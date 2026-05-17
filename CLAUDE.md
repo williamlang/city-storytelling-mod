@@ -142,6 +142,3 @@ Brand new. No code yet. Project setup is the first task.
 ## How to use this file
 
 When opening a fresh Claude Code session in this repo, point it at this file. It contains the orientation needed to pick up cold: stack, conventions, reference mods, gotchas, first tasks. The sibling storytelling project has its own CLAUDE.md describing the canon side.
-
-A good first prompt:
-> Read CLAUDE.md, then help me set up the dev environment and build the smallest possible "hello mod" using the official Paradox toolchain template. Reference Carto for project structure.

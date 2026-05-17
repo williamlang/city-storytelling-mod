@@ -1,0 +1,18 @@
+<Publish>
+  <!-- ModId is assigned by PDX Mods on first publish; leave empty for local-only builds -->
+  <ModId Value="" />
+  <DisplayName Value="City Story Mod" />
+  <ShortDescription Value="Exports city state (citizens, companies, districts, trade) to JSON for the City Storytelling project." />
+  <LongDescription>
+A Cities: Skylines II mod that exports rich city state to JSON snapshots, feeding the sibling **City Storytelling** project where playthroughs become grounded fiction.
+
+This mod is the sensor: it queries the game's ECS for citizens, companies, districts, buildings, and trade flows, and writes snapshot files. An external agent consumes those snapshots and weaves them into characters, events, and stories that shape later sessions.
+  </LongDescription>
+  <Tag Value="Code Mod" />
+  <ModVersion Value="0.0.1" />
+  <GameVersion Value="1.5.*" />
+  <Dependency Id="" />
+  <ChangeLog>
+* Initial scaffold &#8212; hello-mod skeleton, no exports yet.
+  </ChangeLog>
+</Publish>
