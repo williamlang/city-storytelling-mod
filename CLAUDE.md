@@ -115,22 +115,21 @@ Working scaffold with a minimum-viable population export.
 
 What's wired up:
 - Project structure: `CityStoryMod.csproj`, `Mod.cs` (IMod), `Settings.cs`, `Properties/PublishConfiguration.xml`, `Systems/ExportSystem.cs`. Builds via the Paradox toolchain; auto-deploys to the local Mods folder.
-- Mod registers a Settings sidebar entry in CS2 Options (toggles `ExportEnabled`, `IntervalMinutes`).
+- Mod registers a Settings sidebar entry in CS2 Options with localized labels (en-US). Settings: `ExportEnabled` toggle, `IntervalMinutes` slider (0–60, where 0 disables the interval trigger).
 - `ExportSystem : GameSystemBase` is registered into `SystemUpdatePhase.UIUpdate` (ticks regardless of game pause, so wall-clock + hotkey both work even when the player has paused the sim).
 - Two triggers fire `Export()`: **Ctrl+Shift+E** hotkey, plus a wall-clock interval (default 5 min, configurable).
 - Export writes `{"population": N}` from a count of `Game.Citizens.Citizen` entities to `ModsData\CityStoryMod\snapshot-<unix-ts>.json`.
 
 Known caveats / open questions:
 - **Raw `Citizen` count ≠ HUD population.** The `Citizen` ECS component is broader: includes tourists, commuters, and transient/spawning entities. For a sensor mod this is more useful than the HUD number, but it surprises people who compare. Will refine to break down resident vs. tourist vs. commuter when expanding the schema.
-- **No localization yet.** Settings labels render as raw keys like `Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ExportEnabled]`. Add a `Locale/en-US.json` to fix.
+- **Localization is en-US only** and lives in code (`Locale.cs`) rather than embedded JSON. Fine for one language; if we add more, switch to embedded `Locale/*.json` like Carto.
 
 ## Next-up tasks
 
 1. **Schema sketch.** Coordinate with the storytelling project (sibling repo) on the JSON shape it expects to ingest. Currently a one-key dict; needs district / company / sampled-citizen fields.
-2. **Localization.** `Locale/en-US.json` so the Settings page reads naturally.
-3. **Richer demographics.** Break `Citizen` down by resident vs. tourist vs. commuter, plus age / education / wealth bands. Likely needs additional components (`HouseholdMember`, `Resident`, etc.) — find them via SceneExplorer or ILSpy on `Game.dll`.
-4. **District names + populations.** First step toward per-place storytelling.
-5. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
+2. **Richer demographics.** Break `Citizen` down by resident vs. tourist vs. commuter, plus age / education / wealth bands. Likely needs additional components (`HouseholdMember`, `Resident`, etc.) — find them via SceneExplorer or ILSpy on `Game.dll`.
+3. **District names + populations.** First step toward per-place storytelling.
+4. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
 
 ## Gotchas
 

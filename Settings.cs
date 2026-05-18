@@ -11,6 +11,7 @@ namespace CityStoryMod
 
         public bool ExportEnabled { get; set; }
 
+        [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
         public override void SetDefaults()

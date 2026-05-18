@@ -30,6 +30,9 @@
     <Reference Include="Colossal.PSI.Common">
       <Private>False</Private>
     </Reference>
+    <Reference Include="Colossal.Localization">
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <Private>False</Private>
     </Reference>
