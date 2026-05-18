@@ -4,6 +4,7 @@ using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
 using Game.Citizens;
+using Newtonsoft.Json;
 using Unity.Entities;
 using UnityEngine;
 
@@ -55,18 +56,62 @@ namespace CityStoryMod.Systems
             }
         }
 
+        const string SchemaVersion = "0.1";
+
         void Export(string triggeredBy)
         {
-            int population = _citizenQuery.CalculateEntityCount();
+            int citizensTotal = _citizenQuery.CalculateEntityCount();
+
+            long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            string snapshotId = $"snapshot-{unixTs}";
+
+            var snapshot = new
+            {
+                schema_version = SchemaVersion,
+                snapshot_id = snapshotId,
+                captured_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                captured_at_ingame = (string)null,
+
+                city = new
+                {
+                    name = (string)null,
+                    population_hud = (int?)null,
+                    citizens_total = citizensTotal,
+                    money = (long?)null,
+                    happiness = (int?)null,
+                },
+
+                districts = new object[0],
+                buildings = new object[0],
+                companies = new object[0],
+                citizens_sample = new object[0],
+
+                demographics = new
+                {
+                    by_age_band = (object)null,
+                    by_education = (object)null,
+                    by_wealth = (object)null,
+                    tourists_count = (int?)null,
+                    commuters_count = (int?)null,
+                },
+
+                trade = new
+                {
+                    imports = new object[0],
+                    exports = new object[0],
+                },
+
+                services = new { },
+            };
+
+            string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod));
             Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, $"{snapshotId}.json");
+            File.WriteAllText(file, json);
 
-            long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string file = Path.Combine(dir, $"snapshot-{unixTs}.json");
-            File.WriteAllText(file, $"{{\"population\": {population}}}");
-
-            _log.Info($"Exported snapshot ({triggeredBy}): population={population} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal} -> {file}");
         }
     }
 }

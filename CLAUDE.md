@@ -118,7 +118,7 @@ What's wired up:
 - Mod registers a Settings sidebar entry in CS2 Options with localized labels (en-US). Settings: `ExportEnabled` toggle, `IntervalMinutes` slider (0–60, where 0 disables the interval trigger).
 - `ExportSystem : GameSystemBase` is registered into `SystemUpdatePhase.UIUpdate` (ticks regardless of game pause, so wall-clock + hotkey both work even when the player has paused the sim).
 - Two triggers fire `Export()`: **Ctrl+Shift+E** hotkey, plus a wall-clock interval (default 5 min, configurable).
-- Export writes `{"population": N}` from a count of `Game.Citizens.Citizen` entities to `ModsData\CityStoryMod\snapshot-<unix-ts>.json`.
+- Export writes a **v0.1 schema** snapshot to `ModsData\CityStoryMod\snapshot-<unix-ts>.json`. Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md). The shape is finalized; most fields are intentionally `null` / `[]` placeholders and get filled in iteratively. Today `city.citizens_total` is the only populated field beyond the metadata header.
 
 Known caveats / open questions:
 - **Raw `Citizen` count ≠ HUD population.** The `Citizen` ECS component is broader: includes tourists, commuters, and transient/spawning entities. For a sensor mod this is more useful than the HUD number, but it surprises people who compare. Will refine to break down resident vs. tourist vs. commuter when expanding the schema.
@@ -126,10 +126,14 @@ Known caveats / open questions:
 
 ## Next-up tasks
 
-1. **Schema sketch.** Coordinate with the storytelling project (sibling repo) on the JSON shape it expects to ingest. Currently a one-key dict; needs district / company / sampled-citizen fields.
-2. **Richer demographics.** Break `Citizen` down by resident vs. tourist vs. commuter, plus age / education / wealth bands. Likely needs additional components (`HouseholdMember`, `Resident`, etc.) — find them via SceneExplorer or ILSpy on `Game.dll`.
-3. **District names + populations.** First step toward per-place storytelling.
-4. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
+The schema is sketched. Filling it in field-by-field, easiest first (full order in [`docs/snapshot-schema.md`](docs/snapshot-schema.md)):
+
+1. **`city.name` / `city.money` / `city.happiness`** — cheap city-stat queries.
+2. **`captured_at_ingame`** — hook `TimeSystem` for the in-game date.
+3. **`districts[]`** (id, name, population) — biggest jump toward per-place storytelling.
+4. **Richer demographics + `citizens_sample[]`** — needs additional citizen-state components (`HouseholdMember`, `Resident`, etc.); find via SceneExplorer or ILSpy on `Game.dll`.
+5. **`companies[]`** — name, sector, headcount.
+6. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
 
 ## Gotchas
 
