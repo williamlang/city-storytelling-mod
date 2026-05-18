@@ -11,9 +11,12 @@ namespace CityStoryMod
 
         public bool ExportEnabled { get; set; }
 
+        public int IntervalMinutes { get; set; }
+
         public override void SetDefaults()
         {
             ExportEnabled = true;
+            IntervalMinutes = 5;
         }
     }
 }

@@ -29,26 +29,27 @@ The story flows player → city; the mod flows city → story. Together they clo
 
 - **Language:** C#
 - **Runtime (inside CS2):** Unity 2022.3.7f1 with Mono. Target framework is set by `Mod.props` from the Paradox toolchain — **do not override it** in csproj.
-- **Build SDK:** .NET 8 SDK (per Paradox toolchain recommendation)
-- **IDE:** Visual Studio 2022 Community (free) or newer. Rider also works.
+- **Build SDK:** .NET 8 or 9 SDK works. The CS2 toolchain's own setup screen explicitly accepted .NET 9.0.311 on this machine, despite older Paradox docs saying .NET 8. Trust whatever the toolchain installer says when it checks prerequisites.
+- **IDE:** Visual Studio 2022 Community (free) is the documented path (and gets a "CS2 Mod" project template). Rider also works. **VS Code + `dotnet build` from the CLI is also fine** — there's no IDE-only step, you just have to hand-author the csproj from a reference like Carto.
 - **ECS:** Unity DOTS — Entities, Burst, Collections, Mathematics packages.
 
 ## Toolchain setup (Windows-only)
 
 The CS2 Modding Toolchain is the foundation. It's installed from **inside CS2**:
 
-1. Launch CS2 → **Options → Mods → enable modding tools.** Big download (Unity Editor, SDKs, MSBuild integration, Mod.props/targets). Takes a while.
-2. After install, in PowerShell: `echo $env:CSII_TOOLPATH` should print a path. That folder contains `Mod.props` and `Mod.targets`, which every CS2 mod imports.
-3. Visual Studio gets a new project template: **File → New → CS2 Mod**.
+1. Launch CS2 → **Options → Modding → enable modding tools.** Big download (Unity Editor 2022.3.x, SDKs, MSBuild integration, Mod.props/targets). Takes a while.
+2. **The installer asks you to accept a Unity Personal license** mid-flow — it's bundling the Unity Editor. Click through that and it continues.
+3. After install, **open a fresh PowerShell window** (existing shells won't see the new env var). `$env:CSII_TOOLPATH` should print a path like `C:\Users\<you>\AppData\LocalLow\Colossal Order\Cities Skylines II\.cache\Modding`. That folder contains `Mod.props` and `Mod.targets`, which every CS2 mod imports.
+4. Visual Studio gets a new project template: **File → New → CS2 Mod**. (Skip this if using VS Code/CLI.)
 
-Build output is auto-copied to:
+Build output is auto-copied to (note: **`LocalLow`**, not `Local` — the wiki and many tutorials get this wrong):
 ```
-%LOCALAPPDATA%\Colossal Order\Cities Skylines II\Mods\<ModName>\<ModName>.dll
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\Mods\<ModName>\<ModName>.dll
 ```
 
 Logs land at:
 ```
-%LOCALAPPDATA%\Colossal Order\Cities Skylines II\Logs\<ModName>.log
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\Logs\<ModName>.log
 ```
 
 ## Reference mods to study before writing code
@@ -79,8 +80,9 @@ CS2 uses Unity DOTS / ECS. Standard pattern:
 
 1. Subclass `Game.GameSystemBase`.
 2. In `OnCreate`, build an `EntityQuery` using `GetEntityQuery(ComponentType.ReadOnly<Whatever>(), ...)`.
-3. In `OnUpdate`, call `query.ToComponentDataArray<T>(Allocator.Temp)` to get a NativeArray, iterate.
-4. **Throttle.** Do not query every frame. Tie to a sim-tick cadence (e.g. once per in-game day) or a hotkey.
+3. In `OnUpdate`, either call `query.CalculateEntityCount()` for a count, or `query.ToComponentDataArray<T>(Allocator.Temp)` to get a NativeArray and iterate.
+4. **Register the system in `IMod.OnLoad`** via `updateSystem.UpdateBefore<YourSystem>(SystemUpdatePhase.UIUpdate)` (or another phase). Use `UpdateBefore` rather than `UpdateAt` — `UpdateAt` exists but did not reliably cause OnUpdate to tick in testing.
+5. **Throttle.** Don't query every frame. Three options: gate on wall-clock elapsed (works under pause), on an in-game-day boundary (won't tick while paused), or behind a hotkey. We use wall-clock + hotkey.
 
 Key game namespaces:
 
@@ -98,8 +100,10 @@ Key game namespaces:
 JSON, one snapshot per export. Default path:
 
 ```
-%LOCALAPPDATA%\Colossal Order\Cities Skylines II\ModsData\CityStoryExport\snapshot-<in-game-date>-<unix-ts>.json
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\snapshot-<unix-ts>.json
 ```
+
+(In-game date in the filename is TODO — currently just unix timestamp.)
 
 Alternative: write directly into a clone of the storytelling repo's `imports/` folder if both repos live side by side.
 
@@ -107,21 +111,37 @@ Alternative: write directly into a clone of the storytelling repo's `imports/` f
 
 ## Status
 
-Brand new. No code yet. Project setup is the first task.
+Working scaffold with a minimum-viable population export.
 
-## First-session tasks (suggested order)
+What's wired up:
+- Project structure: `CityStoryMod.csproj`, `Mod.cs` (IMod), `Settings.cs`, `Properties/PublishConfiguration.xml`, `Systems/ExportSystem.cs`. Builds via the Paradox toolchain; auto-deploys to the local Mods folder.
+- Mod registers a Settings sidebar entry in CS2 Options (toggles `ExportEnabled`, `IntervalMinutes`).
+- `ExportSystem : GameSystemBase` is registered into `SystemUpdatePhase.UIUpdate` (ticks regardless of game pause, so wall-clock + hotkey both work even when the player has paused the sim).
+- Two triggers fire `Export()`: **Ctrl+Shift+E** hotkey, plus a wall-clock interval (default 5 min, configurable).
+- Export writes `{"population": N}` from a count of `Game.Citizens.Citizen` entities to `ModsData\CityStoryMod\snapshot-<unix-ts>.json`.
 
-1. **Verify toolchain.** `echo $env:CSII_TOOLPATH` prints a path. `Mod.props` and `Mod.targets` exist there.
-2. **Hello mod.** VS 2022 → New Project → CS2 Mod template. Build. Confirm DLL lands in the mods folder and shows up in CS2 → Options → Mods.
-3. **Clone Carto.** `git clone https://github.com/taipei-native/Carto` somewhere local. Skim its csproj, `Mod.cs`, and `Systems/`.
-4. **Sketch the snapshot schema.** Coordinate with the storytelling project (sibling repo). Define what fields, what cadence, what file naming.
-5. **Smallest possible export.** One ECS query for `Game.Citizens.Citizen`, count them, write `{"population": N}` to disk. Confirm the file appears.
-6. **Expand iteratively** — add named entities (citizen names, company names, district names), then per-entity detail.
+Known caveats / open questions:
+- **Raw `Citizen` count ≠ HUD population.** The `Citizen` ECS component is broader: includes tourists, commuters, and transient/spawning entities. For a sensor mod this is more useful than the HUD number, but it surprises people who compare. Will refine to break down resident vs. tourist vs. commuter when expanding the schema.
+- **No localization yet.** Settings labels render as raw keys like `Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ExportEnabled]`. Add a `Locale/en-US.json` to fix.
+
+## Next-up tasks
+
+1. **Schema sketch.** Coordinate with the storytelling project (sibling repo) on the JSON shape it expects to ingest. Currently a one-key dict; needs district / company / sampled-citizen fields.
+2. **Localization.** `Locale/en-US.json` so the Settings page reads naturally.
+3. **Richer demographics.** Break `Citizen` down by resident vs. tourist vs. commuter, plus age / education / wealth bands. Likely needs additional components (`HouseholdMember`, `Resident`, etc.) — find them via SceneExplorer or ILSpy on `Game.dll`.
+4. **District names + populations.** First step toward per-place storytelling.
+5. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
 
 ## Gotchas
 
 - **Unity version is locked at 2022.3.7f1.** Do not install newer. The toolchain matches this version exactly.
-- **Don't query ECS on the main thread every frame.** Throttle to in-game-day cadence or behind a hotkey. `ToComponentDataArray` with `Allocator.Temp` is fine for occasional dumps, pathological per-frame.
+- **No hot-reload for mods.** Once CS2 (Mono) loads your DLL, Windows memory-maps it and holds an exclusive lock until the process exits. `dotnet build`'s post-deploy step will fail with `MSB3231: Access to the path '...' is denied` until you fully quit CS2. The dev loop is **edit → quit CS2 → `dotnet build` → relaunch → load save**. Quicksave (F5) before quitting and quickload (F9) after launching makes the cycle bearable.
+- **`Settings.RegisterInOptionsUI()` is required for the mod to appear in the Options sidebar.** Without it, the mod loads and runs fine but is invisible in the UI. Easy to mistake for "the mod didn't load" — check `Logs/<ModName>.log` first.
+- **`SystemUpdatePhase.GameSimulation` doesn't tick while the game is paused.** For input handling or wall-clock cadence, register your system at `SystemUpdatePhase.UIUpdate` instead — it keeps ticking under pause and is also the right phase for input-related work.
+- **Use `updateSystem.UpdateBefore<T>(phase)` to schedule OnUpdate.** `updateSystem.UpdateAt<T>(phase)` exists but in testing did not cause `OnUpdate` to fire (system was created but never ticked). All known-working mods use `UpdateBefore`.
+- **`UnityEngine.Input` (legacy) needs `UnityEngine.InputLegacyModule` referenced, not just `UnityEngine.CoreModule`.** Unity 2022+ split legacy input out of CoreModule.
+- **F12 is reserved for CS2's screenshot.** Don't bind it. We use Ctrl+Shift+E for the export hotkey.
+- **Don't query ECS on the main thread every frame.** Throttle to a wall-clock interval, in-game-day cadence, or behind a hotkey. `CalculateEntityCount` and `ToComponentDataArray` with `Allocator.Temp` are fine for occasional dumps, pathological per-frame.
 - **Patches break mods.** Mods that hook internals (Harmony patches) break frequently. Mods that just query well-known components survive better. Favor the official "register your own system" pattern over patching.
 - **Mod manifest matters.** The csproj plus `Properties\PublishConfiguration.xml` is what makes CS2 recognize the mod. The toolchain template handles this — don't fight it.
 - **Author identity in commits.** If keeping the GitHub author out of history matters for sharing, set a per-repo override before the first commit: `git config user.name "..."` and `git config user.email "..."`.

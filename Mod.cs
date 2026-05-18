@@ -1,5 +1,6 @@
 using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
+using CityStoryMod.Systems;
 using Game;
 using Game.Modding;
 
@@ -18,6 +19,8 @@ namespace CityStoryMod
             Settings = new Settings(this);
             Settings.RegisterInOptionsUI();
             AssetDatabase.global.LoadSettings(nameof(CityStoryMod), Settings, new Settings(this));
+
+            updateSystem.UpdateBefore<ExportSystem>(SystemUpdatePhase.UIUpdate);
 
             Log.Info("CityStoryMod loaded.");
         }
