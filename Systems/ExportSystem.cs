@@ -4,6 +4,9 @@ using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
 using Game.Citizens;
+using Game.City;
+using Game.SceneFlow;
+using Game.Simulation;
 using Newtonsoft.Json;
 using Unity.Entities;
 using UnityEngine;
@@ -15,6 +18,8 @@ namespace CityStoryMod.Systems
         static readonly ILog _log = Mod.Log;
 
         EntityQuery _citizenQuery;
+        CityConfigurationSystem _cityConfig;
+        TimeSystem _timeSystem;
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
@@ -22,6 +27,8 @@ namespace CityStoryMod.Systems
         {
             base.OnCreate();
             _citizenQuery = GetEntityQuery(ComponentType.ReadOnly<Citizen>());
+            _cityConfig = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
+            _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
             _lastExportUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
         }
@@ -62,6 +69,10 @@ namespace CityStoryMod.Systems
         {
             int citizensTotal = _citizenQuery.CalculateEntityCount();
 
+            bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
+            string cityName = (inGame && !string.IsNullOrEmpty(_cityConfig.cityName)) ? _cityConfig.cityName : null;
+            string ingameDate = inGame ? _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd") : null;
+
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
 
@@ -70,11 +81,11 @@ namespace CityStoryMod.Systems
                 schema_version = SchemaVersion,
                 snapshot_id = snapshotId,
                 captured_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                captured_at_ingame = (string)null,
+                captured_at_ingame = ingameDate,
 
                 city = new
                 {
-                    name = (string)null,
+                    name = cityName,
                     population_hud = (int?)null,
                     citizens_total = citizensTotal,
                     money = (long?)null,
