@@ -8,6 +8,8 @@ using Game.Areas;
 using Game.Citizens;
 using Game.City;
 using Game.Common;
+using Game.Companies;
+using Game.Prefabs;
 using Game.SceneFlow;
 using Game.Simulation;
 using Game.Tools;
@@ -25,6 +27,7 @@ namespace CityStoryMod.Systems
 
         EntityQuery _citizenQuery;
         EntityQuery _districtQuery;
+        EntityQuery _companyQuery;
         CityConfigurationSystem _cityConfig;
         TimeSystem _timeSystem;
         NameSystem _nameSystem;
@@ -39,6 +42,16 @@ namespace CityStoryMod.Systems
             {
                 All = new[] { ComponentType.ReadOnly<District>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
+            _companyQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<CompanyData>(), ComponentType.ReadOnly<Employee>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                },
             });
             _cityConfig = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
@@ -87,6 +100,7 @@ namespace CityStoryMod.Systems
             string cityName = (inGame && !string.IsNullOrEmpty(_cityConfig.cityName)) ? _cityConfig.cityName : null;
             string ingameDate = inGame ? _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd") : null;
             List<object> districts = inGame ? CollectDistricts() : new List<object>();
+            List<object> companies = inGame ? CollectCompanies() : new List<object>();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
@@ -109,7 +123,7 @@ namespace CityStoryMod.Systems
 
                 districts = districts,
                 buildings = new object[0],
-                companies = new object[0],
+                companies = companies,
                 citizens_sample = new object[0],
 
                 demographics = new
@@ -137,7 +151,7 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count} -> {file}");
         }
 
         List<object> CollectDistricts()
@@ -154,6 +168,27 @@ namespace CityStoryMod.Systems
                     population = (int?)null,
                     area_hectares = (double?)null,
                     dominant_zone = (string)null,
+                });
+            }
+            return result;
+        }
+
+        List<object> CollectCompanies()
+        {
+            var result = new List<object>();
+            using var entities = _companyQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                var employees = EntityManager.GetBuffer<Employee>(e, isReadOnly: true);
+                result.Add(new
+                {
+                    id = $"{e.Index}-{e.Version}",
+                    name = _nameSystem.GetRenderedLabelName(e),
+                    sector = (string)null,
+                    headcount = employees.Length,
+                    building_id = (string)null,
+                    district_id = (string)null,
                 });
             }
             return result;
