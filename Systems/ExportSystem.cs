@@ -1,13 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
+using Game.Areas;
 using Game.Citizens;
 using Game.City;
+using Game.Common;
 using Game.SceneFlow;
 using Game.Simulation;
+using Game.Tools;
+using Game.UI;
 using Newtonsoft.Json;
+using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 
@@ -18,8 +24,10 @@ namespace CityStoryMod.Systems
         static readonly ILog _log = Mod.Log;
 
         EntityQuery _citizenQuery;
+        EntityQuery _districtQuery;
         CityConfigurationSystem _cityConfig;
         TimeSystem _timeSystem;
+        NameSystem _nameSystem;
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
@@ -27,8 +35,14 @@ namespace CityStoryMod.Systems
         {
             base.OnCreate();
             _citizenQuery = GetEntityQuery(ComponentType.ReadOnly<Citizen>());
+            _districtQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<District>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
             _cityConfig = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
+            _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _lastExportUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
         }
@@ -72,6 +86,7 @@ namespace CityStoryMod.Systems
             bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
             string cityName = (inGame && !string.IsNullOrEmpty(_cityConfig.cityName)) ? _cityConfig.cityName : null;
             string ingameDate = inGame ? _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd") : null;
+            List<object> districts = inGame ? CollectDistricts() : new List<object>();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
@@ -92,7 +107,7 @@ namespace CityStoryMod.Systems
                     happiness = (int?)null,
                 },
 
-                districts = new object[0],
+                districts = districts,
                 buildings = new object[0],
                 companies = new object[0],
                 citizens_sample = new object[0],
@@ -122,7 +137,26 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count} -> {file}");
+        }
+
+        List<object> CollectDistricts()
+        {
+            var result = new List<object>();
+            using var entities = _districtQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                result.Add(new
+                {
+                    id = $"{e.Index}-{e.Version}",
+                    name = _nameSystem.GetRenderedLabelName(e),
+                    population = (int?)null,
+                    area_hectares = (double?)null,
+                    dominant_zone = (string)null,
+                });
+            }
+            return result;
         }
     }
 }
