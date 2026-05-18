@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
 using Game.Areas;
+using Game.Buildings;
 using Game.Citizens;
 using Game.City;
 using Game.Common;
@@ -28,9 +31,12 @@ namespace CityStoryMod.Systems
         EntityQuery _citizenQuery;
         EntityQuery _districtQuery;
         EntityQuery _companyQuery;
+        EntityQuery _renamedBuildingQuery;
         CityConfigurationSystem _cityConfig;
+        CitySystem _citySystem;
         TimeSystem _timeSystem;
         NameSystem _nameSystem;
+        FieldInfo _playerMoneyField;
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
@@ -53,9 +59,34 @@ namespace CityStoryMod.Systems
                     ComponentType.ReadOnly<PrefabData>(),
                 },
             });
+            _renamedBuildingQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Building>(),
+                    ComponentType.ReadOnly<CustomName>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                },
+            });
             _cityConfig = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
+            _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
+
+            _playerMoneyField = typeof(PlayerMoney)
+                .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(f => f.FieldType == typeof(long) || f.FieldType == typeof(int));
+            if (_playerMoneyField == null)
+            {
+                _log.Warn("PlayerMoney has no long/int field; city.money will stay null. Field names: "
+                    + string.Join(",", typeof(PlayerMoney).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Select(f => $"{f.Name}:{f.FieldType.Name}")));
+            }
+
             _lastExportUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
         }
@@ -99,8 +130,12 @@ namespace CityStoryMod.Systems
             bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
             string cityName = (inGame && !string.IsNullOrEmpty(_cityConfig.cityName)) ? _cityConfig.cityName : null;
             string ingameDate = inGame ? _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd") : null;
+            long? money = (inGame && _playerMoneyField != null && _citySystem.City != Entity.Null)
+                ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
+                : (long?)null;
             List<object> districts = inGame ? CollectDistricts() : new List<object>();
             List<object> companies = inGame ? CollectCompanies() : new List<object>();
+            List<object> buildings = inGame ? CollectRenamedBuildings() : new List<object>();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
@@ -117,12 +152,12 @@ namespace CityStoryMod.Systems
                     name = cityName,
                     population_hud = (int?)null,
                     citizens_total = citizensTotal,
-                    money = (long?)null,
+                    money = money,
                     happiness = (int?)null,
                 },
 
                 districts = districts,
-                buildings = new object[0],
+                buildings = buildings,
                 companies = companies,
                 citizens_sample = new object[0],
 
@@ -151,7 +186,7 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {file}");
         }
 
         List<object> CollectDistricts()
@@ -181,17 +216,58 @@ namespace CityStoryMod.Systems
             {
                 var e = entities[i];
                 var employees = EntityManager.GetBuffer<Employee>(e, isReadOnly: true);
+
+                string buildingId = null;
+                string districtId = null;
+                if (EntityManager.HasComponent<PropertyRenter>(e))
+                {
+                    var building = EntityManager.GetComponentData<PropertyRenter>(e).m_Property;
+                    if (building != Entity.Null)
+                    {
+                        buildingId = EntityId(building);
+                        districtId = DistrictIdOf(building);
+                    }
+                }
+
                 result.Add(new
                 {
-                    id = $"{e.Index}-{e.Version}",
+                    id = EntityId(e),
                     name = _nameSystem.GetRenderedLabelName(e),
+                    custom_named = EntityManager.HasComponent<CustomName>(e),
                     sector = (string)null,
                     headcount = employees.Length,
-                    building_id = (string)null,
-                    district_id = (string)null,
+                    building_id = buildingId,
+                    district_id = districtId,
                 });
             }
             return result;
+        }
+
+        List<object> CollectRenamedBuildings()
+        {
+            var result = new List<object>();
+            using var entities = _renamedBuildingQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                result.Add(new
+                {
+                    id = EntityId(e),
+                    name = _nameSystem.GetRenderedLabelName(e),
+                    custom_named = true,
+                    district_id = DistrictIdOf(e),
+                });
+            }
+            return result;
+        }
+
+        static string EntityId(Entity e) => $"{e.Index}-{e.Version}";
+
+        string DistrictIdOf(Entity building)
+        {
+            if (!EntityManager.HasComponent<CurrentDistrict>(building)) return null;
+            var d = EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
+            return d != Entity.Null ? EntityId(d) : null;
         }
     }
 }
