@@ -33,11 +33,13 @@ namespace CityStoryMod.Systems
         EntityQuery _districtQuery;
         EntityQuery _companyQuery;
         EntityQuery _renamedBuildingQuery;
+        bool _cityComponentsLogged;
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
         TimeSystem _timeSystem;
         NameSystem _nameSystem;
         FieldInfo _playerMoneyField;
+        FieldInfo _populationResidentsField;
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
@@ -97,6 +99,14 @@ namespace CityStoryMod.Systems
                     + string.Join(",", typeof(PlayerMoney).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Select(f => $"{f.Name}:{f.FieldType.Name}")));
             }
 
+            // Best-effort: pick the int field on Game.City.Population that looks like residents
+            // (named *Resident* / *Population*), else fall back to the first int.
+            var popFields = typeof(Population).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            _populationResidentsField = popFields.FirstOrDefault(f => f.FieldType == typeof(int)
+                && (f.Name.IndexOf("Resident", StringComparison.OrdinalIgnoreCase) >= 0
+                    || f.Name.IndexOf("Population", StringComparison.OrdinalIgnoreCase) >= 0))
+                ?? popFields.FirstOrDefault(f => f.FieldType == typeof(int));
+
             _lastExportUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
         }
@@ -149,12 +159,25 @@ namespace CityStoryMod.Systems
         void Export(string triggeredBy)
         {
             // OnUpdate's gate guarantees inGame + cityReady when we get here.
+            if (!_cityComponentsLogged)
+            {
+                _cityComponentsLogged = true;
+                LogCityComponentsOnce();
+            }
+
             int citizensTotal = _citizenQuery.CalculateEntityCount();
             string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
             string ingameDate = _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd");
             long? money = _playerMoneyField != null
                 ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
                 : (long?)null;
+
+            int? populationHud = null;
+            if (_populationResidentsField != null && EntityManager.HasComponent<Population>(_citySystem.City))
+            {
+                var pop = EntityManager.GetComponentData<Population>(_citySystem.City);
+                populationHud = (int)_populationResidentsField.GetValue(pop);
+            }
             List<object> districts = CollectDistricts();
             List<object> companies = CollectCompanies();
             List<object> buildings = CollectRenamedBuildings();
@@ -165,14 +188,17 @@ namespace CityStoryMod.Systems
             var snapshot = new
             {
                 schema_version = SchemaVersion,
+                mod_version = typeof(Mod).Assembly.GetName().Version.ToString(),
                 snapshot_id = snapshotId,
+                session_id = Mod.SessionId,
+                session_started_at_utc = Mod.SessionStartedAtUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 captured_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 captured_at_ingame = ingameDate,
 
                 city = new
                 {
                     name = cityName,
-                    population_hud = (int?)null,
+                    population_hud = populationHud,
                     citizens_total = citizensTotal,
                     money = money,
                     happiness = (int?)null,
@@ -267,18 +293,83 @@ namespace CityStoryMod.Systems
                 string buildingId = building != Entity.Null ? EntityId(building) : null;
                 string districtId = building != Entity.Null ? DistrictIdOf(building) : null;
 
+                string rawName = _nameSystem.GetRenderedLabelName(e);
+                var (sector, subtype) = ParseCompanyType(rawName);
+
                 result.Add(new
                 {
                     id = EntityId(e),
-                    name = _nameSystem.GetRenderedLabelName(e),
+                    name = rawName,
                     custom_named = EntityManager.HasComponent<CustomName>(e),
-                    sector = (string)null,
+                    sector = sector,
+                    subtype = subtype,
                     headcount = employees.Length,
                     building_id = buildingId,
                     district_id = districtId,
                 });
             }
             return result;
+        }
+
+        // "Assets.NAME[Commercial_LiquorStore]" -> ("commercial", "LiquorStore")
+        // Names that don't follow the prefab-key shape return (null, null).
+        static (string sector, string subtype) ParseCompanyType(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return (null, null);
+            const string prefix = "Assets.NAME[";
+            if (!name.StartsWith(prefix) || !name.EndsWith("]")) return (null, null);
+            string inner = name.Substring(prefix.Length, name.Length - prefix.Length - 1);
+            int underscore = inner.IndexOf('_');
+            if (underscore <= 0 || underscore >= inner.Length - 1) return (null, null);
+            return (inner.Substring(0, underscore).ToLowerInvariant(), inner.Substring(underscore + 1));
+        }
+
+        void LogCityComponentsOnce()
+        {
+            try
+            {
+                using var types = EntityManager.GetComponentTypes(_citySystem.City, Allocator.Temp);
+                var names = new List<string>(types.Length);
+                for (int i = 0; i < types.Length; i++)
+                {
+                    var managed = types[i].GetManagedType();
+                    names.Add(managed != null ? managed.FullName : types[i].ToString());
+                }
+                names.Sort();
+                _log.Info($"[diag] City singleton {EntityId(_citySystem.City)} has {names.Count} components: {string.Join(", ", names)}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"[diag] LogCityComponentsOnce failed: {ex.Message}");
+            }
+
+            // Field-level dump of selected components so we can map fields -> snapshot keys
+            // in the next batch without guessing.
+            LogComponentFieldsOnce<Population>();
+            LogComponentFieldsOnce<Tourism>();
+            LogComponentFieldsOnce<DangerLevel>();
+            LogComponentFieldsOnce<MilestoneLevel>();
+            LogComponentFieldsOnce<XP>();
+        }
+
+        void LogComponentFieldsOnce<T>() where T : unmanaged, IComponentData
+        {
+            try
+            {
+                if (!EntityManager.HasComponent<T>(_citySystem.City))
+                {
+                    _log.Info($"[diag] {typeof(T).FullName}: NOT on City singleton");
+                    return;
+                }
+                var data = EntityManager.GetComponentData<T>(_citySystem.City);
+                var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var pairs = fields.Select(f => $"{f.Name}:{f.FieldType.Name}={f.GetValue(data)}").ToArray();
+                _log.Info($"[diag] {typeof(T).FullName} fields: {string.Join(", ", pairs)}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"[diag] Field dump of {typeof(T).FullName} failed: {ex.Message}");
+            }
         }
 
         List<object> CollectRenamedBuildings()

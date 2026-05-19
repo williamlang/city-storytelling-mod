@@ -29,6 +29,8 @@ This document defines the contract. The mod is the producer; the agent is the co
 {
   "schema_version": "0.1",
   "snapshot_id": "snapshot-1779083749",
+  "session_id": "session-1779083100",
+  "session_started_at_utc": "2026-05-17T22:45:00Z",
   "captured_at_utc": "2026-05-17T22:55:49Z",
   "captured_at_ingame": null,
 
@@ -95,6 +97,7 @@ This document defines the contract. The mod is the producer; the agent is the co
 
 - **`id`** = CS2 ECS entity, serialized as `"<index>-<version>"`. Stable across snapshots within a save; not stable across new game starts.
 - **`snapshot_id`** = `"snapshot-<unix-ts>"`. Matches the filename stem.
+- **`session_id`** = `"session-<unix-ts>"`. Set once when the mod loads (CS2 launch). Every snapshot in the same play session carries the same `session_id`. Changes only when the user fully restarts CS2.
 - **Cross-references** (e.g. `building.district_id`) always use the referenced entity's `id`. Never embed copies.
 
 ## What's emitted today

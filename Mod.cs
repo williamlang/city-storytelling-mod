@@ -1,3 +1,4 @@
+using System;
 using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
 using CityStoryMod.Systems;
@@ -15,8 +16,17 @@ namespace CityStoryMod
 
         public static Settings Settings { get; private set; }
 
+        // Set once when the mod loads (CS2 launch). Every snapshot in this play session
+        // carries this id so the storytelling agent can bucket snapshots without inferring
+        // session boundaries from time gaps.
+        public static string SessionId { get; private set; }
+        public static DateTime SessionStartedAtUtc { get; private set; }
+
         public void OnLoad(UpdateSystem updateSystem)
         {
+            SessionStartedAtUtc = DateTime.UtcNow;
+            SessionId = $"session-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+
             Settings = new Settings(this);
             Settings.RegisterInOptionsUI();
             AssetDatabase.global.LoadSettings(nameof(CityStoryMod), Settings, new Settings(this));
@@ -25,7 +35,7 @@ namespace CityStoryMod
 
             updateSystem.UpdateBefore<ExportSystem>(SystemUpdatePhase.UIUpdate);
 
-            Log.Info("CityStoryMod loaded.");
+            Log.Info($"CityStoryMod loaded. session_id={SessionId}");
         }
 
         public void OnDispose()
