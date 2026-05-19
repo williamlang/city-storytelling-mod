@@ -208,6 +208,7 @@ namespace CityStoryMod.Systems
                 xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
             List<object> districts = CollectDistricts();
             List<object> buildings = CollectRenamedBuildings();
+            object demographics = CollectDemographics();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
@@ -243,14 +244,7 @@ namespace CityStoryMod.Systems
                 buildings = buildings,
                 citizens_sample = new object[0],
 
-                demographics = new
-                {
-                    by_age_band = (object)null,
-                    by_education = (object)null,
-                    by_wealth = (object)null,
-                    tourists_count = (int?)null,
-                    commuters_count = (int?)null,
-                },
+                demographics = demographics,
 
                 trade = new
                 {
@@ -485,6 +479,92 @@ namespace CityStoryMod.Systems
             var field = typeof(T).GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             if (field == null) return null;
             return Convert.ToInt32(field.GetValue(EntityManager.GetComponentData<T>(e)));
+        }
+
+        const int MaxCitizensSampled = 5000;
+
+        // Aggregate citizen-level signals into a snapshot demographics block.
+        // CitizenFlags (m_State) is treated opaquely: we split its ToString into named
+        // flags (AgeBit1, Male, EducationBit2, ...) and count each. The agent can
+        // interpret the flag names without us needing to decode the bit layout.
+        object CollectDemographics()
+        {
+            var flagCounts = new Dictionary<string, int>();
+            long wellbeingSum = 0, healthSum = 0;
+            int wellbeingN = 0, healthN = 0;
+            int employed = 0;
+            int birthdayMin = int.MaxValue, birthdayMax = int.MinValue;
+            bool sawBirthday = false;
+
+            const BindingFlags bf = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var stateField     = typeof(Citizen).GetField("m_State", bf);
+            var wellbeingField = typeof(Citizen).GetField("m_WellBeing", bf);
+            var healthField    = typeof(Citizen).GetField("m_Health", bf);
+            var birthdayField  = typeof(Citizen).GetField("m_BirthDay", bf);
+            var workerWorkplaceField = typeof(Worker).GetField("m_Workplace", bf);
+
+            using var entities = _citizenQuery.ToEntityArray(Allocator.Temp);
+            int totalEntities = entities.Length;
+            int cap = Math.Min(totalEntities, MaxCitizensSampled);
+
+            bool diagged = false;
+            for (int i = 0; i < cap; i++)
+            {
+                var e = entities[i];
+                if (!EntityManager.HasComponent<Citizen>(e)) continue;
+                var c = EntityManager.GetComponentData<Citizen>(e);
+
+                if (stateField != null)
+                {
+                    string flags = stateField.GetValue(c)?.ToString() ?? "";
+                    foreach (var part in flags.Split(','))
+                    {
+                        var trimmed = part.Trim();
+                        if (trimmed.Length == 0) continue;
+                        flagCounts.TryGetValue(trimmed, out int prev);
+                        flagCounts[trimmed] = prev + 1;
+                    }
+                }
+                if (wellbeingField != null) { wellbeingSum += Convert.ToInt64(wellbeingField.GetValue(c)); wellbeingN++; }
+                if (healthField != null)    { healthSum    += Convert.ToInt64(healthField.GetValue(c));    healthN++; }
+                if (birthdayField != null)
+                {
+                    int bday = Convert.ToInt32(birthdayField.GetValue(c));
+                    if (bday < birthdayMin) birthdayMin = bday;
+                    if (bday > birthdayMax) birthdayMax = bday;
+                    sawBirthday = true;
+                }
+
+                // Worker / HasJobSeeker / CarKeeper / CrimeVictim etc. are passive marker
+                // components on (nearly) every citizen, not state flags. The real "is
+                // employed" signal is Worker.m_Workplace pointing at a non-null entity.
+                if (workerWorkplaceField != null && EntityManager.HasComponent<Worker>(e))
+                {
+                    if (!diagged) { diagged = true; DumpFieldsOnce<Worker>(e, "citizen"); }
+                    var w = EntityManager.GetComponentData<Worker>(e);
+                    var workplace = (Entity)workerWorkplaceField.GetValue(w);
+                    if (workplace != Entity.Null) employed++;
+                }
+            }
+
+            return new
+            {
+                citizens_total = totalEntities,
+                sampled = cap,
+                truncated = totalEntities > cap,
+
+                flag_counts = flagCounts,
+                avg_wellbeing = wellbeingN > 0 ? (double?)((double)wellbeingSum / wellbeingN) : null,
+                avg_health    = healthN > 0    ? (double?)((double)healthSum    / healthN)    : null,
+                birthday_min = sawBirthday ? (int?)birthdayMin : null,
+                birthday_max = sawBirthday ? (int?)birthdayMax : null,
+
+                // Citizens with Worker.m_Workplace pointing at a non-null entity.
+                // Worker is added on employment, so this equals "currently employed".
+                // Non-employed = citizens_total - employed (includes kids, retirees, students,
+                // job-seekers; can't be split further without parsing m_State age bits).
+                employed = employed,
+            };
         }
 
         // One-time dump of an arbitrary Citizen's components and the field layout of
