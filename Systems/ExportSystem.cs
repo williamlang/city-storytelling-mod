@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
@@ -49,9 +50,18 @@ namespace CityStoryMod.Systems
                 All = new[] { ComponentType.ReadOnly<District>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
+            // PropertyRenter is required: it links the company to a real building.
+            // Without it the entity is a per-type singleton anchor (one per Commercial_Bar,
+            // Industrial_OreExtractor, etc.) that exists even on empty maps and is not a
+            // real operating business.
             _companyQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<CompanyData>(), ComponentType.ReadOnly<Employee>() },
+                All = new[]
+                {
+                    ComponentType.ReadOnly<CompanyData>(),
+                    ComponentType.ReadOnly<Employee>(),
+                    ComponentType.ReadOnly<PropertyRenter>(),
+                },
                 None = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
@@ -193,47 +203,35 @@ namespace CityStoryMod.Systems
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
-            string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod));
+            string citySlug = Slugify(cityName) ?? "_unnamed";
+            string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            string siblingFile = null;
-            var s = Mod.Settings;
-            if (s != null && s.WriteToSibling)
-            {
-                siblingFile = TryWriteSibling(s.StorytellingRepoPath, snapshotId, json);
-            }
-
-            string locations = siblingFile != null ? $"{file} + {siblingFile}" : file;
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {locations}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {file}");
         }
 
-        string TryWriteSibling(string repoPath, string snapshotId, string json)
+        static string Slugify(string name)
         {
-            if (string.IsNullOrWhiteSpace(repoPath))
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            var sb = new StringBuilder(name.Length);
+            bool lastDash = true;
+            foreach (char c in name)
             {
-                _log.Warn("WriteToSibling is on but StorytellingRepoPath is empty; skipping sibling write.");
-                return null;
+                if (char.IsLetterOrDigit(c))
+                {
+                    sb.Append(char.ToLowerInvariant(c));
+                    lastDash = false;
+                }
+                else if (!lastDash)
+                {
+                    sb.Append('-');
+                    lastDash = true;
+                }
             }
-            if (!Directory.Exists(repoPath))
-            {
-                _log.Warn($"WriteToSibling: StorytellingRepoPath does not exist: {repoPath}");
-                return null;
-            }
-            try
-            {
-                string siblingDir = Path.Combine(repoPath, "imports");
-                Directory.CreateDirectory(siblingDir);
-                string siblingFile = Path.Combine(siblingDir, $"{snapshotId}.json");
-                File.WriteAllText(siblingFile, json);
-                return siblingFile;
-            }
-            catch (Exception ex)
-            {
-                _log.Error(ex, "WriteToSibling failed.");
-                return null;
-            }
+            string result = sb.ToString().TrimEnd('-');
+            return result.Length > 0 ? result : null;
         }
 
         List<object> CollectDistricts()
@@ -264,17 +262,10 @@ namespace CityStoryMod.Systems
                 var e = entities[i];
                 var employees = EntityManager.GetBuffer<Employee>(e, isReadOnly: true);
 
-                string buildingId = null;
-                string districtId = null;
-                if (EntityManager.HasComponent<PropertyRenter>(e))
-                {
-                    var building = EntityManager.GetComponentData<PropertyRenter>(e).m_Property;
-                    if (building != Entity.Null)
-                    {
-                        buildingId = EntityId(building);
-                        districtId = DistrictIdOf(building);
-                    }
-                }
+                // Query guarantees PropertyRenter; m_Property still defensively null-checked.
+                var building = EntityManager.GetComponentData<PropertyRenter>(e).m_Property;
+                string buildingId = building != Entity.Null ? EntityId(building) : null;
+                string districtId = building != Entity.Null ? DistrictIdOf(building) : null;
 
                 result.Add(new
                 {

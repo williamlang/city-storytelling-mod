@@ -14,17 +14,10 @@ namespace CityStoryMod
         [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
-        public bool WriteToSibling { get; set; }
-
-        [SettingsUIDirectoryPicker]
-        public string StorytellingRepoPath { get; set; }
-
         public override void SetDefaults()
         {
             ExportEnabled = true;
             IntervalMinutes = 5;
-            WriteToSibling = false;
-            StorytellingRepoPath = "";
         }
     }
 }
