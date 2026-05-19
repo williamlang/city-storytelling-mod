@@ -55,7 +55,24 @@ This document defines the contract. The mod is the producer; the agent is the co
   ],
 
   "buildings": [
-    // { "id": "...", "name": "...", "custom_named": true, "district_id": "..." }
+    // {
+    //   "id": "...",
+    //   "name": "...",                  // CS2-rendered name (custom or auto-named)
+    //   "custom_named": true,
+    //   "prefab_name": "WaterTower01",  // asset name from PrefabSystem
+    //   "type": "transformer|water_pumping|extractor|industrial|commercial|office|residential|service",
+    //   "efficiency": null,             // not yet wired (buffer-typed component)
+    //   "condition": N,                 // raw m_Condition (level/XP scale, not 0-100)
+    //   "citizens_present": N,          // current occupants
+    //   "renter_count": N,
+    //   "company": {                    // null for civic services
+    //     "id": "...", "name": "...", "custom_named": false,
+    //     "sector": "commercial|industrial|office",
+    //     "subtype": "FurnitureStore|SawMill|...",
+    //     "headcount": N
+    //   },
+    //   "district_id": "..."
+    // }
     // Filtered to entities with the CustomName component. This covers both:
     //   - Player-renamed buildings (intentional canon link, e.g. "Conklin Ranch")
     //   - CS2's auto-named service / civic buildings (e.g. "Halverson Tower" for a
@@ -64,10 +81,10 @@ This document defines the contract. The mod is the producer; the agent is the co
     // can heuristically distinguish them if it cares, but for most purposes
     // "this building has a unique name" is the signal.
   ],
-
-  "companies": [
-    // { "id": "...", "name": "...", "sector": "...", "headcount": N, "building_id": "...", "district_id": "..." }
-  ],
+  // Note: there is no top-level companies[] in v0.1. Company info is folded into
+  // each building.company. CS2 has many anonymous template companies in stock
+  // commercial zones; surfacing only the company occupying a named building keeps
+  // the snapshot focused on narratively-relevant businesses.
 
   "citizens_sample": [
     // Up to N sampled citizens, not every citizen.

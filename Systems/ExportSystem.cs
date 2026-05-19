@@ -31,10 +31,10 @@ namespace CityStoryMod.Systems
 
         EntityQuery _citizenQuery;
         EntityQuery _districtQuery;
-        EntityQuery _companyQuery;
         EntityQuery _renamedBuildingQuery;
         bool _cityComponentsLogged;
         bool _buildingFirstDiagged;
+        bool _citizenFirstDiagged;
         readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
@@ -67,25 +67,6 @@ namespace CityStoryMod.Systems
             {
                 All = new[] { ComponentType.ReadOnly<District>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
-            });
-            // PropertyRenter is required: it links the company to a real building.
-            // Without it the entity is a per-type singleton anchor (one per Commercial_Bar,
-            // Industrial_OreExtractor, etc.) that exists even on empty maps and is not a
-            // real operating business.
-            _companyQuery = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[]
-                {
-                    ComponentType.ReadOnly<CompanyData>(),
-                    ComponentType.ReadOnly<Employee>(),
-                    ComponentType.ReadOnly<PropertyRenter>(),
-                },
-                None = new[]
-                {
-                    ComponentType.ReadOnly<Deleted>(),
-                    ComponentType.ReadOnly<Temp>(),
-                    ComponentType.ReadOnly<PrefabData>(),
-                },
             });
             _renamedBuildingQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -185,6 +166,7 @@ namespace CityStoryMod.Systems
                 _cityComponentsLogged = true;
                 LogCityComponentsOnce();
             }
+            if (!_citizenFirstDiagged) DiagFirstCitizenOnce();
 
             int citizensTotal = _citizenQuery.CalculateEntityCount();
             string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
@@ -225,7 +207,6 @@ namespace CityStoryMod.Systems
             if (_f_xp != null && EntityManager.HasComponent<XP>(_citySystem.City))
                 xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
             List<object> districts = CollectDistricts();
-            List<object> companies = CollectCompanies();
             List<object> buildings = CollectRenamedBuildings();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -260,7 +241,6 @@ namespace CityStoryMod.Systems
 
                 districts = districts,
                 buildings = buildings,
-                companies = companies,
                 citizens_sample = new object[0],
 
                 demographics = new
@@ -289,7 +269,7 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, named_buildings={buildings.Count} -> {file}");
         }
 
         static string Slugify(string name)
@@ -328,38 +308,6 @@ namespace CityStoryMod.Systems
                     population = (int?)null,
                     area_hectares = (double?)null,
                     dominant_zone = (string)null,
-                });
-            }
-            return result;
-        }
-
-        List<object> CollectCompanies()
-        {
-            var result = new List<object>();
-            using var entities = _companyQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-                var employees = EntityManager.GetBuffer<Employee>(e, isReadOnly: true);
-
-                // Query guarantees PropertyRenter; m_Property still defensively null-checked.
-                var building = EntityManager.GetComponentData<PropertyRenter>(e).m_Property;
-                string buildingId = building != Entity.Null ? EntityId(building) : null;
-                string districtId = building != Entity.Null ? DistrictIdOf(building) : null;
-
-                string rawName = _nameSystem.GetRenderedLabelName(e);
-                var (sector, subtype) = ParseCompanyType(rawName);
-
-                result.Add(new
-                {
-                    id = EntityId(e),
-                    name = rawName,
-                    custom_named = EntityManager.HasComponent<CustomName>(e),
-                    sector = sector,
-                    subtype = subtype,
-                    headcount = employees.Length,
-                    building_id = buildingId,
-                    district_id = districtId,
                 });
             }
             return result;
@@ -473,6 +421,35 @@ namespace CityStoryMod.Systems
                     ? EntityManager.GetBuffer<Renter>(e, isReadOnly: true).Length
                     : (int?)null;
 
+                // Walk the Renter buffer and find the first CompanyData entry, folding its
+                // info inline. Most renamed buildings are 1:1 with a company (signature
+                // industrials, named extractors, custom-named shops); we surface that one.
+                object company = null;
+                if (EntityManager.HasBuffer<Renter>(e))
+                {
+                    var renters = EntityManager.GetBuffer<Renter>(e, isReadOnly: true);
+                    for (int j = 0; j < renters.Length; j++)
+                    {
+                        var renter = renters[j].m_Renter;
+                        if (renter == Entity.Null || !EntityManager.HasComponent<CompanyData>(renter)) continue;
+                        int headcount = EntityManager.HasBuffer<Employee>(renter)
+                            ? EntityManager.GetBuffer<Employee>(renter, isReadOnly: true).Length
+                            : 0;
+                        string rawCompanyName = _nameSystem.GetRenderedLabelName(renter);
+                        var (cSector, cSubtype) = ParseCompanyType(rawCompanyName);
+                        company = new
+                        {
+                            id = EntityId(renter),
+                            name = rawCompanyName,
+                            custom_named = EntityManager.HasComponent<CustomName>(renter),
+                            sector = cSector,
+                            subtype = cSubtype,
+                            headcount = headcount,
+                        };
+                        break;
+                    }
+                }
+
                 result.Add(new
                 {
                     id = EntityId(e),
@@ -484,6 +461,7 @@ namespace CityStoryMod.Systems
                     condition = condition,
                     citizens_present = citizensPresent,
                     renter_count = renterCount,
+                    company = company,
                     district_id = DistrictIdOf(e),
                 });
             }
@@ -507,6 +485,19 @@ namespace CityStoryMod.Systems
             var field = typeof(T).GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             if (field == null) return null;
             return Convert.ToInt32(field.GetValue(EntityManager.GetComponentData<T>(e)));
+        }
+
+        // One-time dump of an arbitrary Citizen's components and the field layout of
+        // the Citizen component itself. Goal: figure out where age / education /
+        // wealth / household linkage live so the next batch can aggregate demographics.
+        void DiagFirstCitizenOnce()
+        {
+            using var entities = _citizenQuery.ToEntityArray(Allocator.Temp);
+            if (entities.Length == 0) return;  // try again next export
+            _citizenFirstDiagged = true;
+            var e = entities[0];
+            DumpComponentsOnce($"Citizen first sample", e);
+            DumpFieldsOnce<Citizen>(e, "citizen");
         }
 
         void DumpFieldsOnce<T>(Entity sample, string label) where T : unmanaged, IComponentData
