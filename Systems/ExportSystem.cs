@@ -34,10 +34,12 @@ namespace CityStoryMod.Systems
         EntityQuery _companyQuery;
         EntityQuery _renamedBuildingQuery;
         bool _cityComponentsLogged;
+        bool _buildingFirstDiagged;
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
         TimeSystem _timeSystem;
         NameSystem _nameSystem;
+        PrefabSystem _prefabSystem;
         FieldInfo _playerMoneyField;
 
         // City singleton fields, identified by name (see [diag] log dumps in the OnCreate path
@@ -102,6 +104,7 @@ namespace CityStoryMod.Systems
             _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
+            _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
 
             _playerMoneyField = typeof(PlayerMoney)
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
@@ -426,18 +429,109 @@ namespace CityStoryMod.Systems
         {
             var result = new List<object>();
             using var entities = _renamedBuildingQuery.ToEntityArray(Allocator.Temp);
+            // Cap the per-entity component diag at 5 buildings to avoid log spam in large cities.
+            int diagBudget = _buildingFirstDiagged ? 0 : 5;
             for (int i = 0; i < entities.Length; i++)
             {
                 var e = entities[i];
+
+                string prefabName = null;
+                Entity prefabEntity = Entity.Null;
+                if (EntityManager.HasComponent<PrefabRef>(e))
+                {
+                    prefabEntity = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
+                    if (prefabEntity != Entity.Null && _prefabSystem.TryGetPrefab(prefabEntity, out PrefabBase prefabBase))
+                    {
+                        prefabName = prefabBase.name;
+                    }
+                }
+
+                // Classify primarily from instance-marker components (most reliable),
+                // fall back to heuristic name parsing if no marker matched.
+                string type = BuildingTypeFromMarkers(e) ?? BuildingTypeFromPrefabName(prefabName);
+
+                // Diag: dump components of up to 5 renamed buildings + their prefabs on the
+                // first export so we get the full marker-taxonomy in one shot.
+                if (diagBudget > 0)
+                {
+                    diagBudget--;
+                    DumpComponentsOnce($"Building({_nameSystem.GetRenderedLabelName(e)} / prefab={prefabName})", e);
+                    if (prefabEntity != Entity.Null) DumpComponentsOnce($"BuildingPrefab({prefabName})", prefabEntity);
+                }
+
                 result.Add(new
                 {
                     id = EntityId(e),
                     name = _nameSystem.GetRenderedLabelName(e),
                     custom_named = true,
+                    prefab_name = prefabName,
+                    type = type,
                     district_id = DistrictIdOf(e),
                 });
             }
+            if (!_buildingFirstDiagged && entities.Length > 0) _buildingFirstDiagged = true;
             return result;
+        }
+
+        // Instance-marker-based type classification. Adds entries as new markers
+        // are discovered via the [diag] Building dumps.
+        string BuildingTypeFromMarkers(Entity b)
+        {
+            // Specific service markers (more specific than just "service")
+            if (EntityManager.HasComponent<Game.Buildings.Transformer>(b)) return "transformer";
+            if (EntityManager.HasComponent<Game.Buildings.WaterPumpingStation>(b)) return "water_pumping";
+            // Property class markers (extractor is a refinement of industrial; check first)
+            if (EntityManager.HasComponent<ExtractorProperty>(b)) return "extractor";
+            if (EntityManager.HasComponent<IndustrialProperty>(b)) return "industrial";
+            if (EntityManager.HasComponent<CommercialProperty>(b)) return "commercial";
+            if (EntityManager.HasComponent<OfficeProperty>(b)) return "office";
+            if (EntityManager.HasComponent<ResidentialProperty>(b)) return "residential";
+            // Generic service fallback: city pays upkeep and it's not above
+            if (EntityManager.HasComponent<Game.City.CityServiceUpkeep>(b)) return "service";
+            return null;
+        }
+
+        // PrefabSystem.GetPrefabName returns raw asset names like "ElectricityTransformer01",
+        // "WaterPumpingStation01", "LowResidentialRowhouse02". Best-effort classification
+        // by substring; if no rule matches we return null and the agent can categorize
+        // from prefab_name + the diag log's component dump.
+        static string BuildingTypeFromPrefabName(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return null;
+            string n = prefabName.ToLowerInvariant();
+            if (n.Contains("residential") || n.Contains("rowhouse") || n.Contains("apartment") || n.Contains("housing")) return "residential";
+            if (n.Contains("commercial")) return "commercial";
+            if (n.Contains("industrial")) return "industrial";
+            if (n.Contains("office")) return "office";
+            if (n.Contains("extractor") || n.Contains("farm") || n.Contains("forestry") || n.Contains("mine")) return "extractor";
+            if (n.Contains("park")) return "park";
+            if (n.Contains("landmark") || n.Contains("signature")) return "landmark";
+            // Common service prefab name fragments
+            if (n.Contains("transformer") || n.Contains("powerline") || n.Contains("powerplant") || n.Contains("substation") || n.Contains("solarpower") || n.Contains("windturbine")) return "service";
+            if (n.Contains("water") || n.Contains("sewage") || n.Contains("pumpingstation")) return "service";
+            if (n.Contains("police") || n.Contains("fire") || n.Contains("hospital") || n.Contains("school") || n.Contains("university") || n.Contains("clinic")) return "service";
+            if (n.Contains("garbage") || n.Contains("landfill") || n.Contains("incinerator") || n.Contains("recycling")) return "service";
+            return null;
+        }
+
+        void DumpComponentsOnce(string label, Entity e)
+        {
+            try
+            {
+                using var types = EntityManager.GetComponentTypes(e, Allocator.Temp);
+                var names = new List<string>(types.Length);
+                for (int i = 0; i < types.Length; i++)
+                {
+                    var managed = types[i].GetManagedType();
+                    names.Add(managed != null ? managed.FullName : types[i].ToString());
+                }
+                names.Sort();
+                _log.Info($"[diag] {label} {EntityId(e)} has {names.Count} components: {string.Join(", ", names)}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"[diag] DumpComponentsOnce({label}) failed: {ex.Message}");
+            }
         }
 
         static string EntityId(Entity e) => $"{e.Index}-{e.Version}";
