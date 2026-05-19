@@ -35,6 +35,7 @@ namespace CityStoryMod.Systems
         EntityQuery _renamedBuildingQuery;
         bool _cityComponentsLogged;
         bool _buildingFirstDiagged;
+        readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
         TimeSystem _timeSystem;
@@ -457,7 +458,20 @@ namespace CityStoryMod.Systems
                     diagBudget--;
                     DumpComponentsOnce($"Building({_nameSystem.GetRenderedLabelName(e)} / prefab={prefabName})", e);
                     if (prefabEntity != Entity.Null) DumpComponentsOnce($"BuildingPrefab({prefabName})", prefabEntity);
+                    // Also dump the field layout of building-stat components, once per type.
+                    // Efficiency turned out to not be IComponentData (likely IBufferElementData);
+                    // skipping here and investigating next batch.
+                    DumpFieldsOnce<BuildingCondition>(e, "building");
+                    DumpFieldsOnce<CitizenPresence>(e, "building");
                 }
+
+                int? condition = ReadFirstInt<BuildingCondition>(e);
+                // CitizenPresence has m_Delta (SByte, recent change) and m_Presence (Byte, current
+                // headcount-ish). We want the absolute presence value.
+                int? citizensPresent = ReadIntField<CitizenPresence>(e, "m_Presence");
+                int? renterCount = EntityManager.HasBuffer<Renter>(e)
+                    ? EntityManager.GetBuffer<Renter>(e, isReadOnly: true).Length
+                    : (int?)null;
 
                 result.Add(new
                 {
@@ -466,11 +480,54 @@ namespace CityStoryMod.Systems
                     custom_named = true,
                     prefab_name = prefabName,
                     type = type,
+                    efficiency = (float?)null,
+                    condition = condition,
+                    citizens_present = citizensPresent,
+                    renter_count = renterCount,
                     district_id = DistrictIdOf(e),
                 });
             }
             if (!_buildingFirstDiagged && entities.Length > 0) _buildingFirstDiagged = true;
             return result;
+        }
+
+        int? ReadFirstInt<T>(Entity e) where T : unmanaged, IComponentData
+        {
+            if (!EntityManager.HasComponent<T>(e)) return null;
+            var field = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(f => f.FieldType == typeof(int) || f.FieldType == typeof(short)
+                                  || f.FieldType == typeof(byte) || f.FieldType == typeof(sbyte));
+            if (field == null) return null;
+            return Convert.ToInt32(field.GetValue(EntityManager.GetComponentData<T>(e)));
+        }
+
+        int? ReadIntField<T>(Entity e, string fieldName) where T : unmanaged, IComponentData
+        {
+            if (!EntityManager.HasComponent<T>(e)) return null;
+            var field = typeof(T).GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field == null) return null;
+            return Convert.ToInt32(field.GetValue(EntityManager.GetComponentData<T>(e)));
+        }
+
+        void DumpFieldsOnce<T>(Entity sample, string label) where T : unmanaged, IComponentData
+        {
+            if (_fieldDumpsSeen.Contains(typeof(T))) return;
+            // Don't mark as seen if the component isn't on THIS sample - the next
+            // building processed might be a better candidate (e.g. BuildingCondition
+            // is only present on properties, not on civic services).
+            if (!EntityManager.HasComponent<T>(sample)) return;
+            _fieldDumpsSeen.Add(typeof(T));
+            try
+            {
+                var data = EntityManager.GetComponentData<T>(sample);
+                var fields = typeof(T).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var pairs = fields.Select(f => $"{f.Name}:{f.FieldType.Name}={f.GetValue(data)}").ToArray();
+                _log.Info($"[diag] {typeof(T).FullName} ({label}) fields: {string.Join(", ", pairs)}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"[diag] DumpFieldsOnce<{typeof(T).Name}> failed: {ex.Message}");
+            }
         }
 
         // Instance-marker-based type classification. Adds entries as new markers
