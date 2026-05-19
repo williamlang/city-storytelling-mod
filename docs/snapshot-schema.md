@@ -36,10 +36,18 @@ This document defines the contract. The mod is the producer; the agent is the co
 
   "city": {
     "name": null,
-    "population_hud": null,
-    "citizens_total": 2,
-    "money": null,
-    "happiness": null
+    "population_hud": null,         // residents count, matches in-game HUD
+    "population_with_move_in": null, // includes incoming move-ins
+    "citizens_total": 2,             // raw ECS Citizen entity count; broader than HUD
+    "money": null,                   // PlayerMoney
+    "happiness": null,               // 0-100, lives inside Population
+    "health": null,                  // 0-100, lives inside Population
+    "tourists_current": null,
+    "tourists_average": null,
+    "attractiveness": null,
+    "danger_level": null,            // float
+    "milestone_level": null,
+    "xp": null
   },
 
   "districts": [
@@ -47,8 +55,14 @@ This document defines the contract. The mod is the producer; the agent is the co
   ],
 
   "buildings": [
-    // { "id": "...", "name": "...", "type": "...", "district_id": "...", "built_at_ingame": "..." }
-    // Initially only notable/named buildings (landmarks, services). Not every house.
+    // { "id": "...", "name": "...", "custom_named": true, "district_id": "..." }
+    // Filtered to entities with the CustomName component. This covers both:
+    //   - Player-renamed buildings (intentional canon link, e.g. "Conklin Ranch")
+    //   - CS2's auto-named service / civic buildings (e.g. "Halverson Tower" for a
+    //     water tower, "Selkirk Power Transformer" for a transformer station)
+    // Both are useful candidates for canon `places/*.md`. The storytelling agent
+    // can heuristically distinguish them if it cares, but for most purposes
+    // "this building has a unique name" is the signal.
   ],
 
   "companies": [

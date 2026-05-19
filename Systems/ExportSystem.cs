@@ -39,7 +39,20 @@ namespace CityStoryMod.Systems
         TimeSystem _timeSystem;
         NameSystem _nameSystem;
         FieldInfo _playerMoneyField;
-        FieldInfo _populationResidentsField;
+
+        // City singleton fields, identified by name (see [diag] log dumps in the OnCreate path
+        // for the source of truth). Reflection by name is brittle to CS2 updates but explicit;
+        // if a future patch renames a field, the diag log will surface the new name.
+        FieldInfo _f_pop_total;       // Population.m_Population
+        FieldInfo _f_pop_withMoveIn;  // Population.m_PopulationWithMoveIn
+        FieldInfo _f_pop_happiness;   // Population.m_AverageHappiness
+        FieldInfo _f_pop_health;      // Population.m_AverageHealth
+        FieldInfo _f_tour_current;    // Tourism.m_CurrentTourists
+        FieldInfo _f_tour_average;    // Tourism.m_AverageTourists
+        FieldInfo _f_tour_attract;    // Tourism.m_Attractiveness
+        FieldInfo _f_danger_level;    // DangerLevel.m_DangerLevel (float)
+        FieldInfo _f_milestone;       // MilestoneLevel.m_AchievedMilestone
+        FieldInfo _f_xp;              // XP.m_XP
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
@@ -99,13 +112,17 @@ namespace CityStoryMod.Systems
                     + string.Join(",", typeof(PlayerMoney).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Select(f => $"{f.Name}:{f.FieldType.Name}")));
             }
 
-            // Best-effort: pick the int field on Game.City.Population that looks like residents
-            // (named *Resident* / *Population*), else fall back to the first int.
-            var popFields = typeof(Population).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            _populationResidentsField = popFields.FirstOrDefault(f => f.FieldType == typeof(int)
-                && (f.Name.IndexOf("Resident", StringComparison.OrdinalIgnoreCase) >= 0
-                    || f.Name.IndexOf("Population", StringComparison.OrdinalIgnoreCase) >= 0))
-                ?? popFields.FirstOrDefault(f => f.FieldType == typeof(int));
+            const BindingFlags fieldFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            _f_pop_total      = typeof(Population).GetField("m_Population", fieldFlags);
+            _f_pop_withMoveIn = typeof(Population).GetField("m_PopulationWithMoveIn", fieldFlags);
+            _f_pop_happiness  = typeof(Population).GetField("m_AverageHappiness", fieldFlags);
+            _f_pop_health     = typeof(Population).GetField("m_AverageHealth", fieldFlags);
+            _f_tour_current   = typeof(Tourism).GetField("m_CurrentTourists", fieldFlags);
+            _f_tour_average   = typeof(Tourism).GetField("m_AverageTourists", fieldFlags);
+            _f_tour_attract   = typeof(Tourism).GetField("m_Attractiveness", fieldFlags);
+            _f_danger_level   = typeof(DangerLevel).GetField("m_DangerLevel", fieldFlags);
+            _f_milestone      = typeof(MilestoneLevel).GetField("m_AchievedMilestone", fieldFlags);
+            _f_xp             = typeof(XP).GetField("m_XP", fieldFlags);
 
             _lastExportUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
@@ -172,12 +189,37 @@ namespace CityStoryMod.Systems
                 ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
                 : (long?)null;
 
-            int? populationHud = null;
-            if (_populationResidentsField != null && EntityManager.HasComponent<Population>(_citySystem.City))
+            // Read the four Population fields in a single boxed access.
+            int? popTotal = null, popWithMoveIn = null, happiness = null, health = null;
+            if (EntityManager.HasComponent<Population>(_citySystem.City))
             {
-                var pop = EntityManager.GetComponentData<Population>(_citySystem.City);
-                populationHud = (int)_populationResidentsField.GetValue(pop);
+                object pop = EntityManager.GetComponentData<Population>(_citySystem.City);
+                if (_f_pop_total != null)      popTotal      = Convert.ToInt32(_f_pop_total.GetValue(pop));
+                if (_f_pop_withMoveIn != null) popWithMoveIn = Convert.ToInt32(_f_pop_withMoveIn.GetValue(pop));
+                if (_f_pop_happiness != null)  happiness     = Convert.ToInt32(_f_pop_happiness.GetValue(pop));
+                if (_f_pop_health != null)     health        = Convert.ToInt32(_f_pop_health.GetValue(pop));
             }
+
+            int? touristsCurrent = null, touristsAverage = null, attractiveness = null;
+            if (EntityManager.HasComponent<Tourism>(_citySystem.City))
+            {
+                object t = EntityManager.GetComponentData<Tourism>(_citySystem.City);
+                if (_f_tour_current != null)  touristsCurrent  = Convert.ToInt32(_f_tour_current.GetValue(t));
+                if (_f_tour_average != null)  touristsAverage  = Convert.ToInt32(_f_tour_average.GetValue(t));
+                if (_f_tour_attract != null)  attractiveness   = Convert.ToInt32(_f_tour_attract.GetValue(t));
+            }
+
+            float? dangerLevel = null;
+            if (_f_danger_level != null && EntityManager.HasComponent<DangerLevel>(_citySystem.City))
+                dangerLevel = Convert.ToSingle(_f_danger_level.GetValue(EntityManager.GetComponentData<DangerLevel>(_citySystem.City)));
+
+            int? milestoneLevel = null;
+            if (_f_milestone != null && EntityManager.HasComponent<MilestoneLevel>(_citySystem.City))
+                milestoneLevel = Convert.ToInt32(_f_milestone.GetValue(EntityManager.GetComponentData<MilestoneLevel>(_citySystem.City)));
+
+            int? xp = null;
+            if (_f_xp != null && EntityManager.HasComponent<XP>(_citySystem.City))
+                xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
             List<object> districts = CollectDistricts();
             List<object> companies = CollectCompanies();
             List<object> buildings = CollectRenamedBuildings();
@@ -198,10 +240,18 @@ namespace CityStoryMod.Systems
                 city = new
                 {
                     name = cityName,
-                    population_hud = populationHud,
+                    population_hud = popTotal,
+                    population_with_move_in = popWithMoveIn,
                     citizens_total = citizensTotal,
                     money = money,
-                    happiness = (int?)null,
+                    happiness = happiness,
+                    health = health,
+                    tourists_current = touristsCurrent,
+                    tourists_average = touristsAverage,
+                    attractiveness = attractiveness,
+                    danger_level = dangerLevel,
+                    milestone_level = milestoneLevel,
+                    xp = xp,
                 },
 
                 districts = districts,
