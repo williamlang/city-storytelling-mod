@@ -102,6 +102,19 @@ namespace CityStoryMod.Systems
             var settings = Mod.Settings;
             if (settings == null || !settings.ExportEnabled) return;
 
+            // Gate everything below on the game being in an active session with a
+            // ready City singleton. Outside that window (main menu, loading screen,
+            // editor mode), ECS state isn't safe to read and can crash the game.
+            bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
+            bool cityReady = _citySystem != null && _citySystem.City != Entity.Null;
+            if (!inGame || !cityReady)
+            {
+                // Hold the interval timer at "now" so the first auto-export after
+                // load fires ~IntervalMinutes later instead of immediately.
+                _lastExportUtc = DateTime.UtcNow;
+                return;
+            }
+
             bool hotkey = Input.GetKeyDown(KeyCode.E)
                 && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
                 && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
@@ -125,17 +138,16 @@ namespace CityStoryMod.Systems
 
         void Export(string triggeredBy)
         {
+            // OnUpdate's gate guarantees inGame + cityReady when we get here.
             int citizensTotal = _citizenQuery.CalculateEntityCount();
-
-            bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
-            string cityName = (inGame && !string.IsNullOrEmpty(_cityConfig.cityName)) ? _cityConfig.cityName : null;
-            string ingameDate = inGame ? _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd") : null;
-            long? money = (inGame && _playerMoneyField != null && _citySystem.City != Entity.Null)
+            string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
+            string ingameDate = _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd");
+            long? money = _playerMoneyField != null
                 ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
                 : (long?)null;
-            List<object> districts = inGame ? CollectDistricts() : new List<object>();
-            List<object> companies = inGame ? CollectCompanies() : new List<object>();
-            List<object> buildings = inGame ? CollectRenamedBuildings() : new List<object>();
+            List<object> districts = CollectDistricts();
+            List<object> companies = CollectCompanies();
+            List<object> buildings = CollectRenamedBuildings();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
@@ -186,7 +198,42 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(dir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {file}");
+            string siblingFile = null;
+            var s = Mod.Settings;
+            if (s != null && s.WriteToSibling)
+            {
+                siblingFile = TryWriteSibling(s.StorytellingRepoPath, snapshotId, json);
+            }
+
+            string locations = siblingFile != null ? $"{file} + {siblingFile}" : file;
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, companies={companies.Count}, named_buildings={buildings.Count} -> {locations}");
+        }
+
+        string TryWriteSibling(string repoPath, string snapshotId, string json)
+        {
+            if (string.IsNullOrWhiteSpace(repoPath))
+            {
+                _log.Warn("WriteToSibling is on but StorytellingRepoPath is empty; skipping sibling write.");
+                return null;
+            }
+            if (!Directory.Exists(repoPath))
+            {
+                _log.Warn($"WriteToSibling: StorytellingRepoPath does not exist: {repoPath}");
+                return null;
+            }
+            try
+            {
+                string siblingDir = Path.Combine(repoPath, "imports");
+                Directory.CreateDirectory(siblingDir);
+                string siblingFile = Path.Combine(siblingDir, $"{snapshotId}.json");
+                File.WriteAllText(siblingFile, json);
+                return siblingFile;
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "WriteToSibling failed.");
+                return null;
+            }
         }
 
         List<object> CollectDistricts()
