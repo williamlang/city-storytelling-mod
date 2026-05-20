@@ -44,6 +44,10 @@ namespace CityStoryMod.Systems
         // last on-disk snapshot on first export.
         Dictionary<string, BuildingFingerprint> _prevBuildings;
         Dictionary<string, int> _prevZoneCounts;
+        Dictionary<string, NameRef> _prevRoads;
+        Dictionary<string, NameRef> _prevOutsideConnections;
+        Dictionary<string, NameRef> _prevWaterSources;
+        Dictionary<string, NameRef> _prevDistricts;
         DateTime? _prevIngameDate;
         string _prevSnapshotId;
 
@@ -55,6 +59,14 @@ namespace CityStoryMod.Systems
             public string CompanySubtype;  // null when no company renter
             public string DistrictId;
             public bool HasCompany;
+        }
+
+        // Lightweight id+name pair used for renaming/add/remove detection on the
+        // simpler entity classes (roads, outside connections, water sources, districts).
+        struct NameRef
+        {
+            public string Id;
+            public string Name;
         }
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
@@ -246,7 +258,7 @@ namespace CityStoryMod.Systems
             int? xp = null;
             if (_f_xp != null && EntityManager.HasComponent<XP>(_citySystem.City))
                 xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
-            List<object> districts = CollectDistricts();
+            var (districts, districtPrints) = CollectDistricts();
             var (buildings, buildingPrints) = CollectRenamedBuildings();
             object demographics = CollectDemographics();
             Dictionary<string, int> zoneCounts = CollectZoneCounts();
@@ -257,12 +269,18 @@ namespace CityStoryMod.Systems
             string snapshotId = $"snapshot-{unixTs}";
 
             object diff = _prevBuildings != null
-                ? ComputeDiff(buildingPrints, zoneCounts, currentIngameDate)
+                ? ComputeDiff(buildingPrints, zoneCounts, currentIngameDate,
+                    named.roadsFingerprints, named.outsideConnectionsFingerprints,
+                    named.waterSourcesFingerprints, districtPrints)
                 : null;
 
             // Advance the previous-snapshot pointers for the next export.
             _prevBuildings = buildingPrints;
             _prevZoneCounts = zoneCounts;
+            _prevRoads = named.roadsFingerprints;
+            _prevOutsideConnections = named.outsideConnectionsFingerprints;
+            _prevWaterSources = named.waterSourcesFingerprints;
+            _prevDistricts = districtPrints;
             _prevIngameDate = currentIngameDate;
             _prevSnapshotId = snapshotId;
 
@@ -357,20 +375,20 @@ namespace CityStoryMod.Systems
             public List<string> NamedBuildingIds = new List<string>();
         }
 
-        List<object> CollectDistricts()
+        (List<object>, Dictionary<string, NameRef>) CollectDistricts()
         {
+            var prints = new Dictionary<string, NameRef>();
             using var districts = _districtQuery.ToEntityArray(Allocator.Temp);
-            if (districts.Length == 0) return new List<object>();
+            if (districts.Length == 0) return (new List<object>(), prints);
 
             var aggs = new Dictionary<Entity, DistrictAgg>(districts.Length);
             for (int i = 0; i < districts.Length; i++)
             {
                 var d = districts[i];
-                aggs[d] = new DistrictAgg
-                {
-                    Id = EntityId(d),
-                    Name = _nameSystem.GetRenderedLabelName(d),
-                };
+                string id = EntityId(d);
+                string name = _nameSystem.GetRenderedLabelName(d);
+                aggs[d] = new DistrictAgg { Id = id, Name = name };
+                prints[id] = new NameRef { Id = id, Name = name };
             }
 
             // Pass 1: every building, attribute to its district.
@@ -456,7 +474,7 @@ namespace CityStoryMod.Systems
                     named_buildings = agg.NamedBuildingIds,
                 });
             }
-            return result;
+            return (result, prints);
         }
 
         Entity DistrictEntityOf(Entity building)
@@ -471,6 +489,9 @@ namespace CityStoryMod.Systems
             public List<object> outsideConnections;
             public List<object> waterSources;
             public List<object> other;
+            public Dictionary<string, NameRef> roadsFingerprints;
+            public Dictionary<string, NameRef> outsideConnectionsFingerprints;
+            public Dictionary<string, NameRef> waterSourcesFingerprints;
         }
 
         // Sweeps every entity with a CustomName component and bins it. Things already
@@ -484,6 +505,9 @@ namespace CityStoryMod.Systems
                 outsideConnections = new List<object>(),
                 waterSources = new List<object>(),
                 other = new List<object>(),
+                roadsFingerprints = new Dictionary<string, NameRef>(),
+                outsideConnectionsFingerprints = new Dictionary<string, NameRef>(),
+                waterSourcesFingerprints = new Dictionary<string, NameRef>(),
             };
             using var entities = _customNameQuery.ToEntityArray(Allocator.Temp);
             int otherDiagBudget = 5;
@@ -493,15 +517,26 @@ namespace CityStoryMod.Systems
                 if (EntityManager.HasComponent<Building>(e)) continue;
                 if (EntityManager.HasComponent<District>(e)) continue;
 
+                string id = EntityId(e);
                 string name = _nameSystem.GetRenderedLabelName(e);
-                var entry = new { id = EntityId(e), name = name };
+                var entry = new { id = id, name = name };
+                var refp = new NameRef { Id = id, Name = name };
 
                 if (EntityManager.HasComponent<Game.Net.Aggregate>(e))
+                {
                     result.roads.Add(entry);
+                    result.roadsFingerprints[id] = refp;
+                }
                 else if (EntityManager.HasComponent<Game.Objects.OutsideConnection>(e))
+                {
                     result.outsideConnections.Add(entry);
+                    result.outsideConnectionsFingerprints[id] = refp;
+                }
                 else if (EntityManager.HasComponent<Game.Simulation.WaterSourceData>(e))
+                {
                     result.waterSources.Add(entry);
+                    result.waterSourcesFingerprints[id] = refp;
+                }
                 else
                 {
                     if (otherDiagBudget > 0)
@@ -690,7 +725,11 @@ namespace CityStoryMod.Systems
         object ComputeDiff(
             Dictionary<string, BuildingFingerprint> current,
             Dictionary<string, int> currentZoneCounts,
-            DateTime currentIngameDate)
+            DateTime currentIngameDate,
+            Dictionary<string, NameRef> currentRoads,
+            Dictionary<string, NameRef> currentOutsideConnections,
+            Dictionary<string, NameRef> currentWaterSources,
+            Dictionary<string, NameRef> currentDistricts)
         {
             var added = new List<object>();
             var removed = new List<object>();
@@ -747,6 +786,11 @@ namespace CityStoryMod.Systems
                 }
             }
 
+            var roadsDiff = DiffNameRefs(_prevRoads, currentRoads);
+            var ocDiff = DiffNameRefs(_prevOutsideConnections, currentOutsideConnections);
+            var wsDiff = DiffNameRefs(_prevWaterSources, currentWaterSources);
+            var districtsDiff = DiffNameRefs(_prevDistricts, currentDistricts);
+
             return new
             {
                 since_snapshot_id = _prevSnapshotId,
@@ -754,7 +798,36 @@ namespace CityStoryMod.Systems
                 ingame_days_elapsed = ingameDaysElapsed,
                 buildings = new { added, removed, changed },
                 zones_delta = zonesDelta,
+                roads = new { added = roadsDiff.added, removed = roadsDiff.removed, changed = roadsDiff.changed },
+                outside_connections = new { added = ocDiff.added, removed = ocDiff.removed, changed = ocDiff.changed },
+                water_sources = new { added = wsDiff.added, removed = wsDiff.removed, changed = wsDiff.changed },
+                districts = new { added = districtsDiff.added, removed = districtsDiff.removed, changed = districtsDiff.changed },
             };
+        }
+
+        // Generic added/removed/renamed diff for the simple id+name entity classes.
+        (List<object> added, List<object> removed, List<object> changed) DiffNameRefs(
+            Dictionary<string, NameRef> prev,
+            Dictionary<string, NameRef> current)
+        {
+            var added = new List<object>();
+            var removed = new List<object>();
+            var changed = new List<object>();
+            if (prev == null) prev = new Dictionary<string, NameRef>();
+
+            foreach (var kv in current)
+            {
+                if (!prev.TryGetValue(kv.Key, out var p))
+                    added.Add(new { id = kv.Value.Id, name = kv.Value.Name });
+                else if (p.Name != kv.Value.Name)
+                    changed.Add(new { id = kv.Value.Id, name = kv.Value.Name, changes = new { name = new { from = p.Name, to = kv.Value.Name } } });
+            }
+            foreach (var kv in prev)
+            {
+                if (!current.ContainsKey(kv.Key))
+                    removed.Add(new { id = kv.Value.Id, name = kv.Value.Name });
+            }
+            return (added, removed, changed);
         }
 
         // Walks every Building entity (excluding prefabs/deleted/temp) and classifies
