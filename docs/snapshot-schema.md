@@ -98,6 +98,31 @@ This document defines the contract. The mod is the producer; the agent is the co
   // commercial zones; surfacing only the company occupying a named building keeps
   // the snapshot focused on narratively-relevant businesses.
 
+  "roads": [
+    // Player-named or CS2-auto-named road aggregates: { "id": "...", "name": "..." }
+    // Detected via Game.Net.Aggregate. A single named road is one aggregate, regardless
+    // of how many edges/segments compose it.
+  ],
+
+  "outside_connections": [
+    // Edge-of-map destinations (cities the player connects to via highway / rail / air).
+    // { "id": "...", "name": "Canmore" }
+    // CS2 typically pairs these (one inbound, one outbound) so the same name appears
+    // twice with different ids. Detected via Game.Objects.OutsideConnection.
+  ],
+
+  "water_sources": [
+    // Lakes, river segments, springs. { "id": "...", "name": "Lake Minnewanka" }
+    // Detected via Game.Simulation.WaterSourceData. Includes both narratively-named
+    // landmarks (Lake Minnewanka) and auto-named flow segments (Bow12).
+  ],
+
+  "other_named": [
+    // Catch-all for CustomName-tagged entities not covered above. Empty in a typical
+    // city; populated entries get a [diag] component dump so the classifier can be
+    // extended next batch.
+  ],
+
   "citizens_sample": [
     // Up to N sampled citizens, not every citizen.
     // { "id": "...", "name": "...", "age": N, "education": "...", "wealth_tier": "...",

@@ -33,6 +33,7 @@ namespace CityStoryMod.Systems
         EntityQuery _districtQuery;
         EntityQuery _renamedBuildingQuery;
         EntityQuery _allBuildingsQuery;
+        EntityQuery _customNameQuery;
         bool _cityComponentsLogged;
         bool _buildingFirstDiagged;
         bool _citizenFirstDiagged;
@@ -104,6 +105,16 @@ namespace CityStoryMod.Systems
             _allBuildingsQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Building>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                },
+            });
+            _customNameQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<CustomName>() },
                 None = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
@@ -239,6 +250,7 @@ namespace CityStoryMod.Systems
             var (buildings, buildingPrints) = CollectRenamedBuildings();
             object demographics = CollectDemographics();
             Dictionary<string, int> zoneCounts = CollectZoneCounts();
+            var named = CollectOtherNamedEntities();
             DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -284,6 +296,10 @@ namespace CityStoryMod.Systems
 
                 districts = districts,
                 buildings = buildings,
+                roads = named.roads,
+                outside_connections = named.outsideConnections,
+                water_sources = named.waterSources,
+                other_named = named.other,
                 citizens_sample = new object[0],
 
                 demographics = demographics,
@@ -447,6 +463,56 @@ namespace CityStoryMod.Systems
         {
             if (!EntityManager.HasComponent<CurrentDistrict>(building)) return Entity.Null;
             return EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
+        }
+
+        struct NamedEntitiesResult
+        {
+            public List<object> roads;
+            public List<object> outsideConnections;
+            public List<object> waterSources;
+            public List<object> other;
+        }
+
+        // Sweeps every entity with a CustomName component and bins it. Things already
+        // surfaced via buildings[] / districts[] are skipped to avoid duplication.
+        // Classification by instance markers (more reliable than name parsing).
+        NamedEntitiesResult CollectOtherNamedEntities()
+        {
+            var result = new NamedEntitiesResult
+            {
+                roads = new List<object>(),
+                outsideConnections = new List<object>(),
+                waterSources = new List<object>(),
+                other = new List<object>(),
+            };
+            using var entities = _customNameQuery.ToEntityArray(Allocator.Temp);
+            int otherDiagBudget = 5;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (EntityManager.HasComponent<Building>(e)) continue;
+                if (EntityManager.HasComponent<District>(e)) continue;
+
+                string name = _nameSystem.GetRenderedLabelName(e);
+                var entry = new { id = EntityId(e), name = name };
+
+                if (EntityManager.HasComponent<Game.Net.Aggregate>(e))
+                    result.roads.Add(entry);
+                else if (EntityManager.HasComponent<Game.Objects.OutsideConnection>(e))
+                    result.outsideConnections.Add(entry);
+                else if (EntityManager.HasComponent<Game.Simulation.WaterSourceData>(e))
+                    result.waterSources.Add(entry);
+                else
+                {
+                    if (otherDiagBudget > 0)
+                    {
+                        otherDiagBudget--;
+                        DumpComponentsOnce($"OtherNamed({name})", e);
+                    }
+                    result.other.Add(entry);
+                }
+            }
+            return result;
         }
 
         // "Assets.NAME[Commercial_LiquorStore]" -> ("commercial", "LiquorStore")
