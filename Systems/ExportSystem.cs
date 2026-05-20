@@ -331,23 +331,122 @@ namespace CityStoryMod.Systems
             return result.Length > 0 ? result : null;
         }
 
+        class DistrictAgg
+        {
+            public string Id;
+            public string Name;
+            public int Population;
+            public int Jobs;
+            public Dictionary<string, int> Zones = new Dictionary<string, int>();
+            public List<string> NamedBuildingIds = new List<string>();
+        }
+
         List<object> CollectDistricts()
         {
-            var result = new List<object>();
-            using var entities = _districtQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < entities.Length; i++)
+            using var districts = _districtQuery.ToEntityArray(Allocator.Temp);
+            if (districts.Length == 0) return new List<object>();
+
+            var aggs = new Dictionary<Entity, DistrictAgg>(districts.Length);
+            for (int i = 0; i < districts.Length; i++)
             {
-                var e = entities[i];
+                var d = districts[i];
+                aggs[d] = new DistrictAgg
+                {
+                    Id = EntityId(d),
+                    Name = _nameSystem.GetRenderedLabelName(d),
+                };
+            }
+
+            // Pass 1: every building, attribute to its district.
+            using (var buildings = _allBuildingsQuery.ToEntityArray(Allocator.Temp))
+            {
+                for (int i = 0; i < buildings.Length; i++)
+                {
+                    var b = buildings[i];
+                    var d = DistrictEntityOf(b);
+                    if (d == Entity.Null || !aggs.TryGetValue(d, out var agg)) continue;
+
+                    string type = BuildingTypeFromMarkers(b) ?? "other";
+                    agg.Zones.TryGetValue(type, out int prev);
+                    agg.Zones[type] = prev + 1;
+
+                    if (EntityManager.HasComponent<CustomName>(b))
+                        agg.NamedBuildingIds.Add(EntityId(b));
+                }
+            }
+
+            // Pass 2: every citizen, attribute home + work to their district(s).
+            const BindingFlags bf = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var hhField = typeof(HouseholdMember).GetField("m_Household", bf)
+                ?? typeof(HouseholdMember).GetFields(bf).FirstOrDefault(f => f.FieldType == typeof(Entity));
+            var workplaceField = typeof(Worker).GetField("m_Workplace", bf);
+
+            using (var citizens = _citizenQuery.ToEntityArray(Allocator.Temp))
+            {
+                bool diaggedHH = false;
+                for (int i = 0; i < citizens.Length; i++)
+                {
+                    var c = citizens[i];
+
+                    // Home district via HouseholdMember -> Household -> PropertyRenter -> Building -> CurrentDistrict
+                    if (hhField != null && EntityManager.HasComponent<HouseholdMember>(c))
+                    {
+                        if (!diaggedHH) { diaggedHH = true; DumpFieldsOnce<HouseholdMember>(c, "citizen"); }
+                        var hhm = EntityManager.GetComponentData<HouseholdMember>(c);
+                        var hh = (Entity)hhField.GetValue(hhm);
+                        if (hh != Entity.Null && EntityManager.HasComponent<PropertyRenter>(hh))
+                        {
+                            var b = EntityManager.GetComponentData<PropertyRenter>(hh).m_Property;
+                            if (b != Entity.Null)
+                            {
+                                var d = DistrictEntityOf(b);
+                                if (d != Entity.Null && aggs.TryGetValue(d, out var agg))
+                                    agg.Population++;
+                            }
+                        }
+                    }
+
+                    // Work district via Worker.m_Workplace (may be a company or a building directly)
+                    if (workplaceField != null && EntityManager.HasComponent<Worker>(c))
+                    {
+                        var w = EntityManager.GetComponentData<Worker>(c);
+                        var workplace = (Entity)workplaceField.GetValue(w);
+                        if (workplace != Entity.Null)
+                        {
+                            Entity workBuilding = workplace;
+                            if (EntityManager.HasComponent<PropertyRenter>(workplace))
+                                workBuilding = EntityManager.GetComponentData<PropertyRenter>(workplace).m_Property;
+                            if (workBuilding != Entity.Null)
+                            {
+                                var d = DistrictEntityOf(workBuilding);
+                                if (d != Entity.Null && aggs.TryGetValue(d, out var agg))
+                                    agg.Jobs++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            var result = new List<object>(aggs.Count);
+            foreach (var agg in aggs.Values)
+            {
                 result.Add(new
                 {
-                    id = $"{e.Index}-{e.Version}",
-                    name = _nameSystem.GetRenderedLabelName(e),
-                    population = (int?)null,
-                    area_hectares = (double?)null,
-                    dominant_zone = (string)null,
+                    id = agg.Id,
+                    name = agg.Name,
+                    population = agg.Population,
+                    jobs = agg.Jobs,
+                    zones = agg.Zones,
+                    named_buildings = agg.NamedBuildingIds,
                 });
             }
             return result;
+        }
+
+        Entity DistrictEntityOf(Entity building)
+        {
+            if (!EntityManager.HasComponent<CurrentDistrict>(building)) return Entity.Null;
+            return EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
         }
 
         // "Assets.NAME[Commercial_LiquorStore]" -> ("commercial", "LiquorStore")
@@ -822,8 +921,7 @@ namespace CityStoryMod.Systems
 
         string DistrictIdOf(Entity building)
         {
-            if (!EntityManager.HasComponent<CurrentDistrict>(building)) return null;
-            var d = EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
+            var d = DistrictEntityOf(building);
             return d != Entity.Null ? EntityId(d) : null;
         }
     }

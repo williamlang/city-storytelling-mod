@@ -56,7 +56,14 @@ This document defines the contract. The mod is the producer; the agent is the co
   },
 
   "districts": [
-    // { "id": "...", "name": "...", "population": N, "area_hectares": N, "dominant_zone": "residential|commercial|industrial|office|mixed" }
+    // {
+    //   "id": "...", "name": "...",
+    //   "population": N,                 // residents whose home is in this district
+    //   "jobs": N,                       // workers whose workplace is in this district
+    //   "zones": { residential, commercial, industrial, office, extractor,
+    //              service, transformer, water_pumping, other },
+    //   "named_buildings": [ "<id>", ... ]   // ids of buildings[] entries in this district
+    // }
   ],
 
   "buildings": [
