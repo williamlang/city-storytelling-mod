@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
+using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
@@ -173,6 +175,10 @@ namespace CityStoryMod.Systems
                 _log.Info("ExportSystem OnUpdate firing.");
             }
 
+            // Drain completed storyteller runs every tick — cheap when idle (one
+            // null check) and decoupled from the export gates below.
+            Mod.Storyteller?.Tick();
+
             var settings = Mod.Settings;
             if (settings == null || !settings.ExportEnabled) return;
 
@@ -189,11 +195,14 @@ namespace CityStoryMod.Systems
                 return;
             }
 
-            bool hotkey = Input.GetKeyDown(KeyCode.E)
-                && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
-                && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
+            bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            bool hotkey = Input.GetKeyDown(KeyCode.E) && ctrl && shift;
+            bool storytellerHotkey = Input.GetKeyDown(KeyCode.S) && ctrl && shift;
             bool intervalElapsed = settings.IntervalMinutes > 0
                 && (DateTime.UtcNow - _lastExportUtc).TotalMinutes >= settings.IntervalMinutes;
+
+            if (storytellerHotkey) TriggerStorytellerStubRun();
 
             if (!hotkey && !intervalElapsed) return;
 
@@ -206,6 +215,19 @@ namespace CityStoryMod.Systems
             {
                 _log.Error(ex, "Export failed.");
             }
+        }
+
+        // Stub run used to exercise the dispatcher before the real Anthropic
+        // client lands (issue #4 will replace this with a RunFunc that calls
+        // the API). The 10-second delay matches a realistic LLM call so the UI
+        // status surface (#5) can be designed against representative timing.
+        void TriggerStorytellerStubRun()
+        {
+            Mod.Storyteller?.Start("stub", async ct =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                return RunResult.Ok(filesWritten: 0);
+            });
         }
 
         const string SchemaVersion = "0.1";

@@ -1,6 +1,7 @@
 using System;
 using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
+using CityStoryMod.Storyteller;
 using CityStoryMod.Systems;
 using Game;
 using Game.Modding;
@@ -15,6 +16,7 @@ namespace CityStoryMod
             .SetShowsErrorsInUI(true);
 
         public static Settings Settings { get; private set; }
+        public static StorytellerDispatcher Storyteller { get; private set; }
 
         // Set once when the mod loads (CS2 launch). Every snapshot in this play session
         // carries this id so the storytelling agent can bucket snapshots without inferring
@@ -31,6 +33,8 @@ namespace CityStoryMod
             Settings.RegisterInOptionsUI();
             AssetDatabase.global.LoadSettings(nameof(CityStoryMod), Settings, new Settings(this));
 
+            Storyteller = new StorytellerDispatcher(Log);
+
             GameManager.instance.localizationManager.AddSource("en-US", new Locale(Locale.EnglishEntries()));
 
             updateSystem.UpdateBefore<ExportSystem>(SystemUpdatePhase.UIUpdate);
@@ -40,6 +44,9 @@ namespace CityStoryMod
 
         public void OnDispose()
         {
+            Storyteller?.Cancel();
+            Storyteller = null;
+
             Settings?.UnregisterInOptionsUI();
             Settings = null;
 
