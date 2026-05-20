@@ -92,3 +92,7 @@ Working scaffold with a growing schema. Continuing to fill in fields field-by-fi
 ## Reference
 
 See [`CLAUDE.md`](CLAUDE.md) for the full orientation: toolchain setup, reference mods worth studying (Carto, InfoLoom, SceneExplorer), known gotchas, and useful links.
+
+## License
+
+[MIT](LICENSE) — covers both the C# mod code and the storytelling content under `template/`. Fork, modify, redistribute, sell — just keep the copyright notice.
