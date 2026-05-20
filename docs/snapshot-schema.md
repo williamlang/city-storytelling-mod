@@ -47,7 +47,12 @@ This document defines the contract. The mod is the producer; the agent is the co
     "attractiveness": null,
     "danger_level": null,            // float
     "milestone_level": null,
-    "xp": null
+    "xp": null,
+    "zones": {                       // counts of ALL buildings by classified type
+      "residential": N, "commercial": N, "industrial": N, "office": N,
+      "extractor": N, "service": N, "transformer": N, "water_pumping": N,
+      "other": N                     // anything that didn't match a marker
+    }
   },
 
   "districts": [
@@ -109,6 +114,34 @@ This document defines the contract. The mod is the producer; the agent is the co
 
   "services": {
     // "coverage_gaps": [ { "service": "fire", "district_id": "..." } ]
+  },
+
+  "diff": {
+    // null on the first snapshot of a session (no prior to compare against);
+    // populated thereafter. Carries change relative to the previous snapshot.
+    "since_snapshot_id": "snapshot-1779235454",
+    "since_captured_at_ingame": "2026-01-10",
+    "ingame_days_elapsed": 0,
+    "buildings": {
+      // named-building churn (only entities currently in buildings[])
+      "added":   [ { "id": "...", "name": "...", "type": "..." } ],
+      "removed": [ { "id": "...", "name": "...", "type": "..." } ],
+      "changed": [
+        { "id": "...", "name": "...", "changes": {
+          "name":            { "from": "Old Name", "to": "New Name" },
+          "type":            { "from": "industrial", "to": "extractor" },
+          "district_id":     { "from": null, "to": "..." },
+          "company_subtype": { "from": "Bar", "to": "Restaurant" },
+          "has_company":     { "from": true, "to": false }
+        } }
+      ]
+    },
+    "zones_delta": {
+      // bulk zone-count changes (catches residential/commercial growth and
+      // demolitions that don't surface in buildings[] because most lots are
+      // not custom-named). Only keys where the count actually changed appear.
+      "residential": { "from": 415, "to": 423, "delta": 8 }
+    }
   }
 }
 ```

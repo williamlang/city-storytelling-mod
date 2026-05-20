@@ -32,10 +32,29 @@ namespace CityStoryMod.Systems
         EntityQuery _citizenQuery;
         EntityQuery _districtQuery;
         EntityQuery _renamedBuildingQuery;
+        EntityQuery _allBuildingsQuery;
         bool _cityComponentsLogged;
         bool _buildingFirstDiagged;
         bool _citizenFirstDiagged;
         readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
+
+        // Previous-snapshot state for the embedded diff block. Reset on mod reload
+        // (CS2 launch), so cross-session diffs need a future enhancement to read the
+        // last on-disk snapshot on first export.
+        Dictionary<string, BuildingFingerprint> _prevBuildings;
+        Dictionary<string, int> _prevZoneCounts;
+        DateTime? _prevIngameDate;
+        string _prevSnapshotId;
+
+        struct BuildingFingerprint
+        {
+            public string Id;
+            public string Name;
+            public string Type;
+            public string CompanySubtype;  // null when no company renter
+            public string DistrictId;
+            public bool HasCompany;
+        }
         CityConfigurationSystem _cityConfig;
         CitySystem _citySystem;
         TimeSystem _timeSystem;
@@ -75,6 +94,16 @@ namespace CityStoryMod.Systems
                     ComponentType.ReadOnly<Building>(),
                     ComponentType.ReadOnly<CustomName>(),
                 },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                },
+            });
+            _allBuildingsQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Building>() },
                 None = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
@@ -207,11 +236,23 @@ namespace CityStoryMod.Systems
             if (_f_xp != null && EntityManager.HasComponent<XP>(_citySystem.City))
                 xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
             List<object> districts = CollectDistricts();
-            List<object> buildings = CollectRenamedBuildings();
+            var (buildings, buildingPrints) = CollectRenamedBuildings();
             object demographics = CollectDemographics();
+            Dictionary<string, int> zoneCounts = CollectZoneCounts();
+            DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
+
+            object diff = _prevBuildings != null
+                ? ComputeDiff(buildingPrints, zoneCounts, currentIngameDate)
+                : null;
+
+            // Advance the previous-snapshot pointers for the next export.
+            _prevBuildings = buildingPrints;
+            _prevZoneCounts = zoneCounts;
+            _prevIngameDate = currentIngameDate;
+            _prevSnapshotId = snapshotId;
 
             var snapshot = new
             {
@@ -238,6 +279,7 @@ namespace CityStoryMod.Systems
                     danger_level = dangerLevel,
                     milestone_level = milestoneLevel,
                     xp = xp,
+                    zones = zoneCounts,
                 },
 
                 districts = districts,
@@ -245,6 +287,7 @@ namespace CityStoryMod.Systems
                 citizens_sample = new object[0],
 
                 demographics = demographics,
+                diff = diff,
 
                 trade = new
                 {
@@ -368,9 +411,10 @@ namespace CityStoryMod.Systems
             }
         }
 
-        List<object> CollectRenamedBuildings()
+        (List<object>, Dictionary<string, BuildingFingerprint>) CollectRenamedBuildings()
         {
             var result = new List<object>();
+            var prints = new Dictionary<string, BuildingFingerprint>();
             using var entities = _renamedBuildingQuery.ToEntityArray(Allocator.Temp);
             // Cap the per-entity component diag at 5 buildings to avoid log spam in large cities.
             int diagBudget = _buildingFirstDiagged ? 0 : 5;
@@ -419,6 +463,7 @@ namespace CityStoryMod.Systems
                 // info inline. Most renamed buildings are 1:1 with a company (signature
                 // industrials, named extractors, custom-named shops); we surface that one.
                 object company = null;
+                string companySubtype = null;
                 if (EntityManager.HasBuffer<Renter>(e))
                 {
                     var renters = EntityManager.GetBuffer<Renter>(e, isReadOnly: true);
@@ -431,6 +476,7 @@ namespace CityStoryMod.Systems
                             : 0;
                         string rawCompanyName = _nameSystem.GetRenderedLabelName(renter);
                         var (cSector, cSubtype) = ParseCompanyType(rawCompanyName);
+                        companySubtype = cSubtype;
                         company = new
                         {
                             id = EntityId(renter),
@@ -444,10 +490,14 @@ namespace CityStoryMod.Systems
                     }
                 }
 
+                string id = EntityId(e);
+                string renderedName = _nameSystem.GetRenderedLabelName(e);
+                string districtId = DistrictIdOf(e);
+
                 result.Add(new
                 {
-                    id = EntityId(e),
-                    name = _nameSystem.GetRenderedLabelName(e),
+                    id = id,
+                    name = renderedName,
                     custom_named = true,
                     prefab_name = prefabName,
                     type = type,
@@ -456,11 +506,117 @@ namespace CityStoryMod.Systems
                     citizens_present = citizensPresent,
                     renter_count = renterCount,
                     company = company,
-                    district_id = DistrictIdOf(e),
+                    district_id = districtId,
                 });
+                prints[id] = new BuildingFingerprint
+                {
+                    Id = id,
+                    Name = renderedName,
+                    Type = type,
+                    CompanySubtype = companySubtype,
+                    DistrictId = districtId,
+                    HasCompany = company != null,
+                };
             }
             if (!_buildingFirstDiagged && entities.Length > 0) _buildingFirstDiagged = true;
-            return result;
+            return (result, prints);
+        }
+
+        object ComputeDiff(
+            Dictionary<string, BuildingFingerprint> current,
+            Dictionary<string, int> currentZoneCounts,
+            DateTime currentIngameDate)
+        {
+            var added = new List<object>();
+            var removed = new List<object>();
+            var changed = new List<object>();
+
+            foreach (var kv in current)
+            {
+                if (!_prevBuildings.TryGetValue(kv.Key, out var prev))
+                {
+                    added.Add(new { id = kv.Value.Id, name = kv.Value.Name, type = kv.Value.Type });
+                    continue;
+                }
+                var changes = new Dictionary<string, object>();
+                if (kv.Value.Name != prev.Name)
+                    changes["name"] = new { from = prev.Name, to = kv.Value.Name };
+                if (kv.Value.Type != prev.Type)
+                    changes["type"] = new { from = prev.Type, to = kv.Value.Type };
+                if (kv.Value.DistrictId != prev.DistrictId)
+                    changes["district_id"] = new { from = prev.DistrictId, to = kv.Value.DistrictId };
+                if (kv.Value.CompanySubtype != prev.CompanySubtype)
+                    changes["company_subtype"] = new { from = prev.CompanySubtype, to = kv.Value.CompanySubtype };
+                if (kv.Value.HasCompany != prev.HasCompany)
+                    changes["has_company"] = new { from = prev.HasCompany, to = kv.Value.HasCompany };
+                if (changes.Count > 0)
+                    changed.Add(new { id = kv.Value.Id, name = kv.Value.Name, changes });
+            }
+
+            foreach (var kv in _prevBuildings)
+            {
+                if (!current.ContainsKey(kv.Key))
+                {
+                    removed.Add(new { id = kv.Value.Id, name = kv.Value.Name, type = kv.Value.Type });
+                }
+            }
+
+            int? ingameDaysElapsed = _prevIngameDate.HasValue
+                ? (int)(currentIngameDate - _prevIngameDate.Value).TotalDays
+                : (int?)null;
+
+            // Only emit zones that actually changed.
+            var zonesDelta = new Dictionary<string, object>();
+            if (_prevZoneCounts != null)
+            {
+                foreach (var kv in currentZoneCounts)
+                {
+                    _prevZoneCounts.TryGetValue(kv.Key, out int prev);
+                    if (prev != kv.Value)
+                        zonesDelta[kv.Key] = new { from = prev, to = kv.Value, delta = kv.Value - prev };
+                }
+                foreach (var kv in _prevZoneCounts)
+                {
+                    if (!currentZoneCounts.ContainsKey(kv.Key) && kv.Value != 0)
+                        zonesDelta[kv.Key] = new { from = kv.Value, to = 0, delta = -kv.Value };
+                }
+            }
+
+            return new
+            {
+                since_snapshot_id = _prevSnapshotId,
+                since_captured_at_ingame = _prevIngameDate?.ToString("yyyy-MM-dd"),
+                ingame_days_elapsed = ingameDaysElapsed,
+                buildings = new { added, removed, changed },
+                zones_delta = zonesDelta,
+            };
+        }
+
+        // Walks every Building entity (excluding prefabs/deleted/temp) and classifies
+        // by the existing instance-marker check. Cheap relative to the 5-min export
+        // throttle, even on cities with thousands of buildings.
+        Dictionary<string, int> CollectZoneCounts()
+        {
+            var counts = new Dictionary<string, int>
+            {
+                ["residential"] = 0,
+                ["commercial"] = 0,
+                ["industrial"] = 0,
+                ["office"] = 0,
+                ["extractor"] = 0,
+                ["service"] = 0,
+                ["transformer"] = 0,
+                ["water_pumping"] = 0,
+                ["other"] = 0,
+            };
+            using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                string type = BuildingTypeFromMarkers(entities[i]) ?? "other";
+                counts.TryGetValue(type, out int prev);
+                counts[type] = prev + 1;
+            }
+            return counts;
         }
 
         int? ReadFirstInt<T>(Entity e) where T : unmanaged, IComponentData
