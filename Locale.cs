@@ -27,6 +27,14 @@ namespace CityStoryMod
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] = "Auto-export interval (minutes)",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
                 "Wall-clock minutes between automatic exports. Set to 0 to disable interval exports; the hotkey still works.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicApiKey]"] = "Anthropic API key",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicApiKey]"] =
+                "Your Anthropic API key, used by the in-game storyteller to call Claude. Stored in this mod's settings file in plain text — anyone with access to your AppData can read it. Get a key at console.anthropic.com.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] = "Claude model",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] =
+                "Claude model id used for storyteller runs. Defaults to claude-opus-4-7 (current best). Paste a newer id here when Anthropic ships successors without waiting for a mod update.",
         };
     }
 }
