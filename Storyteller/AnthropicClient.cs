@@ -30,6 +30,13 @@ namespace CityStoryMod.Storyteller
         const int MaxHops = 50;
         const int MaxTokens = 8192;
 
+        // Anthropic allows up to 4 cache_control markers per request. We use 1
+        // for the system prompt (permanent) and reserve the remaining 3 for a
+        // sliding window of recent tool_result messages — when we'd cross the
+        // limit, the oldest marker is dropped (its cache entry may still be live
+        // server-side, we just stop referencing it).
+        const int MaxMessageCacheMarkers = 3;
+
         // Shared HttpClient — Anthropic recommends reusing instances. 5-minute
         // timeout is generous for slow turns; the dispatcher's own cancellation
         // path still applies on top via CancellationToken.
@@ -67,16 +74,37 @@ namespace CityStoryMod.Storyteller
             // selective fields).
             string userPrompt = $"{command}\n\n---\n\n{snapshotHint}";
 
+            // System prompt as a content-array block carries the cache_control
+            // marker; this caches CLAUDE.md (+ tools, which live in the prefix) for
+            // 5 minutes, giving back-to-back runs a hot cache hit on the largest
+            // static block we send.
+            JArray systemContent = new JArray {
+                new JObject {
+                    ["type"] = "text",
+                    ["text"] = system,
+                    ["cache_control"] = new JObject { ["type"] = "ephemeral" },
+                },
+            };
+
             JArray messages = new JArray {
                 new JObject { ["role"] = "user", ["content"] = userPrompt }
             };
 
+            // Indices into `messages` of tool_result turns that currently carry a
+            // cache_control marker. Sliding window: when a new marker pushes the
+            // count past MaxMessageCacheMarkers, the oldest is dropped — both the
+            // entry from this list and the cache_control from that message's last
+            // block (so the request stays within Anthropic's 4-marker limit).
+            List<int> markerIndices = new List<int>();
+
             int filesWritten = 0;
+            long totalInput = 0, totalCacheRead = 0, totalCacheWrite = 0, totalOutput = 0;
             int hop;
             for (hop = 0; hop < MaxHops; hop++)
             {
                 ct.ThrowIfCancellationRequested();
-                JObject response = await PostMessages(apiKey, model, system, messages, ct);
+                JObject response = await PostMessages(apiKey, model, systemContent, messages, ct);
+                LogUsage(log, hop, response, ref totalInput, ref totalCacheRead, ref totalCacheWrite, ref totalOutput);
 
                 string stopReason = (string)response["stop_reason"];
                 JArray content = (JArray)response["content"];
@@ -115,8 +143,10 @@ namespace CityStoryMod.Storyteller
                     });
                 }
                 messages.Add(new JObject { ["role"] = "user", ["content"] = toolResults });
+                AddCacheMarkerToLatest(messages, markerIndices);
             }
 
+            log.Info($"Token totals: input={totalInput} (cache read={totalCacheRead}, write={totalCacheWrite}), output={totalOutput}");
             if (hop >= MaxHops)
             {
                 log.Warn($"Hop cap ({MaxHops}) reached; ending run.");
@@ -126,13 +156,55 @@ namespace CityStoryMod.Storyteller
             return RunResult.Ok(filesWritten);
         }
 
-        static async Task<JObject> PostMessages(string apiKey, string model, string system, JArray messages, CancellationToken ct)
+        // Adds cache_control to the last content block of the most recently
+        // appended message, then drops the oldest tracked marker if we've exceeded
+        // the per-request cap.
+        static void AddCacheMarkerToLatest(JArray messages, List<int> markerIndices)
+        {
+            int idx = messages.Count - 1;
+            JObject msg = (JObject)messages[idx];
+            JArray content = msg["content"] as JArray;
+            if (content == null || content.Count == 0) return; // string-content messages aren't markable
+            JObject lastBlock = content[content.Count - 1] as JObject;
+            if (lastBlock == null) return;
+            lastBlock["cache_control"] = new JObject { ["type"] = "ephemeral" };
+            markerIndices.Add(idx);
+
+            while (markerIndices.Count > MaxMessageCacheMarkers)
+            {
+                int oldestIdx = markerIndices[0];
+                markerIndices.RemoveAt(0);
+                JObject oldMsg = (JObject)messages[oldestIdx];
+                JArray oldContent = oldMsg["content"] as JArray;
+                if (oldContent == null || oldContent.Count == 0) continue;
+                JObject oldLast = oldContent[oldContent.Count - 1] as JObject;
+                oldLast?.Remove("cache_control");
+            }
+        }
+
+        static void LogUsage(ILog log, int hop, JObject response,
+            ref long totalInput, ref long totalCacheRead, ref long totalCacheWrite, ref long totalOutput)
+        {
+            JObject u = response["usage"] as JObject;
+            if (u == null) return;
+            int input = u["input_tokens"]?.Value<int>() ?? 0;
+            int cacheRead = u["cache_read_input_tokens"]?.Value<int>() ?? 0;
+            int cacheWrite = u["cache_creation_input_tokens"]?.Value<int>() ?? 0;
+            int output = u["output_tokens"]?.Value<int>() ?? 0;
+            totalInput += input;
+            totalCacheRead += cacheRead;
+            totalCacheWrite += cacheWrite;
+            totalOutput += output;
+            log.Info($"Hop {hop}: input={input} (cache read={cacheRead}, write={cacheWrite}), output={output}");
+        }
+
+        static async Task<JObject> PostMessages(string apiKey, string model, JArray systemContent, JArray messages, CancellationToken ct)
         {
             JObject body = new JObject
             {
                 ["model"] = model,
                 ["max_tokens"] = MaxTokens,
-                ["system"] = system,
+                ["system"] = systemContent,
                 ["messages"] = messages,
                 ["tools"] = ToolDefinitions(),
             };
