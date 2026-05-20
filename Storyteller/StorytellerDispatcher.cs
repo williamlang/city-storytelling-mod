@@ -110,5 +110,11 @@ namespace CityStoryMod.Storyteller
             Duration = d;
             return this;
         }
+
+        public RunResult WithMessage(string m)
+        {
+            Message = m;
+            return this;
+        }
     }
 }

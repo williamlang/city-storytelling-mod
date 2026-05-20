@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using System.Threading.Tasks;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
@@ -202,7 +201,7 @@ namespace CityStoryMod.Systems
             bool intervalElapsed = settings.IntervalMinutes > 0
                 && (DateTime.UtcNow - _lastExportUtc).TotalMinutes >= settings.IntervalMinutes;
 
-            if (storytellerHotkey) TriggerStorytellerStubRun();
+            if (storytellerHotkey) TriggerStorytellerRun();
 
             if (!hotkey && !intervalElapsed) return;
 
@@ -217,17 +216,15 @@ namespace CityStoryMod.Systems
             }
         }
 
-        // Stub run used to exercise the dispatcher before the real Anthropic
-        // client lands (issue #4 will replace this with a RunFunc that calls
-        // the API). The 10-second delay matches a realistic LLM call so the UI
-        // status surface (#5) can be designed against representative timing.
-        void TriggerStorytellerStubRun()
+        // Hardcoded command for v1; a per-hotkey or settings-configurable command
+        // picker is a follow-up. story-driven is the most common in-session call,
+        // so default the dispatcher to it.
+        const string DefaultStorytellerCommand = "story-driven";
+
+        void TriggerStorytellerRun()
         {
-            Mod.Storyteller?.Start("stub", async ct =>
-            {
-                await Task.Delay(TimeSpan.FromSeconds(10), ct);
-                return RunResult.Ok(filesWritten: 0);
-            });
+            Mod.Storyteller?.Start(DefaultStorytellerCommand,
+                StorytellerRun.Build(DefaultStorytellerCommand, _log));
         }
 
         const string SchemaVersion = "0.1";

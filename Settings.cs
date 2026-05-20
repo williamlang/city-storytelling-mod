@@ -9,6 +9,14 @@ using Game.Settings;
 
 namespace CityStoryMod
 {
+    public enum LlmProvider
+    {
+        Anthropic,
+        OpenAI,
+        Gemini,
+        Ollama,
+    }
+
     [FileLocation("ModsSettings/" + nameof(CityStoryMod) + "/" + nameof(CityStoryMod))]
     public class Settings : ModSetting
     {
@@ -19,16 +27,18 @@ namespace CityStoryMod
         [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
-        // Anthropic API credentials for the in-game storyteller. The key is stored
-        // in CS2's settings file unencrypted — the description label spells this out
-        // so the player can decide whether they're comfortable with that. Model
-        // defaults to current best Claude (claude-opus-4-7); user can paste a newer
-        // id without a mod update when Anthropic ships successors.
-        [SettingsUITextInput]
-        public string AnthropicApiKey { get; set; }
+        // LLM credentials for the in-game storyteller. Key/model are kept generic
+        // (not Anthropic-prefixed) so they apply to whichever provider is selected
+        // below — switch provider, paste a different key, paste a matching model
+        // id, no schema migration. Key is stored in CS2's settings file plain; the
+        // description label spells this out.
+        public LlmProvider Provider { get; set; }
 
         [SettingsUITextInput]
-        public string AnthropicModel { get; set; }
+        public string ApiKey { get; set; }
+
+        [SettingsUITextInput]
+        public string Model { get; set; }
 
         // Read-only status surface for the in-game storyteller dispatcher. CS2's
         // settings UI has no dedicated read-only display widget, so this is a text
@@ -53,8 +63,9 @@ namespace CityStoryMod
         {
             ExportEnabled = true;
             IntervalMinutes = 5;
-            AnthropicApiKey = "";
-            AnthropicModel = "claude-opus-4-7";
+            Provider = LlmProvider.Anthropic;
+            ApiKey = "";
+            Model = "claude-opus-4-7";
         }
 
         static string ComposeStorytellerStatus()

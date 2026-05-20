@@ -28,13 +28,17 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
                 "Wall-clock minutes between automatic exports. Set to 0 to disable interval exports; the hotkey still works.",
 
-            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicApiKey]"] = "Anthropic API key",
-            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicApiKey]"] =
-                "Your Anthropic API key, used by the in-game storyteller to call Claude. Stored in this mod's settings file in plain text — anyone with access to your AppData can read it. Get a key at console.anthropic.com.",
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] = "LLM provider",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] =
+                "Which LLM service drives the in-game storyteller. Anthropic (Claude) is the default and the only one implemented today — OpenAI, Gemini and Ollama are wired in via follow-up issues.",
 
-            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] = "Claude model",
-            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] =
-                "Claude model id used for storyteller runs. Defaults to claude-opus-4-7 (current best). Paste a newer id here when Anthropic ships successors without waiting for a mod update.",
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] = "API key",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] =
+                "API key for the LLM provider selected above. Stored in this mod's settings file in plain text — anyone with access to your AppData can read it. Get a key from your provider's console (e.g. console.anthropic.com for Claude).",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.Model]"] = "Model id",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Model]"] =
+                "Model id passed to the selected provider. Defaults to claude-opus-4-7 (matches Anthropic default). When you switch providers, paste a matching model id (e.g. gpt-5 for OpenAI, gemini-2.5-pro for Google).",
 
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] = "Storyteller status",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] =
