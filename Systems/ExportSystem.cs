@@ -334,13 +334,53 @@ namespace CityStoryMod.Systems
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
+            // TODO: prefer a stable save GUID (Game.Assets.SaveGameMetadata / SaveInfo)
+            // as the slug source once verified on Windows with ILSpy. City-name slug
+            // assumes "1 save per city" — collisions across multiple Springfield saves
+            // need the GUID upgrade. Data layout (per-city dir under ModsData) is
+            // unchanged when that swap happens.
             string citySlug = Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
-            string file = Path.Combine(dir, $"{snapshotId}.json");
+            EnsureCityScaffolded(dir);
+            string snapshotsDir = Path.Combine(dir, "snapshots");
+            Directory.CreateDirectory(snapshotsDir);
+            string file = Path.Combine(snapshotsDir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
             _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, named_buildings={buildings.Count} -> {file}");
+        }
+
+        // Marker file used to detect that the template has already been written into
+        // the city dir. CLAUDE.md is part of every template and must be present for
+        // the in-game agent to have its playbook; if it's missing we (re)extract.
+        const string ScaffoldMarker = "CLAUDE.md";
+        const string ResourcePrefix = "template/";
+
+        void EnsureCityScaffolded(string cityDir)
+        {
+            if (File.Exists(Path.Combine(cityDir, ScaffoldMarker))) return;
+
+            var asm = typeof(Mod).Assembly;
+            int written = 0;
+            foreach (string resourceName in asm.GetManifestResourceNames())
+            {
+                if (!resourceName.StartsWith(ResourcePrefix, StringComparison.Ordinal)) continue;
+                string relative = resourceName.Substring(ResourcePrefix.Length);
+                // Resource names use '/' regardless of host OS; rebuild the on-disk
+                // path with the host separator via Path.Combine on the segments.
+                string[] segments = relative.Split('/');
+                string outPath = cityDir;
+                for (int i = 0; i < segments.Length; i++) outPath = Path.Combine(outPath, segments[i]);
+                Directory.CreateDirectory(Path.GetDirectoryName(outPath));
+                using (Stream src = asm.GetManifestResourceStream(resourceName))
+                using (FileStream dst = File.Create(outPath))
+                {
+                    src.CopyTo(dst);
+                }
+                written++;
+            }
+            _log.Info($"Scaffolded city dir from template: {cityDir} ({written} files)");
         }
 
         static string Slugify(string name)

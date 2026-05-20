@@ -61,4 +61,20 @@
     <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
   </ItemGroup>
 
+  <!-- Embed the storytelling template into the DLL as resources. At runtime the
+       mod extracts these into ModsData/CityStoryMod/<city-slug>/ on first export
+       of a new city. Mirrors Carto's <EmbeddedResource> pattern for non-code
+       assets, which is the proven CS2-modding approach (the Paradox Mod.targets
+       toolchain handles loose <Content> deployment inconsistently).
+
+       <LogicalName> overrides the default dot-substituted resource name so each
+       resource keeps its original relative path (e.g. "template/.claude/commands/
+       session-start.md"). This lets ExportSystem walk template/* resources and
+       write each one to its real path on disk without parsing dot-encoded names. -->
+  <ItemGroup>
+    <EmbeddedResource Include="template\**\*.*">
+      <LogicalName>template/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>
