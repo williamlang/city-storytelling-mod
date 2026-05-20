@@ -370,6 +370,8 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(snapshotsDir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
+            Mod.LastExportedCityDir = dir;
+
             _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, named_buildings={buildings.Count} -> {file}");
         }
 

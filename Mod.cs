@@ -18,6 +18,11 @@ namespace CityStoryMod
         public static Settings Settings { get; private set; }
         public static StorytellerDispatcher Storyteller { get; private set; }
 
+        // Most recent successfully-exported city dir. Settings' Open Story Folder
+        // button uses this so the player lands in the right per-city folder when
+        // they click it mid-game. Null until the first export of a session.
+        public static string LastExportedCityDir { get; set; }
+
         // Set once when the mod loads (CS2 launch). Every snapshot in this play session
         // carries this id so the storytelling agent can bucket snapshots without inferring
         // session boundaries from time gaps.

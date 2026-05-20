@@ -35,6 +35,14 @@ namespace CityStoryMod
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] = "Claude model",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AnthropicModel]"] =
                 "Claude model id used for storyteller runs. Defaults to claude-opus-4-7 (current best). Paste a newer id here when Anthropic ships successors without waiting for a mod update.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] = "Storyteller status",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] =
+                "Current state of the in-game storyteller. Updates when you open this panel — it doesn't tick while open, so re-open the panel to refresh.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] = "Open story folder",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] =
+                "Opens the current city's story folder in your file explorer (or the parent folder if no city has been exported yet). Read snapshots, canon, and session files there.",
         };
     }
 }
