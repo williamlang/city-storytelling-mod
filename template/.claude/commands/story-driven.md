@@ -9,11 +9,13 @@ Produce 3–5 story-driven choices the player can act on in-game.
 If a focus is supplied on the line above (a topic, character, faction, place, or theme — e.g. `transit`, `Halverson Civil`, `riverfront`, `scandal`), every proposal must engage with it. The "vary the mix" rule in step 2 relaxes: all options can orbit the focus, as long as they remain meaningfully distinct moves. Before presenting choices, state in one short line how you interpreted the focus so the player can redirect. If the focus line is empty, generate the broad mix as usual.
 
 **1. Survey state silently:**
+- Read `canon/INDEX.md` first — that's the navigation surface; from it you know what entities exist without loading every file. Pull the full files only for entities that look relevant to the moves you're considering.
 - The playthrough goal in `canon/playthrough-goal.md` — every proposal should serve, test, or complicate this goal.
-- Active characters and their agendas.
+- The latest snapshot in `snapshots/` — what's actually happening in-game right now.
+- Active characters and their agendas (load specific files via `read_file` based on INDEX hits).
 - Live secrets in `secrets/` — read them; let them shape proposals; never quote them.
 - Live arcs across characters/companies/factions/places — bias toward moves that *earn* the arc's outcome (no easy wins for `ascends`; tempting bad calls for `falls`).
-- Recent events and the last session file.
+- Recent events and the last session file (`sessions/`, not `sessions/archive/` unless something in an older month is directly load-bearing).
 - Faction tensions, company expansions, planned places, open threads.
 
 **2. Generate 3–5 choices.** Each one is a concrete in-world event that maps to a gameplay action. For each:

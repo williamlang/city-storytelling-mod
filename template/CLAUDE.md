@@ -71,16 +71,28 @@ When a city branch rebases on `main` and inherits new scaffold features (e.g. `c
 
 The player can skip any step or do them piecemeal. The point is that newly-arrived scaffold features don't sit empty.
 
+## Reading canon
+
+**Always start with `canon/INDEX.md`.** It's a compact navigation aid: one short paragraph per entity, grouped by type. Skim it on every run to know what canon exists, then pull only the full files relevant to the current snapshot or task via `read_file`.
+
+Why: loading every entity file each turn is expensive in input tokens and gets worse as the playthrough grows. The index is the durable navigation surface; full files are detail-on-demand.
+
+**Keep INDEX.md in sync.** When you create or substantially update an entity, also update its INDEX.md entry. Each entity file carries a `quick_read:` frontmatter field — that one-paragraph summary is what belongs in INDEX.md; keep the two aligned.
+
+**Session archiving.** Recent sessions (last ~2 in-world months) live full-text in `sessions/`. Older sessions are compressed monthly into `sessions/archive/YYYY-MM.md`. Read recent sessions in full; pull archive months only when something specific from that period matters. The `/session-archive` slash command compresses old files.
+
 ## Directory layout
 
 ```
 canon/        Foundational truths about the city itself — name, geography, history, era, tone
+  INDEX.md      Agent-maintained navigation: one paragraph per entity, all types
 characters/   One markdown file per person. Filename: kebab-case-name.md
 companies/    Businesses, industries, employers. Filename: kebab-case-name.md
 places/       Neighborhoods, districts, landmarks, stadiums. Filename: kebab-case-name.md
 factions/     Sports teams, political parties, unions, advocacy groups. Filename: kebab-case-name.md
 events/       Civic timeline. Filename: YYYY-MM-DD-short-name.md (in-world date)
 sessions/     Real-world playthrough log. Filename: SXX-YYYY-MM-DD-title.md (real date)
+  archive/      Monthly summaries of sessions older than ~2 in-world months
 stories/      Longer narrative pieces — news articles, vignettes, transcripts
 secrets/      Hidden facts driving the story before they break. See "Secrets" — the player may choose not to read this directory.
 ```
@@ -88,6 +100,8 @@ secrets/      Hidden facts driving the story before they break. See "Secrets" �
 ## File conventions
 
 Every entity file starts with YAML frontmatter so we can grep, link, and reason across the city. Suggested fields:
+
+Every major entity (characters, companies, places, factions) also carries a `quick_read:` field — a single paragraph that's the source of truth for that entity's INDEX.md entry. Keep them aligned: when you change an entity meaningfully, update both the full file and its INDEX.md entry.
 
 **characters/*.md**
 ```yaml
@@ -101,6 +115,9 @@ agenda: One sentence — what they want the city to become
 allies: [other-character-slug, ...]
 adversaries: [other-character-slug, ...]
 affiliations: [company-or-faction-slug, ...]
+quick_read: |
+  One short paragraph: who they are, what they're doing, why they matter
+  right now. Goes verbatim into canon/INDEX.md.
 arc:                                  # optional — authorial outcome bias (see "Arcs")
   outcome: ascends | falls | tragic | redemption | survives
   notes: One sentence on how the story bends toward this
@@ -116,6 +133,8 @@ founded: 2014
 status: active | acquired | bankrupt | spun-off
 headquarters: places/downtown-core.md
 key_people: [character-slug, ...]
+quick_read: |
+  One short paragraph — sector, scale, current move, who runs it.
 arc:                                  # optional — see "Arcs"
   outcome: ascends | falls | absorbed | survives
   notes: One sentence
@@ -130,6 +149,8 @@ type: neighborhood | landmark | industrial | civic | recreational
 status: existing | planned | under-construction | proposed | demolished
 built: 2019           # or `proposed: 2026-Q3`
 key_people: [character-slug, ...]
+quick_read: |
+  One short paragraph — character of the place, who lives/works there, current arc.
 arc:                                  # optional — see "Arcs"
   outcome: thrives | declines | transforms | abandoned
   notes: One sentence
@@ -144,6 +165,8 @@ type: sports team | political party | union | advocacy | religious | criminal | 
 founded: 2014
 status: active | dormant | dissolved
 key_people: [character-slug, ...]
+quick_read: |
+  One short paragraph — what they stand for, who leads, current fight.
 arc:                                  # optional — see "Arcs"
   outcome: wins | loses | fractures | survives
   notes: One sentence
