@@ -30,7 +30,9 @@ namespace CityStoryMod.Storyteller
                         break;
 
                     case LlmProvider.OpenAI:
-                        return RunResult.Failed("OpenAI provider not yet implemented (issue #8). Switch back to Anthropic.");
+                        conv = new OpenAiConversation(s.ApiKey, s.Model, log);
+                        break;
+
                     case LlmProvider.Gemini:
                         return RunResult.Failed("Gemini provider not yet implemented (issue #9). Switch back to Anthropic.");
                     case LlmProvider.Ollama:
