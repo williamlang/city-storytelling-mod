@@ -40,6 +40,16 @@ namespace CityStoryMod
         [SettingsUITextInput]
         public string Model { get; set; }
 
+        // Ollama runs against a local (or LAN) HTTP endpoint instead of a hosted
+        // API — only relevant when Provider == Ollama, hidden otherwise to keep
+        // the panel uncluttered for the other three providers.
+        [SettingsUITextInput]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(IsOllamaProvider), invert: true)]
+        public string OllamaBaseUrl { get; set; }
+
+        [SettingsUIHidden]
+        public bool IsOllamaProvider => Provider == LlmProvider.Ollama;
+
         // Read-only status surface for the in-game storyteller dispatcher. CS2's
         // settings UI has no dedicated read-only display widget, so this is a text
         // input whose setter discards writes — the getter recomputes on each render.
@@ -66,6 +76,7 @@ namespace CityStoryMod
             Provider = LlmProvider.Anthropic;
             ApiKey = "";
             Model = "claude-opus-4-7";
+            OllamaBaseUrl = "http://localhost:11434";
         }
 
         static string ComposeStorytellerStatus()

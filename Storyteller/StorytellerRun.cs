@@ -38,7 +38,9 @@ namespace CityStoryMod.Storyteller
                         break;
 
                     case LlmProvider.Ollama:
-                        return RunResult.Failed("Ollama provider not yet implemented (issue #10). Switch back to Anthropic.");
+                        conv = new OllamaConversation(s.OllamaBaseUrl, s.Model, log);
+                        break;
+
 
                     default:
                         return RunResult.Failed($"Unknown provider: {s.Provider}");
