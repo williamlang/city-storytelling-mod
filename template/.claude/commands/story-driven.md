@@ -10,10 +10,10 @@ If a focus is supplied on the line above (a topic, character, faction, place, or
 
 **1. Survey state silently:**
 - Read `canon/INDEX.md` first — that's the navigation surface; from it you know what entities exist without loading every file. Pull the full files only for entities that look relevant to the moves you're considering.
-- The playthrough goal in `canon/playthrough-goal.md` — every proposal should serve, test, or complicate this goal.
+- The playthrough premise in `canon/playthrough-premise.md` — every proposal should serve, test, or complicate this premise.
 - The latest snapshot in `snapshots/` — what's actually happening in-game right now.
 - Active characters and their agendas (load specific files via `read_file` based on INDEX hits).
-- Live secrets in `secrets/` — read them; let them shape proposals; never quote them.
+- Live secrets in `secrets/` — read them; let them shape proposals. Whether to quote contents in chat follows `secrets_visibility` in `settings.json` (see CLAUDE.md "Secrets").
 - Live arcs across characters/companies/factions/places — bias toward moves that *earn* the arc's outcome (no easy wins for `ascends`; tempting bad calls for `falls`).
 - Recent events and the last session file (`sessions/`, not `sessions/archive/` unless something in an older month is directly load-bearing).
 - Faction tensions, company expansions, planned places, open threads.

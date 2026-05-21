@@ -55,19 +55,23 @@ If the scaffold itself improves during a playthrough (better conventions, tighte
 
 `settings.json` at the repo root holds per-playthrough configuration and is **committed on each `city/<slug>` branch** (not gitignored — the values are part of the playthrough's canonical state, just like `canon/city.md`). `settings.sample.json` on `main` is the committed template.
 
-Today it holds one field: `cs2_mod_output_dir`, the absolute directory where a companion Cities: Skylines 2 mod writes export files this app reads. Because the mod organizes output per city (`<mod-root>/<city-slug>/`), the full per-city path is stored verbatim — switching playthroughs (= switching branches) automatically swaps in the right path.
+Fields:
 
-`/new-city` derives this path silently from the mod's standard install location (`%USERPROFILE%/AppData/LocalLow/Colossal Order/Cities Skylines II/ModsData/CityStoryMod/<slug>/`) once the slug is known, and writes `settings.json` as part of the founding commit on the new city branch. The directory doesn't need to exist yet — the mod creates it after the player renames their CS2 save to the chosen city name. Non-standard installs require editing `settings.json` manually after bootstrap.
+- **`cs2_mod_output_dir`** — absolute directory where the companion CS2 mod writes export files this app reads. The mod organizes output per city (`<mod-root>/<city-slug>/`), so the full per-city path is stored verbatim. `/new-city` derives this silently from the standard install location (`%USERPROFILE%/AppData/LocalLow/Colossal Order/Cities Skylines II/ModsData/CityStoryMod/<slug>/`) once the slug is known. The directory doesn't need to exist yet — the mod creates it after the player renames their CS2 save to the chosen city name. Non-standard installs require editing `settings.json` manually after bootstrap.
+- **`secrets_visibility`** — `"hidden"` (default) or `"shown"`. Governs whether I quote unrevealed secret content in chat. See "Secrets". Set at `/new-city`.
+- **`levelup_storylines`** — boolean, default `true`. When `true`, `/session-end` checks whether `city.milestone_level` rose between the prior and current snapshots; if it did, I generate an `events/` entry plus a short narrative piece in `stories/` (council transcript, news clipping, developer memo) about how the funds influx gets spent and fought over — who pushed for what, who lost out, the political fallout. When `false`, milestone advances are still recorded in the session log but I don't generate dedicated stories. Set at `/new-city`.
+
+`/new-city` writes `settings.json` as part of the founding commit on the new city branch.
 
 ## Scaffold arrival
 
-When a city branch rebases on `main` and inherits new scaffold features (e.g. `canon/playthrough-goal.md`, `secrets/`, `arc:` fields, a new entity type), I run a one-time backfill before the next session:
+When a city branch rebases on `main` and inherits new scaffold features (e.g. `canon/playthrough-premise.md`, `secrets/`, `arc:` fields, a new entity type), I run a one-time backfill before the next session:
 
-1. **Detect** what's new — features the city branch hasn't yet populated (no `canon/playthrough-goal.md`, no `secrets/` directory or it's empty, no `arc:` set on major entities, missing frontmatter fields, etc.).
-2. **Confirm the playthrough goal.** If `canon/playthrough-goal.md` is missing or empty, I ask the player for one sentence describing the overarching story of this playthrough (see examples above). I write that sentence to the file. This is the **only** authorial question I ask during backfill — everything below I generate from it.
-3. **Generate arcs from the goal.** Grounded in the playthrough goal and established canon, I write an `arc:` block into every major recurring entity (character / company / faction / place) without asking. I show the player a one-line summary of what was assigned — e.g. *"Annika: redemption; Halverson Civil: ascends; Reuben Kowalski: tragic"* — so they know what I did. I do not pause for per-arc confirmation. If the player disagrees with any individual arc, they can ask me to revise after the fact.
-4. **Generate secrets silently.** I do **not** ask the player what secrets they want — the player should not know them. Grounded in the playthrough goal, the arcs just set, and established canon, I invent 1–2 hidden facts per major entity that create the friction those arcs need to feel earned. I write them to `secrets/` without quoting their content in chat. I tell the player only *what was covered* (e.g., "Wrote 5 secrets touching Annika, the Halverson contract, and the riverfront rezoning") so they know files were added — not what's inside.
-5. **Commit** the backfill as a discrete commit (e.g. "Backfill goal, arcs, and secrets after scaffold rebase") so it's separable from later session work.
+1. **Detect** what's new — features the city branch hasn't yet populated (no `canon/playthrough-premise.md`, no `secrets/` directory or it's empty, no `arc:` set on major entities, missing frontmatter fields, etc.).
+2. **Infer the premise.** If `canon/playthrough-premise.md` is missing or empty, I derive it silently from `canon/city.md` (founding history + region) and any other established canon — see "Playthrough premise" for the inputs and heuristics. I write the resulting one-sentence (or short paragraph) premise to the file and show the player a one-line summary of what I wrote. I do **not** ask the player to author it. They can revise after the fact.
+3. **Generate arcs from the premise.** Grounded in the premise and established canon, I write an `arc:` block into every major recurring entity (character / company / faction / place) without asking. I show the player a one-line summary of what was assigned — e.g. *"Annika: redemption; Halverson Civil: ascends; Reuben Kowalski: tragic"* — so they know what I did. I do not pause for per-arc confirmation. If the player disagrees with any individual arc, they can ask me to revise after the fact.
+4. **Generate secrets.** I do **not** ask the player what secrets they want — secrets are mine to invent. Grounded in the premise, the arcs just set, and established canon, I write 1–2 hidden facts per major entity that create the friction those arcs need to feel earned. Whether I quote their contents in chat depends on `secrets_visibility` in `settings.json` (see "Secrets" below): under `hidden`, I tell the player only *what was covered* (e.g., "Wrote 5 secrets touching Annika, the Halverson contract, and the riverfront rezoning") without quoting; under `shown`, I summarize each secret's content for the player as I write it.
+5. **Commit** the backfill as a discrete commit (e.g. "Backfill premise, arcs, and secrets after scaffold rebase") so it's separable from later session work.
 
 The player can skip any step or do them piecemeal. The point is that newly-arrived scaffold features don't sit empty.
 
@@ -94,7 +98,7 @@ events/       Civic timeline. Filename: YYYY-MM-DD-short-name.md (in-world date)
 sessions/     Real-world playthrough log. Filename: SXX-YYYY-MM-DD-title.md (real date)
   archive/      Monthly summaries of sessions older than ~2 in-world months
 stories/      Longer narrative pieces — news articles, vignettes, transcripts
-secrets/      Hidden facts driving the story before they break. See "Secrets" — the player may choose not to read this directory.
+secrets/      Hidden facts driving the story before they break. Whether I quote contents in chat depends on `secrets_visibility` in settings.json. See "Secrets".
 ```
 
 ## File conventions
@@ -218,30 +222,46 @@ pressure: One sentence — how this drives in-world behavior right now
 What is actually true. What is at stake if it breaks. What could surface it (a rival, a paper trail, a deathbed). Foreshadowing hooks I can plant in stories before the reveal.
 ```
 
-## Playthrough goal
+## Playthrough premise
 
-Every playthrough has one overarching story it's telling — one sentence (sometimes a short paragraph) describing what this city's whole run is about. Examples:
+Every playthrough has one overarching story it's telling — one sentence (sometimes a short paragraph) describing what *shape* of story this city's run is going to take. Not a player goal (the gameplay goal is always "thriving city") — a narrative shape. Examples:
 
 - "Williamsburgh becomes a thriving mid-size city through hard-fought growth driven by a small circle of strong-willed people."
 - "Cedar Flats survives the climate retreat by reinventing itself as an inland tech hub."
 - "Port Haldane's old shipping money corrupts civic life until a generational reform movement breaks the cartel."
 
-It lives in `canon/playthrough-goal.md` as plain prose. The player sets it once during **Scaffold arrival** (or at session 1 for a fresh city). I use it to generate individual entity `arc:` values and the `secrets/` that create their friction.
+It lives in `canon/playthrough-premise.md` as plain prose. **I infer it; the player does not set it.** During `/new-city` (or during Scaffold arrival, as a backstop) I derive the premise silently from the chosen founding history, the map observations, and the city name — then I write it and surface the result to the player as a one-line summary. The player can ask me to revise it, or edit `canon/playthrough-premise.md` directly.
 
-**The player sets only the goal.** They do not set or confirm arcs — I infer arcs from the goal and established canon, write them, and show a one-line summary of what was assigned. The player can ask me to revise any arc afterward if they disagree. The goal is the only authorial question I ask during backfill.
+**Inference inputs, in priority order:**
+
+1. The chosen founding-history paragraph in `canon/city.md` — era, original economic engine, 20th-century trajectory (boom / decline / reinvention), region. This is the dominant signal.
+2. The map observations from `/new-city`'s map read — coastline vs. inland, mountain pass vs. open plain, sheltered bay vs. exposed coast. Drives which story shapes the geography supports.
+3. The chosen city name — sometimes carries tone (a founders' surname implies entrenched-money; a geographic-feature name implies a place-rooted story).
+
+**Inference heuristics** (writerly judgments, not a lookup table):
+
+- Postwar-decline industrial town → reinvention story.
+- Founding-wealth shipping/timber port → entrenched-money-vs-reform story.
+- Agricultural seat / rail junction → small-place-choosing-whether-to-grow story.
+- Recent boom-town setup → whiplash / displacement / identity-loss story.
+- Coastal city with climate exposure → retreat / adaptation story.
+
+Where multiple shapes fit, pick the one with the most narrative friction — the shape that gives arcs and secrets the most to do.
+
+I use the premise to generate individual entity `arc:` values and the `secrets/` that create their friction. Arcs and secrets are likewise inferred, not asked — I show a one-line summary of what was assigned and the player can revise after the fact.
 
 ## Arcs
 
 An **arc** is the authorial intent for a character, company, faction, or place — where the story should ultimately land. It is *not* in-world destiny; nobody inside the city feels predestined. It's a writer's-room bias I apply when proposing objectives, writing events, and resolving narrative ambiguity over many sessions.
 
-I derive arcs from the **playthrough goal** (above) and established canon — the player doesn't set them. I show a one-line summary of what was assigned and the player can ask me to revise any arc afterward.
+I derive arcs from the **playthrough premise** (above) and established canon — the player doesn't set them. I show a one-line summary of what was assigned and the player can ask me to revise any arc afterward.
 
 - **Outcome bends, it doesn't snap.** A character with `arc: ascends` will still face real setbacks, real losers, real costs. The arc only means that when I have a writer's choice between paths of roughly equal plausibility, I lean toward the outcome.
 - **Hard wins, not easy ones.** Arcs make the road harder, not softer. The eventual win has to feel earned.
 - **The story can continue past the arc.** An arc names how a thread *resolves*, not when the world ends. Annika succeeding doesn't mean the city stops.
 - **Arcs can be revised.** If play makes an arc implausible (the character died, the company was acquired), update or remove the `arc:` field — don't force the outcome.
 
-When a new major character/company/faction/place is created mid-play, I assign an `arc:` derived from the playthrough goal and current canon, write it to frontmatter, and note the assignment in one line. I don't pause to ask; the player can revise after the fact.
+When a new major character/company/faction/place is created mid-play, I assign an `arc:` derived from the playthrough premise and current canon, write it to frontmatter, and note the assignment in one line. I don't pause to ask; the player can revise after the fact.
 
 ## Secrets
 
@@ -258,7 +278,10 @@ Rules of use:
 
 - **Never quoted in public-facing artifacts** (news clippings, public character bios, public stories) while `hidden`. Allowed to surface as rumor when `suspected`. Freely used once `revealed`.
 - **Drive proposals and behavior.** When planning a session or writing a character's actions, I read `secrets/` and let what's hidden shape what they do. A character with a hidden debt is more reckless; a company with a buried safety report fights inspections harder.
-- **The player does not read `secrets/` by default.** That's the point — I generate them so the player experiences the consequences in-game without knowing the cause upfront. I never quote secret content in chat replies. If the player explicitly asks to see a particular secret, I can show it.
+- **Whether the player sees secret content is controlled by `secrets_visibility` in `settings.json`.** Two values:
+  - `hidden` (default) — I never quote unrevealed secret content in chat. The player experiences the consequences in-game without knowing the cause. If they explicitly ask to see a particular secret, I can show it.
+  - `shown` — I freely quote secret content in chat. The player sees the engine driving the city. Author / editor mode.
+  Either way, secrets are still generated, still `hidden` in-world to non-`known_to` characters, and still flip through the status lifecycle. The setting governs my chat behavior, not in-world knowledge. `/new-city` sets this; the player can edit `settings.json` later to change it.
 - **Reveals create events.** When a secret flips to `revealed`, I write the corresponding `events/` entry (the leak, the indictment, the deathbed confession) and update the implicated entity files. The secret file stays as the record of what was true.
 
 ## Style guide

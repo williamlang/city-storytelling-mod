@@ -50,7 +50,7 @@ Present via `AskUserQuestion` (single-select). For each option:
 
 Copy the screenshot to `maps/<slug>-overview.<ext>` where `<slug>` is the kebab-case city name (e.g. `port-haldane-overview.png`). Create `maps/` if it doesn't exist. Keep the original in the Steam screenshots folder — don't move it.
 
-**7. Write `canon/city.md`.**
+**7. Write `canon/city.md` and infer the playthrough premise.**
 
 Overwrite the scaffold `canon/city.md` with:
 
@@ -61,9 +61,31 @@ Overwrite the scaffold `canon/city.md` with:
 - `## What it is now` — leave a short stub: *"To be pinned at session 1: starting population, dominant industries today, major employers, the city's regional reputation."*
 - `## The defining tension at session 1` — leave a stub: *"To be set at session 1 — see `/session-start`."*
 
-Do **not** invent characters, companies, places, factions, or events here. This command only writes foundational geography and history. Everything else flows from `/session-start` and `/story-driven`.
+Then **infer the playthrough premise** silently from the chosen founding history, the map observations from step 3, and the chosen name. Write the resulting one-sentence (or short paragraph) premise to `canon/playthrough-premise.md` as plain prose. See the "Playthrough premise" section in CLAUDE.md for the inference inputs and heuristics. Do **not** ask the player to author it — surface the result in the hand-off (step 10), not before.
 
-**8. Create the city branch.**
+Do **not** invent characters, companies, places, factions, or events here. This command only writes the foundational geography, history, and inferred premise. Everything else flows from `/session-start` and `/story-driven`.
+
+**8. Ask about feature toggles.**
+
+Batch both toggles into a single `AskUserQuestion` call (one tool call, two questions):
+
+**Question 1** (header: "Secrets", single-select):
+- Question: "Should hidden secrets be visible to you, or kept blind until they break in-story?"
+- Option 1 (Recommended) — label: `Hidden (Recommended)`, description: "Secrets are generated and shape the story, but you never see their contents in chat until they're revealed in-world. Closer to playing blind."
+- Option 2 — label: `Shown`, description: "Same secrets get generated, but I freely show their contents to you. Author / editor mode — you see the engine driving the city."
+
+**Question 2** (header: "Level-up stories", single-select):
+- Question: "When the city levels up in-game (milestone advance + funds influx), should I generate a storyline about how the new money gets spent and fought over?"
+- Option 1 (Recommended) — label: `Enabled (Recommended)`, description: "On every milestone advance detected in the snapshot diff, I write an event + short narrative piece (council transcript, news clipping, developer memo) about who pushed for what spending, who lost out, the political fallout. Surfaces the story behind a moment the game otherwise treats silently."
+- Option 2 — label: `Disabled`, description: "Milestone advances are still recorded in the session log, but I don't generate dedicated stories. Use this if the storyline noise feels like too much."
+
+Map the answers to settings:
+- `secrets_visibility`: `"hidden"` or `"shown"`
+- `levelup_storylines`: `true` (Enabled) or `false` (Disabled)
+
+These get written to `settings.json` in the next step and are read on every session.
+
+**9. Create the city branch.**
 
 Run `git checkout -b city/<slug>` from `main`. Derive the CS2 mod output path from the standard install location:
 
@@ -71,22 +93,27 @@ Run `git checkout -b city/<slug>` from `main`. Derive the CS2 mod output path fr
 <USERPROFILE>/AppData/LocalLow/Colossal Order/Cities Skylines II/ModsData/CityStoryMod/<slug>/
 ```
 
-Write `settings.json` at the repo root using `settings.sample.json` as the shape, with `cs2_mod_output_dir` set to the resolved per-city path. Do not interactively ask for the path; derive it silently. The directory itself does not need to exist yet — the mod creates it on the first export after the player renames their save (see step 9). If the parent `CityStoryMod/` directory is missing on this machine, the mod isn't installed at the standard location — note this to the player in the hand-off so they know to edit `settings.json` manually.
+Write `settings.json` at the repo root using `settings.sample.json` as the shape, with:
+- `cs2_mod_output_dir` set to the resolved per-city path. Do not interactively ask for the path; derive it silently. The directory itself does not need to exist yet — the mod creates it on the first export after the player renames their save (see step 10). If the parent `CityStoryMod/` directory is missing on this machine, the mod isn't installed at the standard location — note this to the player in the hand-off so they know to edit `settings.json` manually.
+- `secrets_visibility` set to the secrets answer from step 8.
+- `levelup_storylines` set to the level-up-stories answer from step 8 (`true` for Enabled, `false` for Disabled).
 
 Then stage and commit:
 - `canon/city.md`
+- `canon/playthrough-premise.md`
 - `maps/<slug>-overview.<ext>`
 - `settings.json`
 
 Commit message: `Found <City Name> — initial canon and map`. Use the HEREDOC commit pattern with the `Co-Authored-By` line, matching repo style.
 
-**9. Hand off.**
+**10. Hand off.**
 
 Tell the player concretely:
 - The branch they're now on.
+- **The inferred playthrough premise** — quote the one-sentence premise verbatim and note that it lives in `canon/playthrough-premise.md`. Mention they can ask you to revise it (or edit the file directly) before session 1; everything else (arcs, secrets) flows from it.
 - **Rename their CS2 save to "`<City Name>`"** so the mod's future exports flow into `<USERPROFILE>/AppData/LocalLow/.../CityStoryMod/<slug>/`. Until this rename happens in-game, exports will keep landing under the placeholder name.
 - What's still TBD in `canon/city.md` (population, climate, defining tension).
-- That the next step is `/session-start` — it will detect the missing playthrough goal and run scaffold arrival (goal → arcs → secrets) before session 1.
+- That the next step is `/session-start` — first session 1 will pin the remaining `canon/city.md` stubs, and Scaffold arrival (arcs → secrets) runs as needed.
 - If the CS2 mod isn't installed at the standard location (parent `CityStoryMod/` is missing), tell them so and point at `settings.json` for manual adjustment.
 
 Do **not** run `/session-start` automatically. The player decides when to start the first session.
