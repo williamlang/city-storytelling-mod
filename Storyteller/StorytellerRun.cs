@@ -34,7 +34,9 @@ namespace CityStoryMod.Storyteller
                         break;
 
                     case LlmProvider.Gemini:
-                        return RunResult.Failed("Gemini provider not yet implemented (issue #9). Switch back to Anthropic.");
+                        conv = new GeminiConversation(s.ApiKey, s.Model, log);
+                        break;
+
                     case LlmProvider.Ollama:
                         return RunResult.Failed("Ollama provider not yet implemented (issue #10). Switch back to Anthropic.");
 
