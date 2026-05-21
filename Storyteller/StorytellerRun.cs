@@ -4,11 +4,11 @@ using Colossal.Logging;
 
 namespace CityStoryMod.Storyteller
 {
-    // Routes a run to the right provider's client based on Settings.Provider.
-    // Today only Anthropic is implemented; OpenAI / Gemini / Ollama land via
-    // their own issues (#8 / #9 / #10) — picking them currently fails the run
-    // cleanly with an explanatory message so the UX is obvious before the code
-    // is there.
+    // Routes a run to the right Conversation impl based on Settings.Provider,
+    // then hands it to the shared AgentLoop. Adding a new provider = adding a
+    // new Conversation subclass and a switch arm here; no other code changes.
+    // OpenAI / Gemini / Ollama land via #8 / #9 / #10 — picking them today
+    // fails the run cleanly with a pointer to the issue.
     public static class StorytellerRun
     {
         public static StorytellerDispatcher.RunFunc Build(string commandName, ILog log)
@@ -22,10 +22,12 @@ namespace CityStoryMod.Storyteller
                 if (string.IsNullOrEmpty(cityDir))
                     return RunResult.Failed("No exported city yet — trigger an export (Ctrl+Shift+E) first.");
 
+                Conversation conv;
                 switch (s.Provider)
                 {
                     case LlmProvider.Anthropic:
-                        return await AnthropicClient.Run(s.ApiKey, s.Model, cityDir, commandName, log, ct);
+                        conv = new AnthropicConversation(s.ApiKey, s.Model, log);
+                        break;
 
                     case LlmProvider.OpenAI:
                         return RunResult.Failed("OpenAI provider not yet implemented (issue #8). Switch back to Anthropic.");
@@ -37,6 +39,8 @@ namespace CityStoryMod.Storyteller
                     default:
                         return RunResult.Failed($"Unknown provider: {s.Provider}");
                 }
+
+                return await AgentLoop.RunAsync(conv, cityDir, commandName, log, ct);
             };
         }
     }
