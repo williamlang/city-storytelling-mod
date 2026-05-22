@@ -1,0 +1,4 @@
+{
+  "//": "Use the workspace's TypeScript (UI/node_modules/typescript) instead of VS Code's bundled version. The bundled TS is newer than the project's 4.8.4 and surfaces deprecation warnings for options (baseUrl, moduleResolution=node) that 4.8 still supports without complaint. CS2 mod ecosystem is generally pinned to TS 4.8 because the cs2/* .d.ts files use syntax (double `export export`) that newer TS may reject — see UI/types/. Match the IDE's TS to the project's TS so warnings stay consistent with what actually runs at build time.",
+  "typescript.tsdk": "UI/node_modules/typescript/lib"
+}
