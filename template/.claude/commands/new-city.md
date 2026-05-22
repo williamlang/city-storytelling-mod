@@ -1,5 +1,6 @@
 ---
 description: Bootstrap a new city — name, founding history, map, inferred premise
+order: 10
 ---
 
 Start a new playthrough. By the end, this city folder has `canon/city.md` and `canon/playthrough-premise.md` populated enough that `/session-start` can take over.

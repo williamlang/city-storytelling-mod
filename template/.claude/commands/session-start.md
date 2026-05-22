@@ -1,5 +1,6 @@
 ---
 description: Open a session — state scan + checklist of opening tasks
+order: 20
 ---
 
 Run the session-start checklist for this city.

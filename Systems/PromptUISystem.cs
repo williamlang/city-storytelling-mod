@@ -257,17 +257,30 @@ namespace CityStoryMod.Systems
                 if (!IsCommandApplicable(name, settings)) continue;
 
                 string description = null;
+                int order = int.MaxValue;
                 try
                 {
-                    description = TextUtils.GetFrontmatterField(File.ReadAllText(path), "description");
+                    string content = File.ReadAllText(path);
+                    description = TextUtils.GetFrontmatterField(content, "description");
+                    string orderRaw = TextUtils.GetFrontmatterField(content, "order");
+                    if (!string.IsNullOrEmpty(orderRaw) && int.TryParse(orderRaw, out int parsed))
+                        order = parsed;
                 }
                 catch (Exception ex)
                 {
                     _log.Warn($"PromptUISystem: failed to read command file {path}: {ex.Message}");
                 }
-                commands.Add(new SlashCommand { name = name, description = description ?? "" });
+                commands.Add(new SlashCommand { name = name, description = description ?? "", order = order });
             }
-            commands.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+            // Primary sort: `order:` frontmatter ascending (commands declare
+            // their own position). Fallback: alphabetical name for commands
+            // that omit the field, so they don't bunch arbitrarily at the
+            // tail when order ties.
+            commands.Sort((a, b) =>
+            {
+                int c = a.order.CompareTo(b.order);
+                return c != 0 ? c : string.CompareOrdinal(a.name, b.name);
+            });
             return JsonConvert.SerializeObject(commands);
         }
 
@@ -320,5 +333,6 @@ namespace CityStoryMod.Systems
     {
         public string name;        // filename stem, e.g. "story-driven"
         public string description; // `description:` frontmatter field, or ""
+        public int order;          // `order:` frontmatter field, or int.MaxValue when missing
     }
 }

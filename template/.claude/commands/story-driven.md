@@ -1,5 +1,6 @@
 ---
 description: Generate concrete story-driven gameplay choices with for/against framing
+order: 30
 ---
 
 Produce 3–5 story-driven choices the player can act on in-game.

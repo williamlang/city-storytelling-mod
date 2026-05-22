@@ -1,5 +1,6 @@
 ---
 description: Close a session — record what happened, propagate consequences, mark the session file closed
+order: 40
 ---
 
 Run the session-end checklist.

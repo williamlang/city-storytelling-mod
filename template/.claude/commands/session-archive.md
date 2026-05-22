@@ -1,5 +1,6 @@
 ---
 description: Compress old session files into monthly summaries to bound canon growth
+order: 50
 ---
 
 Compress sessions older than ~2 in-world months into monthly archive summaries so the agent doesn't re-read the full playthrough log on every run.
