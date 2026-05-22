@@ -1,32 +1,43 @@
-// Storyteller prompt window styling. Hand-rolled (not pulling in vanilla CS2
-// classes yet) so the panel works without needing the VanillaComponentResolver
-// pattern. When we want it to truly match the game chrome we can swap these
-// rules for the vanilla panel/button classes via moduleRegistry.find.
+// Storyteller toolbar icon + dropdown panel. Hand-rolled styling rather than
+// extending vanilla CS2 component classes — easier to iterate on. Swap for
+// VanillaComponentResolver-extracted classes when we want pixel-perfect chrome
+// match.
 
-.toggle {
-  position: fixed;
-  top: 80rem;
-  right: 16rem;
-  z-index: 9000;
-  padding: 6rem 14rem;
-  background: rgba(20, 28, 36, 0.85);
+.toolbarIcon {
+  // Sized to slot in alongside CS2's other top-left toolbar icons. CS2 uses
+  // rem as its scaling unit; ~40rem matches the rendered icon row visually.
+  width: 40rem;
+  height: 40rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 28, 36, 0.6);
   color: #e6eef7;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 999rem;
-  font-size: 14rem;
+  border-radius: 6rem;
   cursor: pointer;
+  padding: 0;
+  margin: 0 2rem;
 
   &:hover {
-    background: rgba(40, 56, 72, 0.95);
+    background: rgba(40, 56, 72, 0.85);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  svg {
+    width: 22rem;
+    height: 22rem;
   }
 }
 
 .panel {
+  // Drops below the toolbar icon row. Fixed position so it floats above the
+  // game world; the exact top offset matches the toolbar row height plus a gap.
   position: fixed;
-  top: 80rem;
-  right: 16rem;
+  top: 60rem;
+  left: 8rem;
   z-index: 9000;
-  width: 340rem;
+  width: 360rem;
   background: rgba(15, 22, 30, 0.95);
   color: #e6eef7;
   border: 1px solid rgba(255, 255, 255, 0.15);

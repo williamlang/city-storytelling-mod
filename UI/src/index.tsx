@@ -1,15 +1,15 @@
 import { ModRegistrar } from "cs2/modding";
 import mod from "../mod.json";
-import { PromptWindow } from "mods/promptWindow/PromptWindow";
+import { StorytellerToolbar } from "mods/promptWindow/PromptWindow";
 
-// Single registration: append the prompt window to the in-game UI root. CS2
-// renders this as a sibling of the vanilla game UI; layout is controlled by
-// the component's own CSS (fixed-position by default).
+// Mount our toolbar entry in the top-left icon row alongside other tool mods
+// (Zoning Toolkit, etc.). GameTopLeft is one of CS2's append hook targets;
+// the icon click toggles the panel rendered as a sibling in the same slot.
 //
-// To find injection points in CS2's own UI tree, launch the game with the
-// -uiDeveloperMode launch option and inspect the registry at localhost:9444.
+// To explore CS2's UI module registry for other injection points, launch the
+// game with -uiDeveloperMode and inspect at localhost:9444.
 const register: ModRegistrar = (moduleRegistry) => {
-  moduleRegistry.append("Game", PromptWindow);
+  moduleRegistry.append("GameTopLeft", StorytellerToolbar);
   console.log(`${mod.id} UI module registered.`);
 };
 
