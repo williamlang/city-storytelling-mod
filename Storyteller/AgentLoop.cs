@@ -87,10 +87,15 @@ namespace CityStoryMod.Storyteller
                     results.Add(new ToolResult { ToolUseId = call.Id, Content = content, IsError = isError });
                 }
 
+                LogToolCalls(log, hop, turn.ToolCalls);
                 conv.NotifyToolResults(results);
                 turn = await conv.SendToolResults(results, ct);
                 LogHop(log, hop + 1, turn.Usage);
             }
+            // Log any final-turn tool calls too (rare — usually a final
+            // turn is pure text, but the model can request tools then stop).
+            if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
+                LogToolCalls(log, hop, turn.ToolCalls);
 
             // Token totals come straight from the conversation — each provider's
             // BuildTurn() call accumulates into conv.TotalUsage, so we don't sum
@@ -111,6 +116,45 @@ namespace CityStoryMod.Storyteller
         static void LogHop(ILog log, int hop, TokenUsage u)
         {
             log.Info($"Hop {hop}: input={u.InputTokens} (cache read={u.CacheReadTokens}, write={u.CacheWriteTokens}), output={u.OutputTokens}");
+        }
+
+        // Summarizes each tool call in `name(input-preview)` form so the log
+        // shows what the model is actually doing without dumping full tool
+        // result payloads. Kept on a separate line per hop so it's easy to
+        // grep for tool-call patterns across runs.
+        static void LogToolCalls(ILog log, int hop, System.Collections.Generic.IReadOnlyList<ToolCall> calls)
+        {
+            if (calls == null || calls.Count == 0) return;
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < calls.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(calls[i].Name);
+                string preview = PreviewInput(calls[i].Input);
+                if (preview != null) sb.Append('(').Append(preview).Append(')');
+            }
+            log.Info($"Hop {hop} tools: {sb}");
+        }
+
+        // First scalar field of the tool input, truncated. Keeps the log
+        // single-line — most tools have a `path` or `query` first arg that's
+        // the useful identifier.
+        static string PreviewInput(Newtonsoft.Json.Linq.JObject input)
+        {
+            if (input == null) return null;
+            foreach (var prop in input.Properties())
+            {
+                if (prop.Value.Type == Newtonsoft.Json.Linq.JTokenType.String
+                    || prop.Value.Type == Newtonsoft.Json.Linq.JTokenType.Integer
+                    || prop.Value.Type == Newtonsoft.Json.Linq.JTokenType.Float
+                    || prop.Value.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+                {
+                    string val = prop.Value.ToString();
+                    if (val.Length > 60) val = val.Substring(0, 57) + "…";
+                    return $"{prop.Name}={val}";
+                }
+            }
+            return null;
         }
 
         static string DescribeLatestSnapshot(string cityDirFull)

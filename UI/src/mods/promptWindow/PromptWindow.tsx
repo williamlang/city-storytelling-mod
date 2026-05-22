@@ -133,17 +133,12 @@ export function StorytellerToolbar() {
 }
 
 function ChatRow({ msg }: { msg: ChatMessage }) {
-  const roleClass =
-    msg.role === "user" ? styles.userRow
-    : msg.role === "assistant" ? styles.assistantRow
-    : styles.toolRow;
-  const isToolError = msg.role === "tool" && msg.isError;
+  const roleClass = msg.role === "user" ? styles.userRow : styles.assistantRow;
   return (
-    <div className={`${styles.row} ${roleClass} ${isToolError ? styles.errorRow : ""}`}>
+    <div className={`${styles.row} ${roleClass}`}>
       <span className={styles.role}>{msg.role}</span>
       <div className={styles.body}>
-        {msg.text && <div className={styles.text}>{msg.text}</div>}
-        {msg.toolCalls && <div className={styles.toolCalls}>↳ {msg.toolCalls}</div>}
+        <div className={styles.text}>{msg.text}</div>
       </div>
     </div>
   );

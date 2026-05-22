@@ -12,12 +12,12 @@ export const tokenSummaryBinding = bindValue<string>(GROUP, "tokenSummary", "");
 export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
-// match the JsonConvert.SerializeObject output from C#).
+// match the JsonConvert.SerializeObject output from C#). Tool calls / tool
+// results are intentionally NOT in the wire — the C# side drops them so the
+// chat shows only the prose conversation.
 export interface ChatMessage {
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant";
   text: string;
-  toolCalls?: string;
-  isError?: boolean;
 }
 
 export function submitPrompt(prompt: string) {

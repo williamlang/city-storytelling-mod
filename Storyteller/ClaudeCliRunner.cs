@@ -247,6 +247,7 @@ namespace CityStoryMod.Storyteller
                         RequiresToolResponse = calls.Count > 0,
                         Usage = usage,
                     };
+                    if (calls.Count > 0) LogToolCalls(log, calls);
                     dispatcher?.EmitAssistantTurn(turn);
                     return usage;
                 }
@@ -309,6 +310,39 @@ namespace CityStoryMod.Storyteller
                 return sb.ToString();
             }
             return contentToken.ToString();
+        }
+
+        // name(field=value) per tool call, one log line per assistant turn.
+        // Same shape as AgentLoop.LogToolCalls so log greps catch both paths.
+        static void LogToolCalls(ILog log, List<ToolCall> calls)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < calls.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(calls[i].Name);
+                string preview = PreviewInput(calls[i].Input);
+                if (preview != null) sb.Append('(').Append(preview).Append(')');
+            }
+            log.Info($"CLI tools: {sb}");
+        }
+
+        static string PreviewInput(JObject input)
+        {
+            if (input == null) return null;
+            foreach (var prop in input.Properties())
+            {
+                if (prop.Value.Type == JTokenType.String
+                    || prop.Value.Type == JTokenType.Integer
+                    || prop.Value.Type == JTokenType.Float
+                    || prop.Value.Type == JTokenType.Boolean)
+                {
+                    string val = prop.Value.ToString();
+                    if (val.Length > 60) val = val.Substring(0, 57) + "…";
+                    return $"{prop.Name}={val}";
+                }
+            }
+            return null;
         }
 
         static TokenUsage ParseAnthropicUsage(JObject u)

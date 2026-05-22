@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Text;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.UI.Binding;
@@ -92,27 +91,29 @@ namespace CityStoryMod.Systems
 
         void OnAssistantTurn(AssistantTurn turn)
         {
-            _pendingMessages.Enqueue(new ChatMessage
+            // Token totals always accumulate; only enqueue a chat row when the
+            // model actually said something. Pure tool-use turns (no prose)
+            // would otherwise show as empty bubbles and the file-system tool
+            // chatter is noise the player doesn't care about.
+            if (!string.IsNullOrWhiteSpace(turn.TextContent))
             {
-                role = "assistant",
-                text = turn.TextContent,
-                toolCalls = SummarizeToolCalls(turn.ToolCalls),
-            });
+                _pendingMessages.Enqueue(new ChatMessage
+                {
+                    role = "assistant",
+                    text = turn.TextContent,
+                });
+            }
             _liveUsage = _liveUsage + turn.Usage;
             _pendingUsageUpdate = true;
         }
 
+        // Tool results are intentionally not surfaced into the chat — they
+        // contain glob output, file contents, and other internal tool chatter
+        // that clutters the conversation view. The event handler is kept (and
+        // wired) so future features (e.g. a separate "activity" pane) can
+        // observe them without a Conversation refactor.
         void OnToolResults(IReadOnlyList<ToolResult> results)
         {
-            foreach (ToolResult r in results)
-            {
-                _pendingMessages.Enqueue(new ChatMessage
-                {
-                    role = "tool",
-                    text = TruncateText(r.Content, 500),
-                    isError = r.IsError,
-                });
-            }
         }
 
         void OnRunFinished(RunResult result)
@@ -205,24 +206,6 @@ namespace CityStoryMod.Systems
             return s;
         }
 
-        static string SummarizeToolCalls(IReadOnlyList<ToolCall> calls)
-        {
-            if (calls == null || calls.Count == 0) return null;
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < calls.Count; i++)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(calls[i].Name);
-            }
-            return sb.ToString();
-        }
-
-        static string TruncateText(string s, int max)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            if (s.Length <= max) return s;
-            return s.Substring(0, max) + "…";
-        }
     }
 
     // Wire-format for a chat message — serialized to JSON for the React UI.
@@ -230,9 +213,7 @@ namespace CityStoryMod.Systems
     [Serializable]
     public class ChatMessage
     {
-        public string role;        // "user" | "assistant" | "tool"
+        public string role;   // "user" | "assistant"
         public string text;
-        public string toolCalls;   // comma-separated tool names, when role=assistant
-        public bool isError;       // tool-result error indicator, when role=tool
     }
 }
