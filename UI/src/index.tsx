@@ -1,6 +1,6 @@
 import { ModRegistrar } from "cs2/modding";
 import mod from "../mod.json";
-import { StorytellerToolbar } from "mods/promptWindow/PromptWindow";
+import { StorytellerToolbar } from "./mods/promptWindow/PromptWindow";
 
 // Mount our toolbar entry in the top-left icon row alongside other tool mods
 // (Zoning Toolkit, etc.). GameTopLeft is one of CS2's append hook targets;

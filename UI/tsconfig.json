@@ -1,19 +1,19 @@
 {
   "compilerOptions": {
-    "jsx":"react-jsx",
+    "jsx": "react-jsx",
     "target": "ESNext",
     "module": "ESNext",
+    // TS 4.8 still calls this "Node" (renamed to "Node10" in TS 5+, deprecated
+    // in TS 6+). The CS2 modding ecosystem is pinned to TS 4.8 because the
+    // cs2/* .d.ts files use non-standard `export export` syntax that newer TS
+    // may reject. Keep "Node" until we upgrade.
     "moduleResolution": "Node",
     "isolatedModules": true,
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": "src",
     "skipLibCheck": true,
     "typeRoots": ["./types"],
-    "resolveJsonModule": true,
-    "paths": {
-      "mod.json": ["../mod.json"]
-    }
-  },
-} 
+    "resolveJsonModule": true
+  }
+}
