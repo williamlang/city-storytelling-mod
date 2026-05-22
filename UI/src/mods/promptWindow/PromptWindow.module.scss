@@ -227,6 +227,10 @@
   display: flex;
   align-items: center;
   gap: 8rem;
+  // Extra breathing room above the footer so the textarea isn't crowded
+  // against the buttons. Stacks with the panel's own `gap: 8rem` between
+  // children.
+  margin-top: 8rem;
 }
 
 .status {

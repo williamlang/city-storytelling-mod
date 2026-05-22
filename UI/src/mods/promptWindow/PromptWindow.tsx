@@ -170,6 +170,9 @@ export function StorytellerToolbar() {
           />
 
           <div className={styles.footer}>
+            <span className={styles.status}>
+              {tokenSummary || (isRunning ? "Running…" : "Idle")}
+            </span>
             <CommandMenu
               commands={commands}
               open={commandMenuOpen}
@@ -177,9 +180,6 @@ export function StorytellerToolbar() {
               onToggle={() => setCommandMenuOpen((v) => !v)}
               onPick={runCommand}
             />
-            <span className={styles.status}>
-              {tokenSummary || (isRunning ? "Running…" : "Idle")}
-            </span>
             {isRunning ? (
               <button
                 type="button"
