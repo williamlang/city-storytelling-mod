@@ -3,36 +3,11 @@
 // VanillaComponentResolver-extracted classes when we want pixel-perfect chrome
 // match.
 
+// Only the SVG sizing matters here — the blue circle background and hover
+// states come from vanilla CS2's `Button variant="floating"`.
 .toolbarIcon {
-  // Sized + colored to slot in alongside CS2's other top-left toolbar icons.
-  // Solid sky-blue circle with a white glyph matches the look of Zoning Toolkit,
-  // Anarchy, and the other tool-icon mods in that row. CS2 uses rem as its
-  // scaling unit.
   width: 40rem;
   height: 40rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #4ea3df;
-  color: #ffffff;
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  margin: 0 2rem;
-
-  &:hover {
-    background: #6cb5e6;
-  }
-
-  &:active {
-    background: #3d8cc5;
-  }
-
-  svg {
-    width: 22rem;
-    height: 22rem;
-  }
 }
 
 .panel {

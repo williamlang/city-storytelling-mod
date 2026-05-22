@@ -1,13 +1,17 @@
 import { useState } from "react";
+import { Button } from "cs2/ui";
+import storytellerIcon from "../../assets/storyteller_icon.svg";
 import styles from "./PromptWindow.module.scss";
 
-// Top-left toolbar entry. Sits in the same row as Zoning Toolkit / other
-// tool-icon mods (CS2's GameTopLeft append target). Click toggles the prompt
-// panel as a sibling below the icon.
+// Storyteller toolbar entry. Built on CS2's vanilla `Button` with
+// variant="floating" — this is the same component (and styling) used by
+// Zoning Toolkit, Anarchy, etc., so the icon picks up the canonical blue
+// circle / white glyph chrome automatically and stays in sync with any
+// CS2 theme update.
 //
-// No C# bindings yet — the Run button only console.logs. Wiring up the
-// engine.trigger call to a Systems/PromptUISystem trigger binding lands in
-// the next commit.
+// SVG icon is bundled by webpack's asset/resource rule and referenced as
+// a coui:// URL at runtime. White strokes/fills on a transparent
+// background let it sit naturally on the floating-button blue.
 export function StorytellerToolbar() {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -19,22 +23,13 @@ export function StorytellerToolbar() {
 
   return (
     <>
-      <button
-        type="button"
-        className={styles.toolbarIcon}
-        title="Storyteller"
-        aria-label="Storyteller"
+      <Button
+        variant="floating"
         onClick={() => setOpen((v) => !v)}
+        aria-label="Storyteller"
       >
-        {/* Inline SVG so we don't need an asset pipeline. A scroll/quill icon
-            sized to match the other top-left toolbar entries. */}
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-          <path
-            fill="currentColor"
-            d="M5 3h11l3 3v15a0 0 0 0 1 0 0H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v14h12V7h-3V5H5zm2 4h8v2H7V9zm0 4h8v2H7v-2zm0 4h5v2H7v-2z"
-          />
-        </svg>
-      </button>
+        <img src={storytellerIcon} className={styles.toolbarIcon} alt="" />
+      </Button>
 
       {open && (
         <div className={styles.panel}>
