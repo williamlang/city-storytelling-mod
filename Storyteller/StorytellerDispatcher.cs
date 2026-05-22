@@ -63,6 +63,13 @@ namespace CityStoryMod.Storyteller
         void ForwardAssistantTurn(AssistantTurn turn) => AssistantTurn?.Invoke(turn);
         void ForwardToolResults(IReadOnlyList<ToolResult> results) => ToolResults?.Invoke(results);
 
+        // Direct event-emission for run paths that don't drive a Conversation
+        // (e.g. ClaudeCliRunner parsing the CLI's --output-format stream-json
+        // output and synthesizing turns from the JSONL stream). Same wire as
+        // ForwardAssistantTurn / ForwardToolResults but callable from outside.
+        public void EmitAssistantTurn(AssistantTurn turn) => AssistantTurn?.Invoke(turn);
+        public void EmitToolResults(IReadOnlyList<ToolResult> results) => ToolResults?.Invoke(results);
+
         public bool Start(string runName, RunFunc func)
         {
             if (IsRunning)
