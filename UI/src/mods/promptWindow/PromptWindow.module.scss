@@ -4,24 +4,29 @@
 // match.
 
 .toolbarIcon {
-  // Sized to slot in alongside CS2's other top-left toolbar icons. CS2 uses
-  // rem as its scaling unit; ~40rem matches the rendered icon row visually.
+  // Sized + colored to slot in alongside CS2's other top-left toolbar icons.
+  // Solid sky-blue circle with a white glyph matches the look of Zoning Toolkit,
+  // Anarchy, and the other tool-icon mods in that row. CS2 uses rem as its
+  // scaling unit.
   width: 40rem;
   height: 40rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(20, 28, 36, 0.6);
-  color: #e6eef7;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6rem;
+  background: #4ea3df;
+  color: #ffffff;
+  border: 0;
+  border-radius: 50%;
   cursor: pointer;
   padding: 0;
   margin: 0 2rem;
 
   &:hover {
-    background: rgba(40, 56, 72, 0.85);
-    border-color: rgba(255, 255, 255, 0.3);
+    background: #6cb5e6;
+  }
+
+  &:active {
+    background: #3d8cc5;
   }
 
   svg {
