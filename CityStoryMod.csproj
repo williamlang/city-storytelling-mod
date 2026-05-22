@@ -108,9 +108,9 @@
 
     AfterTargets="DeployWIP" so we run only after the C# deploy has placed the
     .dll. NeedBuild condition matches the rest of Mod.targets (skips in
-    `dotnet build --no-build` / restore-only flows). ContinueOnError so a
-    missing node/npm on a developer machine fails loud in the log but doesn't
-    kill the C# build itself.
+    restore-only and no-build flows). ContinueOnError so a missing node/npm
+    on a developer machine fails loud in the log but doesn't kill the C#
+    build itself.
   -->
   <Target Name="RestoreUIBundle" AfterTargets="DeployWIP" Condition="'$(NeedBuild)' == 'true'">
     <Message Importance="high" Text="Restoring UI bundle: npm run build (UI/)" />
