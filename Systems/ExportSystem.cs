@@ -5,12 +5,10 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using CityStoryMod.Storyteller;
-using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
 using Colossal.PSI.Environment;
 using Game;
 using Game.Areas;
-using Game.Assets;
 using Game.Buildings;
 using Game.Citizens;
 using Game.City;
@@ -247,73 +245,6 @@ namespace CityStoryMod.Systems
 
         const string SchemaVersion = "0.1";
 
-        // Walks AssetDatabase.global for SaveGameMetadata whose underlying SaveInfo
-        // has a matching cityName, and sets Mod.ActiveSaveId to the picked id. Picks
-        // the most-recently-modified candidate when more than one save exists for the
-        // city — the active save is the one whose mtime advances when the player saves.
-        //
-        // Logs every candidate the first time it runs per session so the player can
-        // verify which SaveInfo field is stable (id vs. sessionGuid vs. uri) against
-        // real save files. Subsequent resolutions log only the chosen one.
-        //
-        // Returns true if a candidate was found; false leaves ActiveSaveId untouched
-        // (caller falls back to the city-name slug).
-        void RefreshActiveSaveId(string cityName)
-        {
-            if (string.IsNullOrEmpty(cityName)) return;
-
-            SaveGameMetadata best = null;
-            SaveInfo bestInfo = null;
-            int matchCount = 0;
-            foreach (var meta in AssetDatabase.global.AllAssets().OfType<SaveGameMetadata>())
-            {
-                SaveInfo info = meta.target;
-                if (info == null) continue;
-                if (!string.Equals(info.cityName, cityName, StringComparison.OrdinalIgnoreCase)) continue;
-                matchCount++;
-                if (!_saveCandidatesDumped)
-                {
-                    _log.Info(
-                        $"[save-id-candidate] cityName='{info.cityName}' "
-                        + $"id='{info.id}' sessionGuid={info.sessionGuid:N} "
-                        + $"path='{info.path}' uri='{meta.uri}' "
-                        + $"lastModified={info.lastModified:yyyy-MM-ddTHH:mm:ssZ} "
-                        + $"state={meta.state}");
-                }
-                if (bestInfo == null || info.lastModified > bestInfo.lastModified)
-                {
-                    best = meta;
-                    bestInfo = info;
-                }
-            }
-            _saveCandidatesDumped = true;
-
-            if (bestInfo == null)
-            {
-                _log.Info($"[save-id] no SaveGameMetadata matched cityName='{cityName}'; falling back to city-name slug");
-                return;
-            }
-
-            string picked =
-                !string.IsNullOrEmpty(bestInfo.id) ? bestInfo.id
-                : (bestInfo.sessionGuid != Guid.Empty ? bestInfo.sessionGuid.ToString("N")
-                : null);
-
-            if (string.IsNullOrEmpty(picked))
-            {
-                _log.Warn($"[save-id] matched SaveInfo for '{cityName}' but both id and sessionGuid are empty; falling back to city-name slug");
-                return;
-            }
-
-            Mod.ActiveSaveId = picked;
-            _log.Info($"[save-id] cityName='{cityName}' matches={matchCount} picked='{picked}' (uri='{best.uri}')");
-        }
-
-        // One-shot guard for the verbose per-candidate dump in RefreshActiveSaveId.
-        // Flipped true after the first resolution attempt this session so we don't
-        // spam the log on every interval/hotkey export.
-        bool _saveCandidatesDumped;
-
         void Export(string triggeredBy)
         {
             // OnUpdate's gate guarantees inGame + cityReady when we get here.
@@ -327,14 +258,6 @@ namespace CityStoryMod.Systems
             int citizensTotal = _citizenQuery.CalculateEntityCount();
             string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
             string ingameDate = _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd");
-
-            // Resolve stable per-save id on save-load (or any export where we don't
-            // already have one). Cached for the rest of the session — hotkey/interval
-            // exports reuse without re-walking AssetDatabase.
-            if (triggeredBy == "save-load" || string.IsNullOrEmpty(Mod.ActiveSaveId))
-            {
-                RefreshActiveSaveId(cityName);
-            }
 
             long? money = _playerMoneyField != null
                 ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
@@ -447,10 +370,11 @@ namespace CityStoryMod.Systems
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
-            // Prefer the stable per-save id resolved by RefreshActiveSaveId from
-            // AssetDatabase. Falls back to city-name slug for the brief window between
-            // starting a new city and its first save (no SaveGameMetadata yet exists).
-            string citySlug = TextUtils.Slugify(Mod.ActiveSaveId) ?? TextUtils.Slugify(cityName) ?? "_unnamed";
+            // One city = one folder, even across multiple saves of that city. The
+            // canon evolves with the city's lived history; different .cok save files
+            // are checkpoints of the same world, not parallel timelines. Per-save
+            // story branching is tracked as a future feature (see GitHub issues).
+            string citySlug = TextUtils.Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
             EnsureCityScaffolded(dir);

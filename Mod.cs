@@ -29,16 +29,6 @@ namespace CityStoryMod
         public static string SessionId { get; private set; }
         public static DateTime SessionStartedAtUtc { get; private set; }
 
-        // Stable per-save identifier resolved from SaveGameMetadata in AssetDatabase.
-        // Set by ExportSystem on the save-load transition (when ECS first reports a
-        // ready City singleton). Null on a fresh new city before any save exists —
-        // ExportSystem falls back to the city-name slug in that window.
-        //
-        // Why not subscribed via GameManager.onGameSaveLoad: that event is declared on
-        // GameManager but never actually invoked anywhere in Game.dll (verified by IL
-        // scan). Resolution happens synchronously in ExportSystem instead.
-        public static string ActiveSaveId { get; set; }
-
         public void OnLoad(UpdateSystem updateSystem)
         {
             SessionStartedAtUtc = DateTime.UtcNow;
