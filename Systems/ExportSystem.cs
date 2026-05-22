@@ -369,12 +369,11 @@ namespace CityStoryMod.Systems
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
-            // TODO: prefer a stable save GUID (Game.Assets.SaveGameMetadata / SaveInfo)
-            // as the slug source once verified on Windows with ILSpy. City-name slug
-            // assumes "1 save per city" — collisions across multiple Springfield saves
-            // need the GUID upgrade. Data layout (per-city dir under ModsData) is
-            // unchanged when that swap happens.
-            string citySlug = Slugify(cityName) ?? "_unnamed";
+            // Prefer the stable per-save id captured by Mod.OnGameSaveLoad — survives
+            // saves of the same city under different names. Falls back to a city-name
+            // slug only for the brief window between starting a new city and the first
+            // save (when no SaveInfo exists yet).
+            string citySlug = Slugify(Mod.ActiveSaveId) ?? Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
             EnsureCityScaffolded(dir);
