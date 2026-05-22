@@ -45,30 +45,6 @@ namespace CityStoryMod
             return !string.IsNullOrEmpty(val);
         }
 
-        // Returns the comma-separated entries of `<key>:` from the leading
-        // YAML frontmatter block, with each entry trimmed and empty entries
-        // dropped. Returns an empty array (never null) when the key is
-        // missing, empty, or the content has no frontmatter. Useful for
-        // declarative "list of files/dirs" frontmatter fields like
-        // `hide_when_exists: a.md, b.md`.
-        public static string[] GetFrontmatterFieldList(string content, string key)
-        {
-            string raw = GetFrontmatterField(content, key);
-            if (string.IsNullOrEmpty(raw)) return new string[0];
-            string[] parts = raw.Split(',');
-            int n = 0;
-            for (int i = 0; i < parts.Length; i++)
-            {
-                string p = parts[i].Trim();
-                if (p.Length == 0) continue;
-                parts[n++] = p;
-            }
-            if (n == parts.Length) return parts;
-            string[] trimmed = new string[n];
-            Array.Copy(parts, trimmed, n);
-            return trimmed;
-        }
-
         // Returns the value of `<key>:` from the leading YAML frontmatter
         // block of `content`, or null if the key is missing / empty / the
         // content has no frontmatter. Treats whatever is between the first

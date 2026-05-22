@@ -1,5 +1,6 @@
 {
   "cs2_mod_output_dir": "C:/path/to/your/cs2/mod/output",
   "secrets_visibility": "hidden",
-  "levelup_storylines": true
+  "levelup_storylines": true,
+  "bootstrapped": false
 }

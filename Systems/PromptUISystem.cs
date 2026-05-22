@@ -2,13 +2,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.UI.Binding;
 using Game;
 using Game.UI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CityStoryMod.Systems
 {
@@ -234,76 +234,75 @@ namespace CityStoryMod.Systems
         }
 
         // Walks <cityDir>/.claude/commands/*.md, extracts (name, description)
-        // for each, filters out commands that don't apply to the current state
-        // of the city dir per their own frontmatter rules, returns a JSON
-        // array sorted alphabetically by name. Returns "[]" when the dir
-        // doesn't exist (no city exported yet).
+        // for each, applies the per-command applicability rule, returns a
+        // JSON array sorted alphabetically by name. Returns "[]" when the
+        // commands dir doesn't exist (no city exported yet).
         //
-        // Applicability rules live in each command file's YAML frontmatter:
-        //   hide_when_exists: <comma-separated paths relative to city dir>
-        //     — hide when any of those files exist
-        //   hide_when_dir_nonempty: <comma-separated dirs relative to city dir>
-        //     — hide when any of those dirs contains any file
-        //
-        // Declarative-in-the-command-file lets each command own its own
-        // visibility — no central hardcoded registry. Re-scans after every
-        // storyteller run so newly-written marker files take effect on the
-        // next tick.
+        // Re-scans on every dispatcher RunFinished so flags set by the run
+        // (e.g. /new-city flipping settings.bootstrapped) take effect on
+        // the next tick.
         static string ScanAvailableCommands(string cityDir)
         {
             if (string.IsNullOrEmpty(cityDir)) return "[]";
             string commandsDir = Path.Combine(cityDir, ".claude", "commands");
             if (!Directory.Exists(commandsDir)) return "[]";
 
+            JObject settings = ReadCitySettings(cityDir);
+
             var commands = new List<SlashCommand>();
             foreach (string path in Directory.GetFiles(commandsDir, "*.md"))
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 if (string.IsNullOrEmpty(name)) continue;
+                if (!IsCommandApplicable(name, settings)) continue;
 
-                string content;
-                try { content = File.ReadAllText(path); }
+                string description = null;
+                try
+                {
+                    description = TextUtils.GetFrontmatterField(File.ReadAllText(path), "description");
+                }
                 catch (Exception ex)
                 {
                     _log.Warn($"PromptUISystem: failed to read command file {path}: {ex.Message}");
-                    continue;
                 }
-
-                if (!IsCommandApplicable(content, cityDir)) continue;
-
-                string description = TextUtils.GetFrontmatterField(content, "description") ?? "";
-                commands.Add(new SlashCommand { name = name, description = description });
+                commands.Add(new SlashCommand { name = name, description = description ?? "" });
             }
             commands.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             return JsonConvert.SerializeObject(commands);
         }
 
-        // Evaluates a command file's hide_when_* frontmatter against the
-        // current city dir filesystem state. Returns false (hide) when any
-        // listed path under hide_when_exists exists or any listed dir under
-        // hide_when_dir_nonempty has at least one file. Returns true (show)
-        // when no rules are declared or all rules pass.
+        // Per-command applicability rules driven by per-city settings.json
+        // flags (see template/CLAUDE.md → City settings). Hardcoded because
+        // the ruleset is small; revisit if it grows beyond a few commands.
         //
-        // Paths in frontmatter are relative to cityDir. Forward slashes work
-        // even on Windows because Path.Combine normalizes separators.
-        static bool IsCommandApplicable(string commandFileContent, string cityDir)
+        //   /new-city  → hide when settings.bootstrapped is true. /new-city
+        //                flips that flag to true at the end of its own run,
+        //                so it disappears from the toolbar after running.
+        static bool IsCommandApplicable(string name, JObject settings)
         {
-            string[] hideWhenExists = TextUtils.GetFrontmatterFieldList(commandFileContent, "hide_when_exists");
-            foreach (string rel in hideWhenExists)
+            switch (name)
             {
-                string full = Path.Combine(cityDir, rel.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(full)) return false;
+                case "new-city":
+                    return !(settings?["bootstrapped"]?.Value<bool?>() ?? false);
+                default:
+                    return true;
             }
+        }
 
-            string[] hideWhenDirNonempty = TextUtils.GetFrontmatterFieldList(commandFileContent, "hide_when_dir_nonempty");
-            foreach (string rel in hideWhenDirNonempty)
+        // Reads <cityDir>/settings.json into a JObject. Returns null when
+        // the file is missing or unparseable — callers treat that as "no
+        // flags set" (commands fall through to default-applicable).
+        static JObject ReadCitySettings(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return null;
+            string path = Path.Combine(cityDir, "settings.json");
+            if (!File.Exists(path)) return null;
+            try { return JObject.Parse(File.ReadAllText(path)); }
+            catch (Exception ex)
             {
-                string dir = Path.Combine(cityDir, rel.Replace('/', Path.DirectorySeparatorChar));
-                if (!Directory.Exists(dir)) continue;
-                if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any())
-                    return false;
+                _log.Warn($"PromptUISystem: failed to parse settings.json at {path}: {ex.Message}");
+                return null;
             }
-            return true;
         }
     }
 

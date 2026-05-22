@@ -1,7 +1,5 @@
 ---
 description: Bootstrap a new city — name, founding history, map, inferred premise
-hide_when_exists: canon/playthrough-premise.md, canon/playthrough-goal.md
-hide_when_dir_nonempty: sessions, characters, stories, events
 ---
 
 Start a new playthrough. By the end, this city folder has `canon/city.md` and `canon/playthrough-premise.md` populated enough that `/session-start` can take over.
@@ -92,6 +90,7 @@ These get written to `settings.json` in the next step and are read on every sess
 Write `settings.json` at the city-folder root using `settings.sample.json` as the shape, with:
 - `secrets_visibility` set to the secrets answer from step 8.
 - `levelup_storylines` set to the level-up-stories answer from step 8 (`true` for Enabled, `false` for Disabled).
+- `bootstrapped` set to `true`. This is the signal that `/new-city` has run for this city; the CityStoryMod prompt panel reads it to know when to hide the `/new-city` button. A new scaffold ships with `bootstrapped: false`; flipping it at the end of this step is the last thing `/new-city` does.
 
 **10. Hand off.**
 
