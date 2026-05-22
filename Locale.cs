@@ -20,10 +20,6 @@ namespace CityStoryMod
         {
             ["Options.SECTION[CityStoryMod.CityStoryMod.Mod]"] = "City Story Mod",
 
-            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ExportEnabled]"] = "Enable exports",
-            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ExportEnabled]"] =
-                "When on, writes a JSON snapshot on the hotkey (Ctrl+Shift+E) and at each interval tick.",
-
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] = "Auto-export interval (minutes)",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
                 "Wall-clock minutes between automatic exports. Set to 0 to disable interval exports; the hotkey still works.",

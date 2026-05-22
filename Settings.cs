@@ -34,8 +34,6 @@ namespace CityStoryMod
     {
         public Settings(IMod mod) : base(mod) { SetDefaults(); }
 
-        public bool ExportEnabled { get; set; }
-
         [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
@@ -98,7 +96,6 @@ namespace CityStoryMod
 
         public override void SetDefaults()
         {
-            ExportEnabled = true;
             IntervalMinutes = 5;
             AutoSessionStartOnSaveLoad = false;
             Provider = LlmProvider.AnthropicAPI;

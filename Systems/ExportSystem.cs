@@ -188,7 +188,7 @@ namespace CityStoryMod.Systems
             Mod.Storyteller?.Tick();
 
             var settings = Mod.Settings;
-            if (settings == null || !settings.ExportEnabled) return;
+            if (settings == null) return;
 
             // Gate everything below on the game being in an active session with a
             // ready City singleton. Outside that window (main menu, loading screen,
