@@ -132,6 +132,11 @@ namespace CityStoryMod.Systems
         {
             _pendingRunFinish = true;
             _pendingFinishResult = result;
+            // The agent may have written files that change which commands
+            // apply (e.g. /new-city writing canon/playthrough-premise.md
+            // should hide its own button). Invalidate the scan cache so the
+            // next OnUpdate tick re-walks the commands dir.
+            _commandsScannedCityDir = null;
         }
 
         // ---- Drain (main thread) ----
@@ -228,10 +233,14 @@ namespace CityStoryMod.Systems
         }
 
         // Walks <cityDir>/.claude/commands/*.md, extracts (name, description)
-        // for each, returns a JSON array sorted alphabetically by name. Name
-        // is the filename stem; description is the `description:` frontmatter
-        // field (empty when missing). Returns "[]" when the dir doesn't exist
-        // yet (no city exported, scaffolding not yet run).
+        // for each, filters out commands that don't apply to the current state
+        // of the city dir, returns a JSON array sorted alphabetically by name.
+        // Returns "[]" when the dir doesn't exist (no city exported yet).
+        //
+        // Applicability filter (see IsCommandApplicable) is what hides
+        // single-use commands like /new-city after they've already run. The
+        // scan re-runs after every storyteller run finishes so newly-written
+        // marker files take effect immediately.
         static string ScanAvailableCommands(string cityDir)
         {
             if (string.IsNullOrEmpty(cityDir)) return "[]";
@@ -243,6 +252,7 @@ namespace CityStoryMod.Systems
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 if (string.IsNullOrEmpty(name)) continue;
+                if (!IsCommandApplicable(name, cityDir)) continue;
                 string description = null;
                 try
                 {
@@ -256,6 +266,27 @@ namespace CityStoryMod.Systems
             }
             commands.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             return JsonConvert.SerializeObject(commands);
+        }
+
+        // Per-command applicability rules. Default-true so unrecognized
+        // commands aren't accidentally hidden. Filesystem-coupled and CS2-
+        // independent — could be extracted into a pure helper + tests if the
+        // ruleset grows beyond a couple of switch arms.
+        //
+        //   new-city  → hide once canon/playthrough-premise.md exists.
+        //               `/new-city` writes that file and is meant to run once
+        //               per city, before any /session-start. Its presence is
+        //               the canonical "this city has been bootstrapped"
+        //               signal (see template/CLAUDE.md → Scaffold arrival).
+        static bool IsCommandApplicable(string name, string cityDir)
+        {
+            switch (name)
+            {
+                case "new-city":
+                    return !File.Exists(Path.Combine(cityDir, "canon", "playthrough-premise.md"));
+                default:
+                    return true;
+            }
         }
     }
 
