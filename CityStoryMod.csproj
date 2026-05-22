@@ -54,6 +54,9 @@
     <Reference Include="Unity.Burst">
       <Private>False</Private>
     </Reference>
+    <Reference Include="System.Net.Http">
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
