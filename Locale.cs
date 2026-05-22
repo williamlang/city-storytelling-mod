@@ -36,15 +36,15 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] =
                 "Which LLM service drives the in-game storyteller. Anthropic (API) uses a direct key against api.anthropic.com — paste a key below and you're done. Anthropic (Claude Code CLI) shells out to the `claude` command on your PATH and uses whatever credentials you've logged into the CLI with (including a Max subscription) — requires Claude Code to be installed and `claude --version` to work in the same shell CS2 was launched from. OpenAI / Gemini / Ollama use their respective HTTP APIs.",
 
-            // Dropdown labels for each LlmProvider enum value. CS2 picks these up via
-            // the Options.ENUM[<asset-id>.<EnumType>.<Value>] key shape; without them
-            // the dropdown falls back to the bare C# member name (e.g. "AnthropicCLI"
-            // rather than "Anthropic (Claude Code CLI)").
-            ["Options.ENUM[CityStoryMod.CityStoryMod.Mod.LlmProvider.AnthropicAPI]"] = "Anthropic (API key)",
-            ["Options.ENUM[CityStoryMod.CityStoryMod.Mod.LlmProvider.AnthropicCLI]"] = "Anthropic (Claude Code CLI)",
-            ["Options.ENUM[CityStoryMod.CityStoryMod.Mod.LlmProvider.OpenAI]"] = "OpenAI",
-            ["Options.ENUM[CityStoryMod.CityStoryMod.Mod.LlmProvider.Gemini]"] = "Google Gemini",
-            ["Options.ENUM[CityStoryMod.CityStoryMod.Mod.LlmProvider.Ollama]"] = "Ollama (local)",
+            // Dropdown labels for each LlmProvider enum value. CS2 builds the locale
+            // key for enum dropdowns as Options.<asset-id>.<ENUMTYPE-UPPER>[<Value>]
+            // (e.g. Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[AnthropicAPI]).
+            // Without these entries the dropdown shows the raw key as the label.
+            ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[AnthropicAPI]"] = "Anthropic (API key)",
+            ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[AnthropicCLI]"] = "Anthropic (Claude Code CLI)",
+            ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[OpenAI]"] = "OpenAI",
+            ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[Gemini]"] = "Google Gemini",
+            ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[Ollama]"] = "Ollama (local)",
 
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] = "API key",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] =
