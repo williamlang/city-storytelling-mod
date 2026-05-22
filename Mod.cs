@@ -53,6 +53,7 @@ namespace CityStoryMod
             GameManager.instance.localizationManager.AddSource("en-US", new Locale(Locale.EnglishEntries()));
 
             updateSystem.UpdateBefore<ExportSystem>(SystemUpdatePhase.UIUpdate);
+            updateSystem.UpdateBefore<PromptUISystem>(SystemUpdatePhase.UIUpdate);
 
             Log.Info($"CityStoryMod loaded. session_id={SessionId}");
         }

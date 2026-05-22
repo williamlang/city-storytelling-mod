@@ -8,39 +8,56 @@ using Colossal.Logging;
 namespace CityStoryMod.Storyteller
 {
     // Provider-agnostic hop loop. Given a Conversation (whichever provider it
-    // wraps), this loads the city's CLAUDE.md + the chosen slash command + a
-    // pointer to the latest snapshot, then runs the agent loop:
+    // wraps), this loads the city's CLAUDE.md as the system prompt and runs
+    // the agent loop:
     //
     //   SendInitial → assistant turn → execute tools → SendToolResults → repeat
     //
     // until the assistant returns RequiresToolResponse=false or the hop cap is
     // hit. Token usage and files-written counters are aggregated and logged.
+    //
+    // Two entry points: RunCommandAsync loads the user prompt from a slash
+    // command file under .claude/commands/, while RunPromptAsync uses a raw
+    // string (used by the in-game prompt panel for free-form input).
     public static class AgentLoop
     {
         const int MaxHops = 50;
 
-        public static async Task<RunResult> RunAsync(
+        public static Task<RunResult> RunCommandAsync(
             Conversation conv,
             string cityDir,
             string commandName,
             ILog log,
             CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(cityDir) || !Directory.Exists(cityDir))
-                return RunResult.Failed($"City dir not found: {cityDir}");
-
-            string cityDirFull = Path.GetFullPath(cityDir);
-            string systemPath = Path.Combine(cityDirFull, "CLAUDE.md");
+            string cityDirFull = Path.GetFullPath(cityDir ?? "");
             string commandPath = Path.Combine(cityDirFull, ".claude", "commands", commandName + ".md");
+            if (!File.Exists(commandPath))
+                return Task.FromResult(RunResult.Failed($"Missing command file: {commandPath}"));
 
-            if (!File.Exists(systemPath)) return RunResult.Failed($"Missing CLAUDE.md: {systemPath}");
-            if (!File.Exists(commandPath)) return RunResult.Failed($"Missing command file: {commandPath}");
-
-            string system = File.ReadAllText(systemPath);
             string command = File.ReadAllText(commandPath);
             string snapshotHint = DescribeLatestSnapshot(cityDirFull);
             string userPrompt = $"{command}\n\n---\n\n{snapshotHint}";
+            return RunPromptAsync(conv, cityDir, userPrompt, log, ct);
+        }
 
+        public static async Task<RunResult> RunPromptAsync(
+            Conversation conv,
+            string cityDir,
+            string userPrompt,
+            ILog log,
+            CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(cityDir) || !Directory.Exists(cityDir))
+                return RunResult.Failed($"City dir not found: {cityDir}");
+            if (string.IsNullOrWhiteSpace(userPrompt))
+                return RunResult.Failed("Empty prompt.");
+
+            string cityDirFull = Path.GetFullPath(cityDir);
+            string systemPath = Path.Combine(cityDirFull, "CLAUDE.md");
+            if (!File.Exists(systemPath)) return RunResult.Failed($"Missing CLAUDE.md: {systemPath}");
+
+            string system = File.ReadAllText(systemPath);
             ToolExecutor tools = new ToolExecutor(cityDirFull);
 
             AssistantTurn turn = await conv.SendInitial(system, userPrompt, ToolSchemas.Default, ct);
@@ -70,6 +87,7 @@ namespace CityStoryMod.Storyteller
                     results.Add(new ToolResult { ToolUseId = call.Id, Content = content, IsError = isError });
                 }
 
+                conv.NotifyToolResults(results);
                 turn = await conv.SendToolResults(results, ct);
                 LogHop(log, hop + 1, turn.Usage);
             }

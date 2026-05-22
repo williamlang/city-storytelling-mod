@@ -31,11 +31,18 @@ namespace CityStoryMod.Storyteller
             "events", "sessions", "stories", "secrets",
         };
 
-        public static async Task<RunResult> RunAsync(
-            string cityDir, string commandName, ILog log, CancellationToken ct)
+        // Convenience entry point for slash-command runs (e.g. /story-driven).
+        public static Task<RunResult> RunAsync(
+            string cityDir, string commandName, ILog log, CancellationToken ct) =>
+            RunPromptAsync(cityDir, "/" + commandName, log, ct);
+
+        public static async Task<RunResult> RunPromptAsync(
+            string cityDir, string prompt, ILog log, CancellationToken ct)
         {
             if (!Directory.Exists(cityDir))
                 return RunResult.Failed($"City dir does not exist: {cityDir}");
+            if (string.IsNullOrWhiteSpace(prompt))
+                return RunResult.Failed("Empty prompt.");
 
             string exe = ResolveClaudeExe();
             if (exe == null)
@@ -44,7 +51,6 @@ namespace CityStoryMod.Storyteller
                     + "Install Claude Code (https://claude.ai/code) and confirm `claude --version` "
                     + "works from the same shell CS2 was launched from.");
 
-            string prompt = "/" + commandName;
             DateTime startedUtc = DateTime.UtcNow;
 
             // .NET Framework 4.8 has no ProcessStartInfo.ArgumentList — single Arguments

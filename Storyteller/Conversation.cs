@@ -27,11 +27,18 @@ namespace CityStoryMod.Storyteller
         // total from the per-turn values their parsers set on AssistantTurn.
         public TokenUsage TotalUsage { get; private set; }
 
-        // Fires after every assistant turn the conversation parses, with that
-        // turn's usage as the argument. Lets a UI panel show live token counts
-        // without polling. Handlers run on the thread that completed the HTTP
-        // request — marshal to the main thread before touching ECS / Unity state.
-        public event Action<TokenUsage> TurnCompleted;
+        // Fires after every assistant turn the conversation parses, carrying
+        // the full turn (text content, tool calls, per-turn usage). Lets a UI
+        // panel display the streaming conversation without polling. Handlers
+        // run on the thread that completed the HTTP request — marshal to the
+        // main thread before touching ECS / Unity state.
+        public event Action<AssistantTurn> AssistantTurnCompleted;
+
+        // Fires when AgentLoop is about to send a batch of tool results back
+        // to the model. The UI uses this to render "tool: read_file → returned
+        // X bytes" entries between assistant bubbles. Invoked via the
+        // NotifyToolResults helper (AgentLoop calls it; subclasses don't).
+        public event Action<IReadOnlyList<ToolResult>> ToolResultsRecorded;
 
         public abstract Task<AssistantTurn> SendInitial(
             string system,
@@ -45,7 +52,7 @@ namespace CityStoryMod.Storyteller
 
         // Provider parsers call this once per response in lieu of constructing
         // an AssistantTurn directly. Keeps TotalUsage in sync and ensures the
-        // TurnCompleted event fires consistently across providers.
+        // AssistantTurnCompleted event fires consistently across providers.
         protected AssistantTurn BuildTurn(
             string textContent,
             IReadOnlyList<ToolCall> toolCalls,
@@ -53,14 +60,23 @@ namespace CityStoryMod.Storyteller
             TokenUsage usage)
         {
             TotalUsage += usage;
-            TurnCompleted?.Invoke(usage);
-            return new AssistantTurn
+            AssistantTurn turn = new AssistantTurn
             {
                 TextContent = textContent,
                 ToolCalls = toolCalls,
                 RequiresToolResponse = requiresToolResponse,
                 Usage = usage,
             };
+            AssistantTurnCompleted?.Invoke(turn);
+            return turn;
+        }
+
+        // AgentLoop calls this before passing tool results back into the
+        // conversation, so observers see tool outputs in their correct
+        // chronological place between assistant turns.
+        public void NotifyToolResults(IReadOnlyList<ToolResult> results)
+        {
+            ToolResultsRecorded?.Invoke(results);
         }
     }
 

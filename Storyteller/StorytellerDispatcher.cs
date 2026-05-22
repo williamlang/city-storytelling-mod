@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Colossal.Logging;
@@ -6,7 +7,7 @@ using Colossal.Logging;
 namespace CityStoryMod.Storyteller
 {
     // Owns the in-flight storyteller run (if any) and exposes its status to the
-    // main thread for the Options-panel UI to read each frame.
+    // main thread for UI consumption.
     //
     // Concurrency is gated by an in-process Task reference rather than a .lock
     // file on disk: a single CS2 process owns the city dir, so there's no
@@ -15,8 +16,9 @@ namespace CityStoryMod.Storyteller
     //
     // HTTP and file I/O are safe to do on a background thread. The hard Unity
     // rule — never touch Unity APIs or ECS state off the main thread — does not
-    // apply to the API client's work. Results land on a shared field that the
-    // main thread drains via Tick() during OnUpdate.
+    // apply to the API client's work. Tick() drains run completion onto the
+    // main thread; event handlers (AssistantTurn, ToolResults) fire on the
+    // background thread — UISystems that subscribe must marshal as needed.
     public class StorytellerDispatcher
     {
         public delegate Task<RunResult> RunFunc(CancellationToken ct);
@@ -25,6 +27,7 @@ namespace CityStoryMod.Storyteller
         Task<RunResult> _running;
         CancellationTokenSource _cts;
         DateTime _runStartedAtUtc;
+        Conversation _activeConversation;
 
         public StorytellerDispatcher(ILog log) { _log = log; }
 
@@ -35,6 +38,30 @@ namespace CityStoryMod.Storyteller
         // Wall-clock duration of the in-flight run, or null when idle. Useful
         // for the status line ("Running… 12s").
         public TimeSpan? RunDuration => IsRunning ? DateTime.UtcNow - _runStartedAtUtc : (TimeSpan?)null;
+
+        // Per-run streaming events for the UI to subscribe to. Forwarded from
+        // the active Conversation via AttachConversation; consumers don't need
+        // to know about the conversation directly. Fired on the worker thread.
+        public event Action<string> RunStarted;
+        public event Action<AssistantTurn> AssistantTurn;
+        public event Action<IReadOnlyList<ToolResult>> ToolResults;
+        public event Action<RunResult> RunFinished;
+
+        // Wires a Conversation's events through to this dispatcher's events.
+        // RunFunc implementations call this with the Conversation they're
+        // about to drive so UI subscribers see the streaming turns without
+        // needing a direct reference. Returns the same instance for chaining.
+        public Conversation AttachConversation(Conversation conv)
+        {
+            if (conv == null) return null;
+            _activeConversation = conv;
+            conv.AssistantTurnCompleted += ForwardAssistantTurn;
+            conv.ToolResultsRecorded += ForwardToolResults;
+            return conv;
+        }
+
+        void ForwardAssistantTurn(AssistantTurn turn) => AssistantTurn?.Invoke(turn);
+        void ForwardToolResults(IReadOnlyList<ToolResult> results) => ToolResults?.Invoke(results);
 
         public bool Start(string runName, RunFunc func)
         {
@@ -47,6 +74,7 @@ namespace CityStoryMod.Storyteller
             _runStartedAtUtc = DateTime.UtcNow;
             CancellationToken token = _cts.Token;
             DateTime startedAt = _runStartedAtUtc;
+            RunStarted?.Invoke(runName);
             _running = Task.Run(async () =>
             {
                 try
@@ -85,7 +113,18 @@ namespace CityStoryMod.Storyteller
             _running = null;
             _cts?.Dispose();
             _cts = null;
+
+            // Detach from the conversation so its events don't keep firing into
+            // our forwarders after the run ends.
+            if (_activeConversation != null)
+            {
+                _activeConversation.AssistantTurnCompleted -= ForwardAssistantTurn;
+                _activeConversation.ToolResultsRecorded -= ForwardToolResults;
+                _activeConversation = null;
+            }
+
             _log.Info($"Storyteller run finished: success={LastResult.Success}, files_written={LastResult.FilesWritten}, duration={LastResult.Duration.TotalSeconds:F1}s");
+            RunFinished?.Invoke(LastResult);
         }
     }
 
