@@ -39,28 +39,38 @@ namespace CityStoryMod
         // non-empty `ended_real_date:` key. Used by ExportSystem to decide
         // whether a session file is still open (no `ended_real_date:` → open)
         // before auto-creating a new session stub.
-        //
-        // Frontmatter is detected as the text between the first two `---`
-        // markers in the file. If either marker is missing, returns false.
         public static bool FrontmatterHasEndedRealDate(string content)
         {
-            if (content == null) return false;
+            string val = GetFrontmatterField(content, "ended_real_date");
+            return !string.IsNullOrEmpty(val);
+        }
+
+        // Returns the value of `<key>:` from the leading YAML frontmatter
+        // block of `content`, or null if the key is missing / empty / the
+        // content has no frontmatter. Treats whatever is between the first
+        // two `---` markers as the YAML block.
+        //
+        // Lightweight scan rather than a full YAML parser — only reads
+        // `key: value` shapes (no nested objects, lists, or multi-line
+        // strings). Sufficient for the kinds of frontmatter our template
+        // and session files use.
+        public static string GetFrontmatterField(string content, string key)
+        {
+            if (content == null || string.IsNullOrEmpty(key)) return null;
             int first = content.IndexOf("---", StringComparison.Ordinal);
-            if (first < 0) return false;
+            if (first < 0) return null;
             int second = content.IndexOf("---", first + 3, StringComparison.Ordinal);
-            if (second < 0) return false;
+            if (second < 0) return null;
             string yaml = content.Substring(first + 3, second - first - 3);
+            string prefix = key + ":";
             foreach (string line in yaml.Split('\n'))
             {
                 string trimmed = line.TrimStart();
-                const string key = "ended_real_date:";
-                if (trimmed.StartsWith(key, StringComparison.Ordinal)
-                    && trimmed.Substring(key.Length).Trim().Length > 0)
-                {
-                    return true;
-                }
+                if (!trimmed.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                string value = trimmed.Substring(prefix.Length).Trim();
+                return value.Length > 0 ? value : null;
             }
-            return false;
+            return null;
         }
     }
 }

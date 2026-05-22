@@ -8,9 +8,11 @@ import {
   isRunningBinding,
   tokenSummaryBinding,
   lastErrorBinding,
+  availableCommandsBinding,
   submitPrompt,
   cancelRun,
   ChatMessage,
+  SlashCommand,
 } from "./bindings";
 
 // Top-level Storyteller panel. Toolbar icon (floating variant matches CS2's
@@ -30,10 +32,15 @@ export function StorytellerToolbar() {
   const isRunning = useValue(isRunningBinding);
   const tokenSummary = useValue(tokenSummaryBinding);
   const lastError = useValue(lastErrorBinding);
+  const commandsJson = useValue(availableCommandsBinding);
 
   const messages = useMemo<ChatMessage[]>(() => {
     try { return JSON.parse(messagesJson); } catch { return []; }
   }, [messagesJson]);
+
+  const commands = useMemo<SlashCommand[]>(() => {
+    try { return JSON.parse(commandsJson); } catch { return []; }
+  }, [commandsJson]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -87,6 +94,23 @@ export function StorytellerToolbar() {
               </div>
             )}
           </div>
+
+          {commands.length > 0 && (
+            <div className={styles.commandRow}>
+              {commands.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  className={styles.commandPill}
+                  title={c.description || `/${c.name}`}
+                  disabled={isRunning}
+                  onClick={() => submitPrompt(`/${c.name}`)}
+                >
+                  /{c.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           <textarea
             className={styles.prompt}

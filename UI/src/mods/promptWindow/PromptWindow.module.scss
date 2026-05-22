@@ -124,6 +124,38 @@
   .text { color: #ffb0b0; }
 }
 
+// Command pill row sits between the chat history and the textarea. Buttons
+// wrap onto multiple lines when there are many commands. Less prominent than
+// the Run button so they don't compete visually with submit/cancel.
+.commandRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4rem;
+}
+
+.commandPill {
+  background: rgba(91, 179, 230, 0.18);
+  color: #cfe5f5;
+  border: 1px solid rgba(91, 179, 230, 0.4);
+  border-radius: 999rem;
+  padding: 3rem 10rem;
+  font-size: 11rem;
+  font-family: monospace;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+
+  &:hover:not(:disabled) {
+    background: rgba(91, 179, 230, 0.35);
+    border-color: rgba(91, 179, 230, 0.7);
+    color: #e6eef7;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
 .prompt {
   width: 100%;
   background: rgba(0, 0, 0, 0.4);

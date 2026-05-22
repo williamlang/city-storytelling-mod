@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.UI.Binding;
@@ -11,13 +12,15 @@ using Newtonsoft.Json;
 namespace CityStoryMod.Systems
 {
     // Bridges the in-game React panel (UI/src/mods/promptWindow/*) to the C#
-    // storyteller dispatcher. Registers four ValueBindings (read by React via
+    // storyteller dispatcher. Registers five ValueBindings (read by React via
     // `useValue`) and three TriggerBindings (called by React via `trigger`):
     //
-    //   messages       — JSON array of ChatMessage rows (user / assistant / tool)
-    //   isRunning      — true while a run is in flight
-    //   tokenSummary   — short formatted token-usage line, updated per turn
-    //   lastError      — non-empty when the most recent run failed
+    //   messages          — JSON array of ChatMessage rows (user / assistant)
+    //   isRunning         — true while a run is in flight
+    //   tokenSummary      — short formatted token-usage line, updated per turn
+    //   lastError         — non-empty when the most recent run failed
+    //   availableCommands — JSON array of SlashCommand rows scanned from the
+    //                       city's .claude/commands/*.md (name + description)
     //
     //   submitPrompt(text)   — start a free-form run with the given prompt
     //   cancelRun()          — cancel the in-flight run
@@ -36,6 +39,13 @@ namespace CityStoryMod.Systems
         ValueBinding<bool> _isRunningBinding;
         ValueBinding<string> _tokenSummaryBinding;
         ValueBinding<string> _lastErrorBinding;
+        ValueBinding<string> _availableCommandsBinding;
+
+        // Caches the city dir we last scanned for slash commands. OnUpdate
+        // rescans (cheap directory listing) when LastExportedCityDir changes,
+        // so command list refreshes as soon as the first export happens for a
+        // city — no separate file watcher needed.
+        string _commandsScannedCityDir;
 
         readonly List<ChatMessage> _messages = new List<ChatMessage>();
         readonly ConcurrentQueue<ChatMessage> _pendingMessages = new ConcurrentQueue<ChatMessage>();
@@ -58,10 +68,12 @@ namespace CityStoryMod.Systems
             _isRunningBinding = new ValueBinding<bool>(Group, "isRunning", false);
             _tokenSummaryBinding = new ValueBinding<string>(Group, "tokenSummary", "");
             _lastErrorBinding = new ValueBinding<string>(Group, "lastError", "");
+            _availableCommandsBinding = new ValueBinding<string>(Group, "availableCommands", "[]");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
             AddBinding(_lastErrorBinding);
+            AddBinding(_availableCommandsBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
@@ -137,6 +149,15 @@ namespace CityStoryMod.Systems
                 _messagesBinding.Update(JsonConvert.SerializeObject(_messages));
             }
 
+            // Refresh available commands once per city. Cheap (one string
+            // compare in the common case where the city hasn't changed).
+            string cityDir = Mod.LastExportedCityDir;
+            if (cityDir != _commandsScannedCityDir)
+            {
+                _commandsScannedCityDir = cityDir;
+                _availableCommandsBinding.Update(ScanAvailableCommands(cityDir));
+            }
+
             if (_pendingRunStart)
             {
                 _pendingRunStart = false;
@@ -206,6 +227,36 @@ namespace CityStoryMod.Systems
             return s;
         }
 
+        // Walks <cityDir>/.claude/commands/*.md, extracts (name, description)
+        // for each, returns a JSON array sorted alphabetically by name. Name
+        // is the filename stem; description is the `description:` frontmatter
+        // field (empty when missing). Returns "[]" when the dir doesn't exist
+        // yet (no city exported, scaffolding not yet run).
+        static string ScanAvailableCommands(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return "[]";
+            string commandsDir = Path.Combine(cityDir, ".claude", "commands");
+            if (!Directory.Exists(commandsDir)) return "[]";
+
+            var commands = new List<SlashCommand>();
+            foreach (string path in Directory.GetFiles(commandsDir, "*.md"))
+            {
+                string name = Path.GetFileNameWithoutExtension(path);
+                if (string.IsNullOrEmpty(name)) continue;
+                string description = null;
+                try
+                {
+                    description = TextUtils.GetFrontmatterField(File.ReadAllText(path), "description");
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"PromptUISystem: failed to read command file {path}: {ex.Message}");
+                }
+                commands.Add(new SlashCommand { name = name, description = description ?? "" });
+            }
+            commands.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+            return JsonConvert.SerializeObject(commands);
+        }
     }
 
     // Wire-format for a chat message — serialized to JSON for the React UI.
@@ -215,5 +266,12 @@ namespace CityStoryMod.Systems
     {
         public string role;   // "user" | "assistant"
         public string text;
+    }
+
+    [Serializable]
+    public class SlashCommand
+    {
+        public string name;        // filename stem, e.g. "story-driven"
+        public string description; // `description:` frontmatter field, or ""
     }
 }

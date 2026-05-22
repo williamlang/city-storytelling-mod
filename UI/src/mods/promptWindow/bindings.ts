@@ -10,6 +10,7 @@ export const messagesBinding = bindValue<string>(GROUP, "messages", "[]");
 export const isRunningBinding = bindValue<boolean>(GROUP, "isRunning", false);
 export const tokenSummaryBinding = bindValue<string>(GROUP, "tokenSummary", "");
 export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
+export const availableCommandsBinding = bindValue<string>(GROUP, "availableCommands", "[]");
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
@@ -18,6 +19,12 @@ export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
 export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+}
+
+// Wire-format mirror of CityStoryMod.Systems.SlashCommand.
+export interface SlashCommand {
+  name: string;        // filename stem, e.g. "story-driven"
+  description: string; // frontmatter `description:` field, "" when missing
 }
 
 export function submitPrompt(prompt: string) {

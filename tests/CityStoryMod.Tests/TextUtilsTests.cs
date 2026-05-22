@@ -110,5 +110,83 @@ namespace CityStoryMod.Tests
                 TextUtils.FrontmatterHasEndedRealDate(md).Should().BeTrue();
             }
         }
+
+        public class GetFrontmatterField
+        {
+            [Fact]
+            public void returns_value_for_present_key()
+            {
+                string md = "---\ndescription: Generate story choices\n---\n\nbody";
+                TextUtils.GetFrontmatterField(md, "description")
+                    .Should().Be("Generate story choices");
+            }
+
+            [Fact]
+            public void returns_null_for_missing_key()
+            {
+                string md = "---\ndescription: foo\n---\n";
+                TextUtils.GetFrontmatterField(md, "nonexistent").Should().BeNull();
+            }
+
+            [Fact]
+            public void returns_null_when_value_is_empty()
+            {
+                string md = "---\ndescription:\n---\n";
+                TextUtils.GetFrontmatterField(md, "description").Should().BeNull();
+            }
+
+            [Fact]
+            public void returns_null_when_no_frontmatter()
+            {
+                string md = "body without frontmatter";
+                TextUtils.GetFrontmatterField(md, "description").Should().BeNull();
+            }
+
+            [Fact]
+            public void returns_null_when_only_one_fence_marker()
+            {
+                string md = "---\ndescription: foo\nno closing fence";
+                TextUtils.GetFrontmatterField(md, "description").Should().BeNull();
+            }
+
+            [Fact]
+            public void tolerates_leading_whitespace_on_key_line()
+            {
+                string md = "---\n  description: indented value\n---\n";
+                TextUtils.GetFrontmatterField(md, "description")
+                    .Should().Be("indented value");
+            }
+
+            [Fact]
+            public void does_not_scan_body_after_frontmatter()
+            {
+                // description: in the body shouldn't be picked up
+                string md = "---\ntitle: foo\n---\n\ndescription: in the body\n";
+                TextUtils.GetFrontmatterField(md, "description").Should().BeNull();
+            }
+
+            [Fact]
+            public void returns_null_for_null_or_empty_content()
+            {
+                TextUtils.GetFrontmatterField(null, "key").Should().BeNull();
+                TextUtils.GetFrontmatterField("", "key").Should().BeNull();
+            }
+
+            [Fact]
+            public void returns_null_for_null_or_empty_key()
+            {
+                string md = "---\ndescription: foo\n---\n";
+                TextUtils.GetFrontmatterField(md, null).Should().BeNull();
+                TextUtils.GetFrontmatterField(md, "").Should().BeNull();
+            }
+
+            [Fact]
+            public void key_match_is_exact_not_prefix()
+            {
+                // "desc" shouldn't match "description"
+                string md = "---\ndescription: foo\n---\n";
+                TextUtils.GetFrontmatterField(md, "desc").Should().BeNull();
+            }
+        }
     }
 }
