@@ -137,13 +137,18 @@
   position: relative;
 }
 
+// Commands toggle is sized identically to the Run/Cancel button so the
+// trailing-edge action row reads as one group. Colors stay distinct — Run
+// is the primary blue, Commands is the muted-blue secondary — so they're
+// visually differentiated by role, not size.
 .commandToggle {
   background: rgba(91, 179, 230, 0.18);
   color: #cfe5f5;
   border: 1px solid rgba(91, 179, 230, 0.4);
   border-radius: 4rem;
-  padding: 5rem 10rem;
-  font-size: 11rem;
+  padding: 6rem 14rem;
+  font-size: 13rem;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
 
@@ -231,6 +236,15 @@
   // against the buttons. Stacks with the panel's own `gap: 8rem` between
   // children.
   margin-top: 8rem;
+}
+
+// Right-aligned action group: Commands button + Run/Cancel button. Own
+// gap controls inter-button spacing independent of the footer's gap (which
+// separates status from this group as a whole).
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8rem;
 }
 
 .status {

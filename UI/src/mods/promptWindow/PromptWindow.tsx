@@ -173,31 +173,33 @@ export function StorytellerToolbar() {
             <span className={styles.status}>
               {tokenSummary || (isRunning ? "Running…" : "Idle")}
             </span>
-            <CommandMenu
-              commands={commands}
-              open={commandMenuOpen}
-              disabled={isRunning}
-              onToggle={() => setCommandMenuOpen((v) => !v)}
-              onPick={runCommand}
-            />
-            {isRunning ? (
-              <button
-                type="button"
-                className={styles.cancel}
-                onClick={() => cancelRun()}
-              >
-                Cancel
-              </button>
-            ) : (
-              <button
-                type="button"
-                className={styles.run}
-                disabled={!canSubmit}
-                onClick={handleSubmit}
-              >
-                Run
-              </button>
-            )}
+            <div className={styles.actions}>
+              <CommandMenu
+                commands={commands}
+                open={commandMenuOpen}
+                disabled={isRunning}
+                onToggle={() => setCommandMenuOpen((v) => !v)}
+                onPick={runCommand}
+              />
+              {isRunning ? (
+                <button
+                  type="button"
+                  className={styles.cancel}
+                  onClick={() => cancelRun()}
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.run}
+                  disabled={!canSubmit}
+                  onClick={handleSubmit}
+                >
+                  Run
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
