@@ -11,6 +11,16 @@
     <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
   </PropertyGroup>
 
+  <!--
+    SDK-default globbing pulls in every *.cs under the project root, including
+    the sibling test project at tests/CityStoryMod.Tests/. Those files reference
+    xunit / FluentAssertions which the mod doesn't link, so we exclude them
+    explicitly here. The test project has its own csproj that compiles them.
+  -->
+  <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
+  </ItemGroup>
+
   <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
   <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
 

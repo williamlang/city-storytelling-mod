@@ -134,13 +134,11 @@ namespace CityStoryMod.Storyteller
             // to tools on capable models. Some models / versions don't set
             // done_reason explicitly when tool_calls are present, so the
             // presence of tool_calls is the durable signal.
-            return new AssistantTurn
-            {
-                TextContent = text.ToString(),
-                ToolCalls = calls,
-                RequiresToolResponse = calls.Count > 0,
-                Usage = ParseUsage(response),
-            };
+            return BuildTurn(
+                text.ToString(),
+                calls,
+                calls.Count > 0,
+                ParseUsage(response));
         }
 
         async Task<JObject> Post(CancellationToken ct)

@@ -42,10 +42,8 @@ namespace CityStoryMod.Storyteller
             string userPrompt = $"{command}\n\n---\n\n{snapshotHint}";
 
             ToolExecutor tools = new ToolExecutor(cityDirFull);
-            TokenUsage totalUsage = default;
 
             AssistantTurn turn = await conv.SendInitial(system, userPrompt, ToolSchemas.Default, ct);
-            totalUsage += turn.Usage;
             LogHop(log, 0, turn.Usage);
 
             int hop = 0;
@@ -73,18 +71,23 @@ namespace CityStoryMod.Storyteller
                 }
 
                 turn = await conv.SendToolResults(results, ct);
-                totalUsage += turn.Usage;
                 LogHop(log, hop + 1, turn.Usage);
             }
 
+            // Token totals come straight from the conversation — each provider's
+            // BuildTurn() call accumulates into conv.TotalUsage, so we don't sum
+            // here and risk drifting from the per-turn values.
+            TokenUsage totalUsage = conv.TotalUsage;
             log.Info($"Token totals: input={totalUsage.InputTokens} (cache read={totalUsage.CacheReadTokens}, write={totalUsage.CacheWriteTokens}), output={totalUsage.OutputTokens}");
             if (hop >= MaxHops)
             {
                 log.Warn($"Hop cap ({MaxHops}) reached; ending run.");
-                return RunResult.Ok(tools.FilesWritten).WithMessage($"Hop cap reached after {hop} hops");
+                return RunResult.Ok(tools.FilesWritten)
+                    .WithMessage($"Hop cap reached after {hop} hops")
+                    .WithUsage(totalUsage);
             }
             log.Info($"Run complete: {tools.FilesWritten} file(s) written across {hop + 1} hop(s).");
-            return RunResult.Ok(tools.FilesWritten);
+            return RunResult.Ok(tools.FilesWritten).WithUsage(totalUsage);
         }
 
         static void LogHop(ILog log, int hop, TokenUsage u)

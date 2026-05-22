@@ -120,13 +120,11 @@ namespace CityStoryMod.Storyteller
                 }
             }
 
-            return new AssistantTurn
-            {
-                TextContent = text.ToString(),
-                ToolCalls = calls,
-                RequiresToolResponse = stopReason == "tool_use" && calls.Count > 0,
-                Usage = ParseUsage(response["usage"] as JObject),
-            };
+            return BuildTurn(
+                text.ToString(),
+                calls,
+                stopReason == "tool_use" && calls.Count > 0,
+                ParseUsage(response["usage"] as JObject));
         }
 
         async Task<JObject> Post(CancellationToken ct)

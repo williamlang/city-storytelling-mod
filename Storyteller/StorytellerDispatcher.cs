@@ -96,6 +96,12 @@ namespace CityStoryMod.Storyteller
         public int FilesWritten;
         public TimeSpan Duration;
 
+        // Accumulated token usage across every model turn in this run. Zero for
+        // failed/cancelled runs that never reached the model and for runs through
+        // the Claude Code CLI provider until that path learns to parse the CLI's
+        // JSON output. Surfaced to the UI / settings status line.
+        public TokenUsage TotalUsage;
+
         public static RunResult Ok(int filesWritten) =>
             new RunResult { Success = true, FilesWritten = filesWritten };
 
@@ -114,6 +120,12 @@ namespace CityStoryMod.Storyteller
         public RunResult WithMessage(string m)
         {
             Message = m;
+            return this;
+        }
+
+        public RunResult WithUsage(TokenUsage u)
+        {
+            TotalUsage = u;
             return this;
         }
     }
