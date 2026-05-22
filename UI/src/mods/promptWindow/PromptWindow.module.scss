@@ -217,6 +217,11 @@
   height: 12rem;
   flex-shrink: 0;
   display: block;
+  // Optical alignment: the chevron's visible center sits above its bounding
+  // box mid-line (downward triangle = mass at the top). Nudge right + down
+  // so it reads as paired with the label rather than floating up-left of it.
+  margin-left: 4rem;
+  transform: translateY(2rem);
 }
 
 .commandMenu {
