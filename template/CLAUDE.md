@@ -19,13 +19,26 @@ Inspired by **City Planner Plays** (YouTube): named characters with agendas driv
 
 The player's canonical session opener is **`/session-start`** — see `.claude/commands/session-start.md`. They should normally invoke it at the top of a play session.
 
-As a backstop, if the player opens a city-branch (`city/*`) conversation *without* running `/session-start` and I notice the canon has unpopulated scaffold features (missing `secrets/`, missing `arc:` blocks on major entities, etc.), I raise the gap as my first response and offer to run the **Scaffold arrival** backfill — I do not silently begin other work while scaffold features sit empty. This check does not apply on `main`.
+### Open-session rule
+
+A session in `sessions/` is **open** if its frontmatter lacks `ended_real_date:`, and **closed** if that field is set. Open sessions act like a pid: while one is open, the player is mid-arc — they haven't yet recorded what happened in-game and propagated consequences.
+
+On any city-folder conversation, before doing other work, I check `sessions/` for the most recent file:
+
+- **Open** → the prior session never got `/session-end`'d (the player ran out of time, force-quit, etc.). I flag this on my first response and tell the player to run `/session-end` to wrap it up. I do not silently begin new story work on top of an unclosed session.
+- **Closed (or no sessions yet)** → free to proceed. If the player invokes `/session-start`, it will create a fresh open stub.
+
+The mod's `AutoSessionStartOnSaveLoad` setting (in CS2's Options → CityStoryMod) can be flipped ON so the mod writes the open session stub the moment a save is loaded. When that's on, opening a conversation after loading a save normally lands me in an already-open session and I can pick up from there. When it's off, the player should invoke `/session-start` themselves.
+
+### Scaffold-arrival backstop
+
+If the player opens a conversation *without* `/session-start` and I notice the canon has unpopulated scaffold features (missing `secrets/`, missing `arc:` blocks on major entities, etc.), I raise the gap as my first response and offer to run the **Scaffold arrival** backfill — I do not silently begin other work while scaffold features sit empty.
 
 ## Slash commands
 
 The player has four project commands at `.claude/commands/`:
 
-- **`/new-city`** — bootstrap a new playthrough from `main`: ask for a map screenshot, suggest a name and founding history, write `canon/city.md`, and create the `city/<slug>` branch. Used once per city, before the first `/session-start`.
+- **`/new-city`** — bootstrap a new playthrough: ask for a map screenshot, suggest a name and founding history, write `canon/city.md` and `canon/playthrough-premise.md` into this city folder. Used once per city, before the first `/session-start`.
 - **`/session-start`** — open a session: state scan + checklist of opening tasks.
 - **`/story-driven`** — generate 3–5 concrete in-game choices grounded in current canon, with for/against character framing. Live secrets and arcs bias which choices surface.
 - **`/session-end`** — close a session: record what happened in-game, propagate consequences (characters, events, secret status), commit.
@@ -43,17 +56,21 @@ When the player opens a session, they are usually doing one of:
 
 I should **never invent canon silently in conversation** — if a fact matters (a name, a date, a relationship), it lives in a file under `canon/`, `characters/`, `companies/`, `places/`, `factions/`, `events/`, or `secrets/`. If it's not written down, it didn't happen. (Secrets are still canon — just hidden canon.)
 
-## Branching
+## Where the city lives
 
-**`main` holds only the scaffold** — CLAUDE.md, canon templates, conventions. No specific city's canon lives here.
+Every city lives in its own folder under the CS2 mod's data directory:
 
-**Each city gets its own branch**, named `city/<slug>` (e.g. `city/port-haldane`, `city/cedar-flats`). Branch off `main` when starting a new playthrough; commit all that city's canon, characters, events, sessions, and stories there. Switching playthroughs = switching branches.
+```
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\
+```
 
-If the scaffold itself improves during a playthrough (better conventions, tighter style guide), the change can be cherry-picked or merged back to `main` so future cities inherit it.
+The CityStoryMod scaffolds this folder on the first snapshot export by copying the `template/` tree (CLAUDE.md, `.claude/commands/`, canon templates, etc.) into it. From then on, every file generated for that city — canon, characters, events, sessions, stories, secrets, snapshots — lives there. Each city directory is independent; switching playthroughs is just opening a conversation in a different folder.
+
+Improvements to the scaffold itself live in the CityStoryMod repo under `template/`. Existing cities aren't automatically updated when the template changes; the Scaffold-arrival backfill (below) picks up new features when the player notices them.
 
 ## City settings
 
-`settings.json` at the repo root holds per-playthrough configuration and is **committed on each `city/<slug>` branch** (not gitignored — the values are part of the playthrough's canonical state, just like `canon/city.md`). `settings.sample.json` on `main` is the committed template.
+`settings.json` at the city folder root holds per-playthrough configuration. `/new-city` writes it as part of bootstrap. `settings.sample.json` in the template is the committed default shape.
 
 Fields:
 
@@ -61,13 +78,13 @@ Fields:
 - **`secrets_visibility`** — `"hidden"` (default) or `"shown"`. Governs whether I quote unrevealed secret content in chat. See "Secrets". Set at `/new-city`.
 - **`levelup_storylines`** — boolean, default `true`. When `true`, `/session-end` checks whether `city.milestone_level` rose between the prior and current snapshots; if it did, I generate an `events/` entry plus a short narrative piece in `stories/` (council transcript, news clipping, developer memo) about how the funds influx gets spent and fought over — who pushed for what, who lost out, the political fallout. When `false`, milestone advances are still recorded in the session log but I don't generate dedicated stories. Set at `/new-city`.
 
-`/new-city` writes `settings.json` as part of the founding commit on the new city branch.
+`/new-city` writes `settings.json` into the city folder during bootstrap.
 
 ## Scaffold arrival
 
-When a city branch rebases on `main` and inherits new scaffold features (e.g. `canon/playthrough-premise.md`, `secrets/`, `arc:` fields, a new entity type), I run a one-time backfill before the next session:
+When the mod ships a new scaffold feature (e.g. `canon/playthrough-premise.md`, `secrets/`, `arc:` fields, a new entity type) and an existing city folder hasn't picked it up yet, I run a one-time backfill before the next session:
 
-1. **Detect** what's new — features the city branch hasn't yet populated (no `canon/playthrough-premise.md`, no `secrets/` directory or it's empty, no `arc:` set on major entities, missing frontmatter fields, etc.).
+1. **Detect** what's new — features the city folder hasn't yet populated (no `canon/playthrough-premise.md`, no `secrets/` directory or it's empty, no `arc:` set on major entities, missing frontmatter fields, etc.).
 2. **Infer the premise.** If `canon/playthrough-premise.md` is missing or empty, I derive it silently from `canon/city.md` (founding history + region) and any other established canon — see "Playthrough premise" for the inputs and heuristics. I write the resulting one-sentence (or short paragraph) premise to the file and show the player a one-line summary of what I wrote. I do **not** ask the player to author it. They can revise after the fact.
 3. **Generate arcs from the premise.** Grounded in the premise and established canon, I write an `arc:` block into every major recurring entity (character / company / faction / place) without asking. I show the player a one-line summary of what was assigned — e.g. *"Annika: redemption; Halverson Civil: ascends; Reuben Kowalski: tragic"* — so they know what I did. I do not pause for per-arc confirmation. If the player disagrees with any individual arc, they can ask me to revise after the fact.
 4. **Generate secrets.** I do **not** ask the player what secrets they want — secrets are mine to invent. Grounded in the premise, the arcs just set, and established canon, I write 1–2 hidden facts per major entity that create the friction those arcs need to feel earned. Whether I quote their contents in chat depends on `secrets_visibility` in `settings.json` (see "Secrets" below): under `hidden`, I tell the player only *what was covered* (e.g., "Wrote 5 secrets touching Annika, the Halverson contract, and the riverfront rezoning") without quoting; under `shown`, I summarize each secret's content for the player as I write it.
@@ -192,8 +209,9 @@ consequences: [Short bullet of what this changes]
 ```yaml
 ---
 session: 1
-real_date: 2026-05-17
-in_world_window: 2026-03 → 2026-06
+real_date: 2026-05-17                # real-world date /session-start ran (or the mod auto-started)
+in_world_window: 2026-03 → 2026-06   # filled in by /session-end
+ended_real_date: 2026-05-17          # set only when /session-end has run — its presence/absence is the open/closed pid
 ---
 
 ## What I built in-game
@@ -205,6 +223,10 @@ in_world_window: 2026-03 → 2026-06
 ## Open threads
 - ...
 ```
+
+Filename convention:
+- While the session is open, the file is `SXX-YYYY-MM-DD-open.md` — written either by `/session-start` or by the mod's `AutoSessionStartOnSaveLoad` setting.
+- `/session-end` renames it to `SXX-YYYY-MM-DD-<title>.md` after the player describes what happened and a short title is chosen.
 
 **secrets/*.md**
 ```yaml

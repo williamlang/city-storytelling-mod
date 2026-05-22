@@ -92,6 +92,13 @@ namespace CityStoryMod.Systems
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
+        // Save-load transition detection. Flips true the first tick OnUpdate sees
+        // inGame+cityReady; flips back to false on any tick where the gate fails
+        // (main menu, loading screen, editor). The false→true edge is what we
+        // treat as "save was just loaded" — forces an export, and (if the setting
+        // is on) writes an open sessions/ stub.
+        bool _inGameLastTick;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -191,8 +198,15 @@ namespace CityStoryMod.Systems
                 // Hold the interval timer at "now" so the first auto-export after
                 // load fires ~IntervalMinutes later instead of immediately.
                 _lastExportUtc = DateTime.UtcNow;
+                _inGameLastTick = false;
                 return;
             }
+
+            // false → true edge on the in-game gate. Treated as a save-load (also
+            // covers a fresh new city or returning from the main menu). Forces an
+            // export this tick so the snapshot reflects freshly-loaded state.
+            bool saveLoadTransition = !_inGameLastTick;
+            _inGameLastTick = true;
 
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
@@ -203,11 +217,13 @@ namespace CityStoryMod.Systems
 
             if (storytellerHotkey) TriggerStorytellerRun();
 
-            if (!hotkey && !intervalElapsed) return;
+            if (!hotkey && !intervalElapsed && !saveLoadTransition) return;
 
             try
             {
-                Export(triggeredBy: hotkey ? "hotkey" : "interval");
+                string trigger = saveLoadTransition ? "save-load"
+                    : (hotkey ? "hotkey" : "interval");
+                Export(triggeredBy: trigger);
                 _lastExportUtc = DateTime.UtcNow;
             }
             catch (Exception ex)
@@ -362,6 +378,17 @@ namespace CityStoryMod.Systems
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
             EnsureCityScaffolded(dir);
+
+            // On the save-load edge, if the player opted into auto-start, drop an
+            // open sessions/ stub before writing the snapshot. The agent's
+            // open-session "pid" rule picks it up — opening Claude after this
+            // lands in a live session without needing /session-start. Skipped if
+            // a prior session is still open (the agent will prompt /session-end).
+            if (triggeredBy == "save-load" && Mod.Settings != null && Mod.Settings.AutoSessionStartOnSaveLoad)
+            {
+                EnsureOpenSessionStub(dir);
+            }
+
             string snapshotsDir = Path.Combine(dir, "snapshots");
             Directory.CreateDirectory(snapshotsDir);
             string file = Path.Combine(snapshotsDir, $"{snapshotId}.json");
@@ -402,6 +429,82 @@ namespace CityStoryMod.Systems
                 written++;
             }
             _log.Info($"Scaffolded city dir from template: {cityDir} ({written} files)");
+        }
+
+        // Writes an open sessions/SXX-YYYY-MM-DD-open.md stub when the auto-start
+        // setting is on and no prior session is still open. Lack of an
+        // `ended_real_date:` line in a session file's frontmatter means it's open;
+        // the /session-end command adds that field on close.
+        void EnsureOpenSessionStub(string cityDir)
+        {
+            string sessionsDir = Path.Combine(cityDir, "sessions");
+            Directory.CreateDirectory(sessionsDir);
+
+            int maxN = 0;
+            bool anyOpen = false;
+            foreach (string path in Directory.GetFiles(sessionsDir, "S*-*.md"))
+            {
+                string name = Path.GetFileName(path);
+                int dash = name.IndexOf('-');
+                if (dash > 1 && name.StartsWith("S", StringComparison.Ordinal)
+                    && int.TryParse(name.Substring(1, dash - 1), out int n)
+                    && n > maxN)
+                {
+                    maxN = n;
+                }
+
+                try
+                {
+                    if (!FrontmatterHasEndedRealDate(File.ReadAllText(path))) anyOpen = true;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"Could not read session file {name} for open-session check: {ex.Message}");
+                }
+            }
+
+            if (anyOpen)
+            {
+                _log.Info($"Auto session-start skipped: open session already present in {sessionsDir}");
+                return;
+            }
+
+            int nextN = maxN + 1;
+            string today = DateTime.Now.ToString("yyyy-MM-dd");
+            string filename = $"S{nextN:D2}-{today}-open.md";
+            string filepath = Path.Combine(sessionsDir, filename);
+            string body =
+                "---\n" +
+                $"session: {nextN}\n" +
+                $"real_date: {today}\n" +
+                "in_world_window: TBD\n" +
+                "---\n" +
+                "\n" +
+                "(Session in progress — populated by /session-end.)\n";
+            File.WriteAllText(filepath, body);
+            _log.Info($"Auto session-start wrote {filename}");
+        }
+
+        // Cheap text scan of a session file's leading YAML block — looks for a
+        // non-empty `ended_real_date:` field. Avoids pulling in a YAML parser.
+        static bool FrontmatterHasEndedRealDate(string content)
+        {
+            int first = content.IndexOf("---", StringComparison.Ordinal);
+            if (first < 0) return false;
+            int second = content.IndexOf("---", first + 3, StringComparison.Ordinal);
+            if (second < 0) return false;
+            string yaml = content.Substring(first + 3, second - first - 3);
+            foreach (string line in yaml.Split('\n'))
+            {
+                string trimmed = line.TrimStart();
+                const string key = "ended_real_date:";
+                if (trimmed.StartsWith(key, StringComparison.Ordinal)
+                    && trimmed.Substring(key.Length).Trim().Length > 0)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         static string Slugify(string name)

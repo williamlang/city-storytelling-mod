@@ -27,6 +27,14 @@ namespace CityStoryMod
         [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
+        // When on, the mod writes an open `sessions/SXX-YYYY-MM-DD-open.md` stub
+        // into the city folder the moment a save is loaded (gate: out-of-game →
+        // in-game transition with city ready). The agent's open-session "pid"
+        // rule then picks it up automatically — opening Claude lands in a live
+        // session without the player having to invoke /session-start. Skipped
+        // if an open session already exists, so it never stacks duplicates.
+        public bool AutoSessionStartOnSaveLoad { get; set; }
+
         // LLM credentials for the in-game storyteller. Key/model are kept generic
         // (not Anthropic-prefixed) so they apply to whichever provider is selected
         // below — switch provider, paste a different key, paste a matching model
@@ -73,6 +81,7 @@ namespace CityStoryMod
         {
             ExportEnabled = true;
             IntervalMinutes = 5;
+            AutoSessionStartOnSaveLoad = false;
             Provider = LlmProvider.Anthropic;
             ApiKey = "";
             Model = "claude-opus-4-7";

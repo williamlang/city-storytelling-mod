@@ -1,8 +1,8 @@
 # Snapshot wishlist
 
-What the storytelling agent (this repo) wants from the [mod's snapshot schema](../../city-storytelling-mod/docs/snapshot-schema.md), ranked by narrative leverage — not by ease of implementation.
+What the storytelling agent wants from the [snapshot schema](../../docs/snapshot-schema.md), ranked by narrative leverage — not by ease of implementation.
 
-The mod is the producer; this project is the consumer. This doc is the consumer's voice.
+The mod's `ExportSystem` produces the snapshot; the agent running in the city folder consumes it. This doc is the consumer's voice — even though both halves now ship together in CityStoryMod, the producer/consumer split inside the codebase is still worth keeping clear.
 
 ## Highest narrative leverage
 

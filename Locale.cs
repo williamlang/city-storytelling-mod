@@ -28,6 +28,10 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
                 "Wall-clock minutes between automatic exports. Set to 0 to disable interval exports; the hotkey still works.",
 
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AutoSessionStartOnSaveLoad]"] = "Auto-start session on save load",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AutoSessionStartOnSaveLoad]"] =
+                "When on, the mod writes an open session stub into the city's sessions folder the moment a save is loaded. The next Claude conversation lands in a live session without needing /session-start. Skipped if a prior session is still open. Off by default — when off, the agent prompts you to run /session-start yourself.",
+
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] = "LLM provider",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] =
                 "Which LLM service drives the in-game storyteller. Anthropic (Claude) is the default and the only one implemented today — OpenAI, Gemini and Ollama are wired in via follow-up issues.",

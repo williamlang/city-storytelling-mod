@@ -1,18 +1,19 @@
 # CityStoryMod
 
-A Cities: Skylines 2 mod that exports rich city state to JSON snapshots, feeding the sibling [`city-storytelling`](https://github.com/williamlang/city-storytelling) project — a separate repo of grounded fiction generated from the playthrough.
-
-This mod is the **sensor**. It runs inside CS2, queries the game's ECS for citizens, companies, districts, buildings, and trade flows, and writes snapshots to disk. An external agent reads those snapshots and turns them into characters, events, and stories that drive subsequent gameplay.
+A Cities: Skylines 2 mod that turns a playthrough into a living narrative. The mod exports rich ECS state to JSON snapshots **and** ships a Claude-driven storytelling system inside the same repo. Both halves run together: the mod is the sensor *and* the workspace.
 
 ```
 [CS2 playthrough]
-      │  (mod queries ECS)
+      │  (ExportSystem queries ECS)
       ▼
-[this mod] ──── snapshot-<unix-ts>.json ────► [storytelling agent]
-                                                       │ (ingests, updates canon)
-                                                       ▼
-                                                 [next session's story-driven choices]
+[ModsData/CityStoryMod/<city-slug>/]
+   ├── snapshots/  ← snapshot-<ts>.json
+   ├── canon/, characters/, companies/, places/, factions/, events/, sessions/, stories/, secrets/
+   ├── CLAUDE.md           (scaffolded from template/)
+   └── .claude/commands/   (scaffolded from template/.claude/commands/)
 ```
+
+The mod scaffolds each new city's folder by copying the `template/` tree into it on first export. The agent then runs against that folder via the in-mod `StorytellerDispatcher` (raw Anthropic API in C# — no separate Claude Code CLI required).
 
 ## Stack
 
@@ -46,14 +47,16 @@ No hot-reload. The dev loop is **edit → quit CS2 → `dotnet build` → relaun
 In CS2, with the mod enabled:
 
 - **Ctrl+Shift+E** — trigger an export immediately
+- **Ctrl+Shift+S** — run the storyteller agent against the city folder
 - **Auto-export** — fires every N minutes (configurable; default 5, set to 0 to disable)
+- **Auto session-start on save load** — opt-in; when enabled, the mod writes an open `sessions/` stub the moment a save loads so the agent picks up where the player left off
 
-Both triggers respect the **Export Enabled** toggle in Options → CityStoryMod.
+All export triggers respect the **Export Enabled** toggle in Options → CityStoryMod.
 
-Snapshots land at:
+Snapshots and the rest of the city's content land at:
 
 ```
-%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\snapshot-<unix-ts>.json
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\
 ```
 
 Logs at:
@@ -64,7 +67,7 @@ Logs at:
 
 ## Snapshot schema
 
-See [`docs/snapshot-schema.md`](docs/snapshot-schema.md) for the v0.1 contract. The shape is finalized; fields are being filled in iteratively — most are still `null` / `[]` placeholders today.
+See [`docs/snapshot-schema.md`](docs/snapshot-schema.md) for the v0.1 contract. The shape is finalized; fields are being filled in iteratively.
 
 Currently populated:
 - Metadata header (timestamp, schema version)
@@ -79,9 +82,11 @@ Currently populated:
 | Path | Purpose |
 |---|---|
 | `Mod.cs` | `IMod` entry point. Registers `ExportSystem` and settings. |
-| `Settings.cs` | Options UI bindings (`ExportEnabled`, `IntervalMinutes`). |
+| `Settings.cs` | Options UI bindings. |
 | `Locale.cs` | en-US strings for the Options sidebar. |
-| `Systems/ExportSystem.cs` | Tick loop, hotkey, ECS queries, JSON writer. |
+| `Systems/ExportSystem.cs` | Tick loop, hotkey, ECS queries, JSON writer, city-folder scaffolder. |
+| `Storyteller/` | In-mod LLM agent (raw Anthropic API + tool use). |
+| `template/` | Storytelling workspace template — copied into each city's folder on first export. |
 | `Properties/PublishConfiguration.xml` | Manifest CS2 reads to recognize the mod. |
 | `docs/snapshot-schema.md` | Snapshot JSON contract. |
 
@@ -91,7 +96,7 @@ Working scaffold with a growing schema. Continuing to fill in fields field-by-fi
 
 ## Reference
 
-See [`CLAUDE.md`](CLAUDE.md) for the full orientation: toolchain setup, reference mods worth studying (Carto, InfoLoom, SceneExplorer), known gotchas, and useful links.
+See [`CLAUDE.md`](CLAUDE.md) for the full orientation: toolchain setup, reference mods worth studying (Carto, InfoLoom, SceneExplorer), known gotchas, and useful links. See [`template/CLAUDE.md`](template/CLAUDE.md) for the storytelling agent's playbook.
 
 ## License
 

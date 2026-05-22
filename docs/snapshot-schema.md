@@ -1,13 +1,13 @@
 # Snapshot schema (v0.1)
 
-The mod emits JSON snapshots; the [sibling storytelling project](../../city-storytelling/CLAUDE.md) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
+The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
-This document defines the contract. The mod is the producer; the agent is the consumer.
+This document defines the contract. The mod is the producer; the agent is the consumer. Both ship inside CityStoryMod, but the producer/consumer split is real and stays useful.
 
 ## File naming and location
 
 ```
-%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\snapshot-<unix-ts>.json
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\snapshots\snapshot-<unix-ts>.json
 ```
 
 - One file per snapshot.
@@ -226,6 +226,3 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 - `0.2` — once `districts`, `companies`, and a basic `citizens_sample` are populated. The agent should be useful at this point.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 
-## Side-by-side output mode (planned)
-
-Future setting: write snapshots directly into a sibling repo's `imports/` folder so the agent can consume without a copy step. Off by default.

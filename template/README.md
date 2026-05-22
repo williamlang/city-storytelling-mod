@@ -14,15 +14,17 @@ Tone is grounded realism: present-day North America, mixed records, real frictio
 
 ## How it works
 
-The repo is driven by [Claude Code](https://claude.com/claude-code). Four project slash commands handle the loop:
+This folder is the **per-city storytelling workspace**. It gets scaffolded automatically by the [CityStoryMod](../../) the first time the mod exports a snapshot for a new city — a copy of this template lands at `%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\` and from then on every file generated for that city lives there.
 
-- **`/new-city`** — bootstrap a playthrough from a map screenshot; create the `city/<slug>` branch.
-- **`/session-start`** — open a play session with a state scan.
+The agent drives the loop through four slash commands (in `.claude/commands/`):
+
+- **`/new-city`** — bootstrap a playthrough from a map screenshot; write founding canon and an inferred playthrough premise.
+- **`/session-start`** — open a play session: state scan + opening checklist. Writes an open session stub.
 - **`/story-driven`** — generate 3–5 grounded in-game choices, with characters for and against each.
-- **`/session-end`** — record what happened in-game, propagate consequences, commit.
+- **`/session-end`** — record what happened in-game, propagate consequences, close the session.
 
-`main` holds only the scaffold (conventions, templates, commands). Each playthrough lives on its own `city/<slug>` branch with all of its canon, characters, companies, places, factions, events, sessions, stories, and secrets.
+Sessions are the playthrough's pid: while a session file in `sessions/` lacks an `ended_real_date:`, the player is mid-arc and the next conversation should pick up where they left off (or close the prior session before opening a new one). The mod has an optional `AutoSessionStartOnSaveLoad` setting that writes the open stub the moment a save is loaded, so the agent always sees a fresh session waiting.
 
 ## Read more
 
-[`CLAUDE.md`](./CLAUDE.md) is the full spec — directory layout, file conventions, how arcs and secrets work, the style guide.
+[`CLAUDE.md`](./CLAUDE.md) is the full spec — directory layout, file conventions, how arcs and secrets work, the session lifecycle, the style guide.

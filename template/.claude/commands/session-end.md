@@ -1,8 +1,17 @@
 ---
-description: Close a session — record what happened, propagate consequences, commit
+description: Close a session — record what happened, propagate consequences, mark the session file closed
 ---
 
 Run the session-end checklist.
+
+**0. Find the open session.**
+
+Scan `sessions/` for the most recent file. Expect to find an open stub (no `ended_real_date:` in frontmatter), usually named `SXX-YYYY-MM-DD-open.md` — created either by `/session-start` or by the mod's auto-start-on-save-load setting.
+
+- If the most recent file already has `ended_real_date:` set, there is no open session to close. Tell the player and stop — they likely meant to run `/session-start` first.
+- If `sessions/` is empty, tell the player there's no session to close and stop.
+
+Otherwise, this is the file you'll be updating in steps 3–5 below.
 
 **1. Ask** the player what happened this session:
 - What did you build / zone / change in-game?
@@ -12,7 +21,12 @@ Run the session-end checklist.
 
 **2. Propose the in-world time window** (default 2–6 months per real-world session) and confirm with the player.
 
-**3. Record** to `sessions/SXX-YYYY-MM-DD-title.md` using the session frontmatter. Number SXX from the last session file. Fill `## What I built in-game`, `## Story consequences`, `## Open threads`.
+**3. Record** into the open session file. Update its frontmatter:
+- Keep `session:`, `real_date:` as-is.
+- Set `in_world_window:` (e.g. `2026-03 → 2026-06`).
+- Add `ended_real_date: <today>` — this is the marker that flips the file from open to closed. The presence of this field is what the next `/session-start` checks to know the prior session is wrapped.
+
+Then fill the body: `## What I built in-game`, `## Story consequences`, `## Open threads`.
 
 **4. Propagate consequences**:
 - Advance `places/` status (planned → under-construction → existing). Update `built:` dates.
@@ -24,8 +38,8 @@ Run the session-end checklist.
   - If `false`: stop after the session-log bullet. No `events/` or `stories/` entry for this milestone.
 - Optionally draft short narrative pieces (news clipping, council transcript, developer email) into `stories/` for the most consequential moments.
 
-**5. Summarize for the player**: files added/modified, events written, time advanced, and a count of any secrets whose status shifted. Quoting hidden content in the summary depends on `secrets_visibility` (see CLAUDE.md "Secrets").
+**5. Rename the session file** to reflect its title now that you have one. Pick a short kebab-case title from what happened (e.g. `riverfront-rezoning`, `stadium-vote`) and rename `sessions/SXX-YYYY-MM-DD-open.md` → `sessions/SXX-YYYY-MM-DD-<title>.md`. This is purely cosmetic — the `ended_real_date` field is the actual closed marker — but it keeps `sessions/` scannable.
 
-**6. Propose a commit message** in the existing style — "Advance <city> canon — session N <short title>" — and confirm before committing.
+**6. Summarize for the player**: files added/modified, events written, time advanced, and a count of any secrets whose status shifted. Quoting hidden content in the summary depends on `secrets_visibility` (see CLAUDE.md "Secrets").
 
 **7. Ask** if the player wants to immediately set up the next session via `/story-driven`, or close out here.

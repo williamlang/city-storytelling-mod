@@ -1,26 +1,33 @@
-# City Mod (Cities: Skylines 2 — Data Export)
+# CityStoryMod (Cities: Skylines 2 — Data Export + Storytelling)
 
-A CS2 mod that exports rich city state to JSON, feeding the sibling **city-storytelling project** (a separate repo of grounded fiction generated from the playthrough).
-
-This mod is the **sensor**. It runs inside CS2, queries the game's ECS for citizens, companies, districts, buildings, and trade flows, and writes snapshots to disk. An external agent reads those snapshots and turns them into characters, events, and stories that drive subsequent gameplay.
+A CS2 mod that turns a playthrough into a living narrative. It exports rich ECS state from the game and ships a per-city Claude-driven storytelling system inside the same repo. Both halves run together: the mod is the sensor *and* the workspace.
 
 ## How this fits together
 
-Two repos:
+Two halves, one repo:
 
-- **`city-storytelling`** (sibling) — the narrative. Markdown files: canon, characters, companies, places, factions, events, sessions, stories. The story drives in-game decisions. Remote: `github.com/williamlang/city-storytelling`.
-- **`<this repo>`** — the mod. C# / Unity DOTS. Reads game state, writes JSON.
+- **Mod code** (repo root) — C# / Unity DOTS. Reads game state, writes JSON snapshots, scaffolds the per-city storytelling workspace, and runs Anthropic-API tool-using agents against it.
+- **Storytelling template** (`template/`) — CLAUDE.md, `.claude/commands/`, canon templates, conventions. The mod copies this tree into each new city's data folder.
 
 Data flow:
 
 ```
 [CS2 playthrough]
-      │  (mod queries ECS)
+      │  (ExportSystem queries ECS)
       ▼
-[this mod] ──── snapshot-YYYY-MM-DD.json ────► [storytelling agent]
-                                                       │ (ingests, updates canon)
-                                                       ▼
-                                                 [next session's story-driven choices]
+[ModsData/CityStoryMod/<city-slug>/]
+   ├── snapshots/      ← snapshot-<ts>.json files
+   ├── canon/          ← founding facts, premise
+   ├── characters/     ← people the agent has invented or the player named
+   ├── companies/      ← businesses, employers
+   ├── places/         ← neighborhoods, landmarks
+   ├── factions/       ← teams, parties, unions
+   ├── events/         ← in-world timeline
+   ├── sessions/       ← real-world playthrough log (the "pid")
+   ├── stories/        ← longer narrative pieces
+   ├── secrets/        ← hidden facts driving the story
+   ├── CLAUDE.md       ← scaffolded from template/, drives the agent
+   └── settings.json   ← per-city config
 ```
 
 The story flows player → city; the mod flows city → story. Together they close the loop.
@@ -72,7 +79,7 @@ Logs land at:
 6. **Service coverage** — gaps in police, fire, healthcare, education (where political pressure originates)
 7. **Recent construction** — new buildings since last snapshot, especially services/landmarks
 
-The storytelling project consumes these and synthesizes characters, companies, events, and stories.
+The storytelling agent (running inside each city folder via `StorytellerDispatcher`) consumes these and synthesizes characters, companies, events, and stories into the same folder.
 
 ## How to read game state (high-level)
 
@@ -97,17 +104,21 @@ Key game namespaces:
 
 ## Output format
 
-JSON, one snapshot per export. Default path:
+JSON, one snapshot per export. Each city gets its own folder, scaffolded from `template/` on first export:
 
 ```
-%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\snapshot-<unix-ts>.json
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\
+  ├── snapshots\
+  │   └── snapshot-<unix-ts>.json
+  ├── canon\, characters\, companies\, places\, factions\, events\, sessions\, stories\, secrets\
+  ├── CLAUDE.md           (copied from template/)
+  ├── .claude\commands\   (copied from template/.claude/commands/)
+  └── settings.json
 ```
 
-(In-game date in the filename is TODO — currently just unix timestamp.)
+The agent's working directory is the city folder itself. The mod and the agent communicate purely through files in that folder — there is no separate ingestion step.
 
-Alternative: write directly into a clone of the storytelling repo's `imports/` folder if both repos live side by side.
-
-**Schema is TBD** — design alongside the storytelling repo's ingestion side. Default: one file per snapshot, top-level keys for each entity type (citizens, companies, districts, etc.). The storytelling agent diffs snapshots to detect changes between sessions.
+Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md). The shape is finalized; fields fill in iteratively. The agent diffs successive snapshots to detect changes between sessions.
 
 ## Status
 
@@ -118,7 +129,7 @@ What's wired up:
 - Mod registers a Settings sidebar entry in CS2 Options with localized labels (en-US). Settings: `ExportEnabled` toggle, `IntervalMinutes` slider (0–60, where 0 disables the interval trigger).
 - `ExportSystem : GameSystemBase` is registered into `SystemUpdatePhase.UIUpdate` (ticks regardless of game pause, so wall-clock + hotkey both work even when the player has paused the sim).
 - Two triggers fire `Export()`: **Ctrl+Shift+E** hotkey, plus a wall-clock interval (default 5 min, configurable).
-- Export writes a **v0.1 schema** snapshot to `ModsData\CityStoryMod\snapshot-<unix-ts>.json`. Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md). The shape is finalized; most fields are intentionally `null` / `[]` placeholders and get filled in iteratively. Today `city.citizens_total` is the only populated field beyond the metadata header.
+- Export writes a **v0.1 schema** snapshot to `ModsData\CityStoryMod\<city-slug>\snapshots\snapshot-<unix-ts>.json`. The per-city folder is scaffolded from `template/` on first export. Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md).
 
 Known caveats / open questions:
 - **Raw `Citizen` count ≠ HUD population.** The `Citizen` ECS component is broader: includes tourists, commuters, and transient/spawning entities. For a sensor mod this is more useful than the HUD number, but it surprises people who compare. Will refine to break down resident vs. tourist vs. commuter when expanding the schema.
@@ -133,7 +144,7 @@ The schema is sketched. Filling it in field-by-field, easiest first (full order 
 3. **`districts[]`** (id, name, population) — biggest jump toward per-place storytelling.
 4. **Richer demographics + `citizens_sample[]`** — needs additional citizen-state components (`HouseholdMember`, `Resident`, etc.); find via SceneExplorer or ILSpy on `Game.dll`.
 5. **`companies[]`** — name, sector, headcount.
-6. **Side-by-side output mode.** Settings toggle to write snapshots directly into `<storytelling-repo>/imports/` when both repos live next to each other.
+6. **Companies expansion.** Currently surfaced only inline on renamed buildings. Stand-alone `companies[]` array would let the agent track businesses without a custom-named storefront as the anchor.
 
 ## Gotchas
 
@@ -164,4 +175,4 @@ The schema is sketched. Filling it in field-by-field, easiest first (full order 
 
 ## How to use this file
 
-When opening a fresh Claude Code session in this repo, point it at this file. It contains the orientation needed to pick up cold: stack, conventions, reference mods, gotchas, first tasks. The sibling storytelling project has its own CLAUDE.md describing the canon side.
+When opening a fresh Claude Code session in this repo, point it at this file. It contains the orientation needed to pick up cold: stack, conventions, reference mods, gotchas, first tasks. The agent-side playbook for the storytelling content lives at [`template/CLAUDE.md`](template/CLAUDE.md) — that's what gets scaffolded into each city folder and drives the in-game agent.
