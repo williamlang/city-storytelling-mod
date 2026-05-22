@@ -1,0 +1,115 @@
+// Storyteller prompt window styling. Hand-rolled (not pulling in vanilla CS2
+// classes yet) so the panel works without needing the VanillaComponentResolver
+// pattern. When we want it to truly match the game chrome we can swap these
+// rules for the vanilla panel/button classes via moduleRegistry.find.
+
+.toggle {
+  position: fixed;
+  top: 80rem;
+  right: 16rem;
+  z-index: 9000;
+  padding: 6rem 14rem;
+  background: rgba(20, 28, 36, 0.85);
+  color: #e6eef7;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999rem;
+  font-size: 14rem;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(40, 56, 72, 0.95);
+  }
+}
+
+.panel {
+  position: fixed;
+  top: 80rem;
+  right: 16rem;
+  z-index: 9000;
+  width: 340rem;
+  background: rgba(15, 22, 30, 0.95);
+  color: #e6eef7;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8rem;
+  box-shadow: 0 4rem 16rem rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  padding: 10rem 12rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rem;
+}
+
+.title {
+  font-size: 14rem;
+  font-weight: 600;
+}
+
+.close {
+  background: transparent;
+  border: 0;
+  color: #e6eef7;
+  font-size: 18rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6rem;
+
+  &:hover {
+    color: #ff8c8c;
+  }
+}
+
+.prompt {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  color: #e6eef7;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4rem;
+  padding: 6rem 8rem;
+  font-family: inherit;
+  font-size: 13rem;
+  resize: vertical;
+  min-height: 56rem;
+  box-sizing: border-box;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rem;
+  gap: 8rem;
+}
+
+.status {
+  font-size: 12rem;
+  color: rgba(230, 238, 247, 0.7);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run {
+  background: #2d7dd2;
+  color: #fff;
+  border: 0;
+  border-radius: 4rem;
+  padding: 6rem 14rem;
+  font-size: 13rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    background: rgba(45, 125, 210, 0.35);
+    cursor: not-allowed;
+  }
+
+  &:not(:disabled):hover {
+    background: #4a9bee;
+  }
+}
