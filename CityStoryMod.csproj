@@ -96,4 +96,28 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <!--
+    Restore the webpack-built UI bundle after the toolchain's DeployWIP step.
+
+    Mod.targets runs a ClearOutput step before deploy that wipes the entire
+    Mods/<ModName>/ folder, including the .mjs/.css/images that webpack emits
+    next to the .dll. Without this target, every `dotnet build` removes the UI
+    half of the mod until something separately triggers a webpack rebuild —
+    `npm run dev` only re-emits on source changes, so an idle watcher won't
+    notice the wipe.
+
+    AfterTargets="DeployWIP" so we run only after the C# deploy has placed the
+    .dll. NeedBuild condition matches the rest of Mod.targets (skips in
+    `dotnet build --no-build` / restore-only flows). ContinueOnError so a
+    missing node/npm on a developer machine fails loud in the log but doesn't
+    kill the C# build itself.
+  -->
+  <Target Name="RestoreUIBundle" AfterTargets="DeployWIP" Condition="'$(NeedBuild)' == 'true'">
+    <Message Importance="high" Text="Restoring UI bundle: npm run build (UI/)" />
+    <Exec Command="npm run build"
+          WorkingDirectory="$(MSBuildProjectDirectory)\UI"
+          ContinueOnError="true"
+          IgnoreExitCode="false" />
+  </Target>
+
 </Project>
