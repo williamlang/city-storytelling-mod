@@ -107,26 +107,12 @@ namespace CityStoryMod.Storyteller
 
         // PATH lookup for `claude` / `claude.exe` / `claude.cmd` — Claude Code on
         // Windows ships as a .cmd wrapper around the Node binary. ProcessStartInfo
-        // with UseShellExecute=false won't resolve PATH or extensions on its own,
-        // so we do it explicitly.
-        static string ResolveClaudeExe()
-        {
-            string path = Environment.GetEnvironmentVariable("PATH") ?? "";
-            string[] dirs = path.Split(Path.PathSeparator);
-            string[] names = { "claude.cmd", "claude.exe", "claude.bat", "claude" };
-            foreach (string dir in dirs)
-            {
-                if (string.IsNullOrWhiteSpace(dir)) continue;
-                foreach (string name in names)
-                {
-                    string candidate;
-                    try { candidate = Path.Combine(dir, name); }
-                    catch { continue; }
-                    if (File.Exists(candidate)) return candidate;
-                }
-            }
-            return null;
-        }
+        // with UseShellExecute=false won't resolve PATH or extensions on its own.
+        // Pure helper lives in PathUtils.FindExecutable so the test project can
+        // exercise it without referencing Game.dll.
+        static readonly string[] s_ClaudeExeNames = { "claude.cmd", "claude.exe", "claude.bat", "claude" };
+        static string ResolveClaudeExe() =>
+            PathUtils.FindExecutable(Environment.GetEnvironmentVariable("PATH") ?? "", s_ClaudeExeNames);
 
         static int CountFilesTouchedSince(string cityDir, DateTime sinceUtc)
         {

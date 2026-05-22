@@ -120,6 +120,20 @@ The agent's working directory is the city folder itself. The mod and the agent c
 
 Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md). The shape is finalized; fields fill in iteratively. The agent diffs successive snapshots to detect changes between sessions.
 
+## Testing
+
+CS2 mod code is glued to `Unity.Entities` and `Game.dll` types that aren't easily mockable, and there's no headless ECS world. So tests live in a sibling `CityStoryMod.Tests` project that targets net48 and **does not reference Game.dll** — it covers only the pure-C# subset.
+
+Test what we can without mocking Unity:
+- String/text helpers (`TextUtils.Slugify`, frontmatter parsing)
+- Subprocess helpers (`ClaudeCliRunner.ResolveClaudeExe` with mockable PATH)
+- JSON request-body shape for LLM providers (assert against fixture JSON)
+- Pure value types (`RunResult`, etc.)
+
+Don't try to test Unity-coupled code (`ExportSystem.Export`, anything `EntityManager`-bound, save-load detection, ECS query construction) — the mock infrastructure is more code than the SUT and breaks on every CS2 patch. In-game verification (edit → quit CS2 → build → relaunch → load save) carries that load.
+
+If a useful helper sits inside a `GameSystemBase` subclass, extract it to its own file (e.g. `TextUtils.cs`) so the test project can `<Compile Link>` it without dragging Unity in. Run tests with `dotnet test` from the repo root.
+
 ## Status
 
 Working scaffold with a minimum-viable population export.

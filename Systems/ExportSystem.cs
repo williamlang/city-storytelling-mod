@@ -450,7 +450,7 @@ namespace CityStoryMod.Systems
             // Prefer the stable per-save id resolved by RefreshActiveSaveId from
             // AssetDatabase. Falls back to city-name slug for the brief window between
             // starting a new city and its first save (no SaveGameMetadata yet exists).
-            string citySlug = Slugify(Mod.ActiveSaveId) ?? Slugify(cityName) ?? "_unnamed";
+            string citySlug = TextUtils.Slugify(Mod.ActiveSaveId) ?? TextUtils.Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
             Directory.CreateDirectory(dir);
             EnsureCityScaffolded(dir);
@@ -531,7 +531,7 @@ namespace CityStoryMod.Systems
 
                 try
                 {
-                    if (!FrontmatterHasEndedRealDate(File.ReadAllText(path))) anyOpen = true;
+                    if (!TextUtils.FrontmatterHasEndedRealDate(File.ReadAllText(path))) anyOpen = true;
                 }
                 catch (Exception ex)
                 {
@@ -559,50 +559,6 @@ namespace CityStoryMod.Systems
                 "(Session in progress — populated by /session-end.)\n";
             File.WriteAllText(filepath, body);
             _log.Info($"Auto session-start wrote {filename}");
-        }
-
-        // Cheap text scan of a session file's leading YAML block — looks for a
-        // non-empty `ended_real_date:` field. Avoids pulling in a YAML parser.
-        static bool FrontmatterHasEndedRealDate(string content)
-        {
-            int first = content.IndexOf("---", StringComparison.Ordinal);
-            if (first < 0) return false;
-            int second = content.IndexOf("---", first + 3, StringComparison.Ordinal);
-            if (second < 0) return false;
-            string yaml = content.Substring(first + 3, second - first - 3);
-            foreach (string line in yaml.Split('\n'))
-            {
-                string trimmed = line.TrimStart();
-                const string key = "ended_real_date:";
-                if (trimmed.StartsWith(key, StringComparison.Ordinal)
-                    && trimmed.Substring(key.Length).Trim().Length > 0)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        static string Slugify(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return null;
-            var sb = new StringBuilder(name.Length);
-            bool lastDash = true;
-            foreach (char c in name)
-            {
-                if (char.IsLetterOrDigit(c))
-                {
-                    sb.Append(char.ToLowerInvariant(c));
-                    lastDash = false;
-                }
-                else if (!lastDash)
-                {
-                    sb.Append('-');
-                    lastDash = true;
-                }
-            }
-            string result = sb.ToString().TrimEnd('-');
-            return result.Length > 0 ? result : null;
         }
 
         class DistrictAgg
