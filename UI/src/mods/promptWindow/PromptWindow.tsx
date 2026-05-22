@@ -9,10 +9,14 @@ import {
   tokenSummaryBinding,
   lastErrorBinding,
   availableCommandsBinding,
+  canonTreeBinding,
+  selectedFileBinding,
   submitPrompt,
   cancelRun,
+  selectFile,
   ChatMessage,
   SlashCommand,
+  CanonTree,
 } from "./bindings";
 
 // Top-level Storyteller panel. Toolbar icon (floating variant matches CS2's
@@ -208,14 +212,83 @@ export function StorytellerToolbar() {
               </div>
             </div>
 
-            <aside className={styles.side}>
-              <div className={styles.sideHeader}>Info</div>
-              <div className={styles.sideBody}>{/* TBD */}</div>
-            </aside>
+            <CanonBrowser />
           </div>
         </div>
       )}
     </>
+  );
+}
+
+// Canon browser sidebar. Top half: a tree of entity files grouped by
+// subdir (characters, companies, places, etc.) — fed by canonTreeBinding,
+// which the C# side scans on every storyteller run-finish. Bottom half:
+// content of the currently-selected file, fed by selectedFileBinding (lazy
+// — C# only reads on click). secrets/ is filtered server-side when the
+// city's settings.json has secrets_visibility != "shown".
+function CanonBrowser() {
+  const canonJson = useValue(canonTreeBinding);
+  const selectedFile = useValue(selectedFileBinding);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const tree = useMemo<CanonTree>(() => {
+    try { return JSON.parse(canonJson); } catch { return {}; }
+  }, [canonJson]);
+
+  const subdirs = Object.keys(tree);
+  const isEmpty = subdirs.length === 0;
+
+  const handleSelect = (path: string) => {
+    setSelectedPath(path);
+    selectFile(path);
+  };
+
+  return (
+    <aside className={styles.side}>
+      <div className={styles.sideHeader}>Canon</div>
+      <div className={styles.canonTree}>
+        {isEmpty && (
+          <div className={styles.canonEmpty}>
+            No canon yet. Run <code>/new-city</code> to bootstrap.
+          </div>
+        )}
+        {subdirs.map((sub) => (
+          <div key={sub} className={styles.canonGroup}>
+            <div className={styles.canonGroupHeader}>{sub}</div>
+            {tree[sub].map((entry) => (
+              <button
+                key={entry.path}
+                type="button"
+                className={`${styles.canonItem} ${
+                  selectedPath === entry.path ? styles.canonItemSelected : ""
+                }`}
+                onClick={() => handleSelect(entry.path)}
+                title={entry.path}
+              >
+                {entry.name}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+      {selectedPath && (
+        <div className={styles.canonContent}>
+          <div className={styles.canonContentHeader}>
+            {selectedPath}
+            <button
+              type="button"
+              className={styles.canonContentClose}
+              onClick={() => { setSelectedPath(null); selectFile(""); }}
+            >
+              ×
+            </button>
+          </div>
+          <pre className={styles.canonContentBody}>
+            {selectedFile || "(empty)"}
+          </pre>
+        </div>
+      )}
+    </aside>
   );
 }
 

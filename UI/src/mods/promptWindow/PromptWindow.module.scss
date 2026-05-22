@@ -43,7 +43,7 @@
 }
 
 .side {
-  width: 200rem;
+  width: 240rem;
   flex-shrink: 0;
   margin-left: 12rem;
   border-left: 1px solid rgba(255, 255, 255, 0.12);
@@ -63,11 +63,122 @@
   padding: 2rem 0;
 }
 
-.sideBody {
+// Canon browser: scrollable list of entity-type groups at the top, file
+// content viewer at the bottom when something is selected. Both share
+// the sidebar's vertical space — the tree grows when no file is open,
+// shrinks to max-height when one is.
+.canonTree {
+  flex: 1;
+  min-height: 60rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6rem;
+}
+
+.canonEmpty {
+  font-size: 11rem;
+  color: rgba(230, 238, 247, 0.45);
+  padding: 4rem 2rem;
+  line-height: 1.4;
+
+  code {
+    font-family: monospace;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1rem 3rem;
+    border-radius: 2rem;
+  }
+}
+
+.canonGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.canonGroupHeader {
+  font-size: 10rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+  color: rgba(230, 238, 247, 0.4);
+  padding: 4rem 2rem 2rem;
+}
+
+.canonItem {
+  background: transparent;
+  color: rgba(230, 238, 247, 0.85);
+  border: 0;
+  border-radius: 3rem;
+  padding: 4rem 6rem;
+  text-align: left;
+  font-size: 11rem;
+  font-family: monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover {
+    background: rgba(91, 179, 230, 0.18);
+    color: #e6eef7;
+  }
+}
+
+.canonItemSelected {
+  background: rgba(91, 179, 230, 0.3);
+  color: #ffffff;
+}
+
+.canonContent {
+  flex-shrink: 0;
+  max-height: 200rem;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 6rem;
+  padding-top: 6rem;
+}
+
+.canonContentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10rem;
+  font-family: monospace;
+  color: rgba(230, 238, 247, 0.7);
+  margin-bottom: 4rem;
+  word-break: break-all;
+}
+
+.canonContentClose {
+  background: transparent;
+  border: 0;
+  color: rgba(230, 238, 247, 0.55);
+  font-size: 14rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4rem;
+  flex-shrink: 0;
+
+  &:hover {
+    color: #ff8c8c;
+  }
+}
+
+.canonContentBody {
   flex: 1;
   overflow-y: auto;
-  font-size: 12rem;
-  color: rgba(230, 238, 247, 0.7);
+  font-size: 11rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(230, 238, 247, 0.75);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3rem;
+  padding: 6rem 8rem;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .header {

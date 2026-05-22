@@ -41,12 +41,15 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _tokenSummaryBinding;
         ValueBinding<string> _lastErrorBinding;
         ValueBinding<string> _availableCommandsBinding;
+        ValueBinding<string> _canonTreeBinding;
+        ValueBinding<string> _selectedFileBinding;
 
-        // Caches the city dir we last scanned for slash commands. OnUpdate
-        // rescans (cheap directory listing) when LastExportedCityDir changes,
-        // so command list refreshes as soon as the first export happens for a
-        // city — no separate file watcher needed.
+        // Caches the city dir we last scanned for slash commands / canon
+        // tree. OnUpdate rescans (cheap directory listing) when
+        // LastExportedCityDir changes, so the lists refresh as soon as the
+        // first export happens for a city — no file watcher needed.
         string _commandsScannedCityDir;
+        string _canonScannedCityDir;
 
         readonly List<ChatMessage> _messages = new List<ChatMessage>();
         readonly ConcurrentQueue<ChatMessage> _pendingMessages = new ConcurrentQueue<ChatMessage>();
@@ -70,15 +73,20 @@ namespace CityStoryMod.Systems
             _tokenSummaryBinding = new ValueBinding<string>(Group, "tokenSummary", "");
             _lastErrorBinding = new ValueBinding<string>(Group, "lastError", "");
             _availableCommandsBinding = new ValueBinding<string>(Group, "availableCommands", "[]");
+            _canonTreeBinding = new ValueBinding<string>(Group, "canonTree", "{}");
+            _selectedFileBinding = new ValueBinding<string>(Group, "selectedFile", "");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
             AddBinding(_lastErrorBinding);
             AddBinding(_availableCommandsBinding);
+            AddBinding(_canonTreeBinding);
+            AddBinding(_selectedFileBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
             AddBinding(new TriggerBinding(Group, "clearMessages", OnClearMessages));
+            AddBinding(new TriggerBinding<string>(Group, "selectFile", OnSelectFile));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -135,9 +143,10 @@ namespace CityStoryMod.Systems
             _pendingFinishResult = result;
             // The agent may have written files that change which commands
             // apply (e.g. /new-city writing canon/playthrough-premise.md
-            // should hide its own button). Invalidate the scan cache so the
-            // next OnUpdate tick re-walks the commands dir.
+            // should hide its own button) or added new canon entries.
+            // Invalidate both scan caches so the next OnUpdate tick re-walks.
             _commandsScannedCityDir = null;
+            _canonScannedCityDir = null;
         }
 
         // ---- Drain (main thread) ----
@@ -155,13 +164,20 @@ namespace CityStoryMod.Systems
                 _messagesBinding.Update(JsonConvert.SerializeObject(_messages));
             }
 
-            // Refresh available commands once per city. Cheap (one string
-            // compare in the common case where the city hasn't changed).
+            // Refresh available commands + canon tree once per city, and
+            // again whenever a run finishes (the cache is invalidated in
+            // OnRunFinished). Cheap when the city hasn't changed (one string
+            // compare).
             string cityDir = Mod.LastExportedCityDir;
             if (cityDir != _commandsScannedCityDir)
             {
                 _commandsScannedCityDir = cityDir;
                 _availableCommandsBinding.Update(ScanAvailableCommands(cityDir));
+            }
+            if (cityDir != _canonScannedCityDir)
+            {
+                _canonScannedCityDir = cityDir;
+                _canonTreeBinding.Update(ScanCanonTree(cityDir));
             }
 
             if (_pendingRunStart)
@@ -299,6 +315,102 @@ namespace CityStoryMod.Systems
                     return !(settings?["bootstrapped"]?.Value<bool?>() ?? false);
                 default:
                     return true;
+            }
+        }
+
+        // Canon-browser scan order. Foundational `canon/` first, then the
+        // entity types in roughly the order a player builds up a city. The
+        // `secrets/` dir is gated by settings.secrets_visibility — see
+        // ScanCanonTree below.
+        static readonly string[] s_CanonSubdirs =
+        {
+            "canon", "characters", "companies", "places", "factions",
+            "events", "stories", "sessions", "secrets",
+        };
+
+        // Walks each canon subdir under cityDir, lists *.md files, returns
+        // a JSON object of {subdir → [{name, path}, ...]} for the React
+        // sidebar to render. Skips secrets/ entirely when settings.json's
+        // secrets_visibility is anything other than "shown" (default
+        // "hidden" — see template/CLAUDE.md → Secrets). Empty subdirs are
+        // dropped so the sidebar doesn't show headers with no entries.
+        static string ScanCanonTree(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return "{}";
+            JObject settings = ReadCitySettings(cityDir);
+            bool showSecrets = string.Equals(
+                (string)settings?["secrets_visibility"], "shown", StringComparison.Ordinal);
+
+            var tree = new System.Collections.Specialized.OrderedDictionary();
+            foreach (string sub in s_CanonSubdirs)
+            {
+                if (sub == "secrets" && !showSecrets) continue;
+                string dir = Path.Combine(cityDir, sub);
+                if (!Directory.Exists(dir)) continue;
+                var entries = new List<object>();
+                string[] files = Directory.GetFiles(dir, "*.md");
+                Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                foreach (string path in files)
+                {
+                    string name = Path.GetFileNameWithoutExtension(path);
+                    string rel = sub + "/" + Path.GetFileName(path);
+                    entries.Add(new { name, path = rel });
+                }
+                if (entries.Count > 0) tree[sub] = entries;
+            }
+            return JsonConvert.SerializeObject(tree);
+        }
+
+        // Handles JS "selectFile" trigger. Reads the requested file under
+        // the active city dir and pushes its content onto the selectedFile
+        // binding. Sandbox: rejects any path that resolves outside cityDir
+        // (defends against `..` escapes from the JS side). Caps content at
+        // 50KB so a runaway file doesn't choke the binding.
+        void OnSelectFile(string relPath)
+        {
+            if (string.IsNullOrEmpty(relPath))
+            {
+                _selectedFileBinding.Update("");
+                return;
+            }
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir))
+            {
+                _selectedFileBinding.Update("");
+                return;
+            }
+            string cityFull = Path.GetFullPath(cityDir);
+            string fullPath;
+            try { fullPath = Path.GetFullPath(Path.Combine(cityFull, relPath)); }
+            catch (Exception ex)
+            {
+                _log.Warn($"PromptUISystem: invalid canon file path '{relPath}': {ex.Message}");
+                _selectedFileBinding.Update("");
+                return;
+            }
+            if (!fullPath.StartsWith(cityFull, StringComparison.OrdinalIgnoreCase))
+            {
+                _log.Warn($"PromptUISystem: rejected canon file path outside cityDir: {relPath}");
+                _selectedFileBinding.Update("");
+                return;
+            }
+            if (!File.Exists(fullPath))
+            {
+                _selectedFileBinding.Update("");
+                return;
+            }
+            try
+            {
+                string content = File.ReadAllText(fullPath);
+                const int maxLen = 50000;
+                if (content.Length > maxLen)
+                    content = content.Substring(0, maxLen) + "\n\n[truncated — file is larger than 50KB]";
+                _selectedFileBinding.Update(content);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"PromptUISystem: failed to read canon file {fullPath}: {ex.Message}");
+                _selectedFileBinding.Update("");
             }
         }
 

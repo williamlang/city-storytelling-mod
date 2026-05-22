@@ -11,6 +11,8 @@ export const isRunningBinding = bindValue<boolean>(GROUP, "isRunning", false);
 export const tokenSummaryBinding = bindValue<string>(GROUP, "tokenSummary", "");
 export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
 export const availableCommandsBinding = bindValue<string>(GROUP, "availableCommands", "[]");
+export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
+export const selectedFileBinding = bindValue<string>(GROUP, "selectedFile", "");
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
@@ -25,6 +27,20 @@ export interface ChatMessage {
 export interface SlashCommand {
   name: string;        // filename stem, e.g. "story-driven"
   description: string; // frontmatter `description:` field, "" when missing
+}
+
+// Wire-format mirror of ScanCanonTree() output: { subdir → entries[] }.
+// Subdir keys correspond to canon/ characters/ companies/ places/ factions/
+// events/ stories/ sessions/ secrets/. Empty subdirs are dropped, so the
+// caller can `Object.keys(tree)` and render headers for whatever's there.
+export interface CanonEntry {
+  name: string;  // filename stem
+  path: string;  // relative path under cityDir, e.g. "characters/foo.md"
+}
+export type CanonTree = Record<string, CanonEntry[]>;
+
+export function selectFile(relPath: string) {
+  trigger(GROUP, "selectFile", relPath);
 }
 
 export function submitPrompt(prompt: string) {
