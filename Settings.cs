@@ -11,7 +11,19 @@ namespace CityStoryMod
 {
     public enum LlmProvider
     {
-        Anthropic,
+        // Anthropic API direct — Conversation builds tool-use messages and posts
+        // them to api.anthropic.com. Requires an API key from console.anthropic.com.
+        // Cost lands on that key's billing.
+        AnthropicAPI,
+
+        // Anthropic via Claude Code CLI — spawns `claude -p` as a subprocess in the
+        // city dir. Uses the user's existing Claude Code login (Max subscription or
+        // API key configured in the CLI), so no key needs to be pasted into the mod.
+        // Tool loop is Claude Code's own (Read/Write/Edit/Glob/Grep against the city
+        // dir), not the AgentLoop in this mod. Requires Claude Code installed and
+        // logged in (`claude --version` works from the same env CS2 was launched in).
+        AnthropicCLI,
+
         OpenAI,
         Gemini,
         Ollama,
@@ -43,6 +55,7 @@ namespace CityStoryMod
         public LlmProvider Provider { get; set; }
 
         [SettingsUITextInput]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(IsCliProvider))]
         public string ApiKey { get; set; }
 
         [SettingsUITextInput]
@@ -50,13 +63,19 @@ namespace CityStoryMod
 
         // Ollama runs against a local (or LAN) HTTP endpoint instead of a hosted
         // API — only relevant when Provider == Ollama, hidden otherwise to keep
-        // the panel uncluttered for the other three providers.
+        // the panel uncluttered for the other providers.
         [SettingsUITextInput]
         [SettingsUIHideByCondition(typeof(Settings), nameof(IsOllamaProvider), invert: true)]
         public string OllamaBaseUrl { get; set; }
 
         [SettingsUIHidden]
         public bool IsOllamaProvider => Provider == LlmProvider.Ollama;
+
+        // CLI providers don't read ApiKey — they use the credentials configured in
+        // the external CLI itself (e.g. `claude /login`). Used to hide the API key
+        // field from the panel when the CLI path is selected.
+        [SettingsUIHidden]
+        public bool IsCliProvider => Provider == LlmProvider.AnthropicCLI;
 
         // Read-only status surface for the in-game storyteller dispatcher. CS2's
         // settings UI has no dedicated read-only display widget, so this is a text
@@ -82,7 +101,7 @@ namespace CityStoryMod
             ExportEnabled = true;
             IntervalMinutes = 5;
             AutoSessionStartOnSaveLoad = false;
-            Provider = LlmProvider.Anthropic;
+            Provider = LlmProvider.AnthropicAPI;
             ApiKey = "";
             Model = "claude-opus-4-7";
             OllamaBaseUrl = "http://localhost:11434";

@@ -22,10 +22,17 @@ namespace CityStoryMod.Storyteller
                 if (string.IsNullOrEmpty(cityDir))
                     return RunResult.Failed("No exported city yet — trigger an export (Ctrl+Shift+E) first.");
 
+                // CLI providers bypass AgentLoop — Claude Code runs its own tool
+                // loop using its own Read/Write/Edit tools against the city dir.
+                if (s.Provider == LlmProvider.AnthropicCLI)
+                {
+                    return await ClaudeCliRunner.RunAsync(cityDir, commandName, log, ct);
+                }
+
                 Conversation conv;
                 switch (s.Provider)
                 {
-                    case LlmProvider.Anthropic:
+                    case LlmProvider.AnthropicAPI:
                         conv = new AnthropicConversation(s.ApiKey, s.Model, log);
                         break;
 
