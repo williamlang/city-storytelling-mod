@@ -1,5 +1,7 @@
 ---
 description: Bootstrap a new city — name, founding history, map, inferred premise
+hide_when_exists: canon/playthrough-premise.md, canon/playthrough-goal.md
+hide_when_dir_nonempty: sessions, characters, stories, events
 ---
 
 Start a new playthrough. By the end, this city folder has `canon/city.md` and `canon/playthrough-premise.md` populated enough that `/session-start` can take over.

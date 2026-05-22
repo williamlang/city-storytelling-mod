@@ -235,13 +235,20 @@ namespace CityStoryMod.Systems
 
         // Walks <cityDir>/.claude/commands/*.md, extracts (name, description)
         // for each, filters out commands that don't apply to the current state
-        // of the city dir, returns a JSON array sorted alphabetically by name.
-        // Returns "[]" when the dir doesn't exist (no city exported yet).
+        // of the city dir per their own frontmatter rules, returns a JSON
+        // array sorted alphabetically by name. Returns "[]" when the dir
+        // doesn't exist (no city exported yet).
         //
-        // Applicability filter (see IsCommandApplicable) is what hides
-        // single-use commands like /new-city after they've already run. The
-        // scan re-runs after every storyteller run finishes so newly-written
-        // marker files take effect immediately.
+        // Applicability rules live in each command file's YAML frontmatter:
+        //   hide_when_exists: <comma-separated paths relative to city dir>
+        //     — hide when any of those files exist
+        //   hide_when_dir_nonempty: <comma-separated dirs relative to city dir>
+        //     — hide when any of those dirs contains any file
+        //
+        // Declarative-in-the-command-file lets each command own its own
+        // visibility — no central hardcoded registry. Re-scans after every
+        // storyteller run so newly-written marker files take effect on the
+        // next tick.
         static string ScanAvailableCommands(string cityDir)
         {
             if (string.IsNullOrEmpty(cityDir)) return "[]";
@@ -253,70 +260,50 @@ namespace CityStoryMod.Systems
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 if (string.IsNullOrEmpty(name)) continue;
-                if (!IsCommandApplicable(name, cityDir)) continue;
-                string description = null;
-                try
-                {
-                    description = TextUtils.GetFrontmatterField(File.ReadAllText(path), "description");
-                }
+
+                string content;
+                try { content = File.ReadAllText(path); }
                 catch (Exception ex)
                 {
                     _log.Warn($"PromptUISystem: failed to read command file {path}: {ex.Message}");
+                    continue;
                 }
-                commands.Add(new SlashCommand { name = name, description = description ?? "" });
+
+                if (!IsCommandApplicable(content, cityDir)) continue;
+
+                string description = TextUtils.GetFrontmatterField(content, "description") ?? "";
+                commands.Add(new SlashCommand { name = name, description = description });
             }
             commands.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             return JsonConvert.SerializeObject(commands);
         }
 
-        // Per-command applicability rules. Default-true so unrecognized
-        // commands aren't accidentally hidden. Filesystem-coupled and CS2-
-        // independent — could be extracted into a pure helper + tests if the
-        // ruleset grows beyond a couple of switch arms.
+        // Evaluates a command file's hide_when_* frontmatter against the
+        // current city dir filesystem state. Returns false (hide) when any
+        // listed path under hide_when_exists exists or any listed dir under
+        // hide_when_dir_nonempty has at least one file. Returns true (show)
+        // when no rules are declared or all rules pass.
         //
-        //   new-city  → hide once any storyteller work has happened.
-        //               `/new-city` is "run once per city, before the first
-        //               /session-start". Detection prefers being broad over
-        //               narrow: any file in any entity dir means the city is
-        //               no longer brand-new, regardless of which exact
-        //               canon/playthrough-*.md file the run wrote (the name
-        //               of that file has changed across template versions).
-        static bool IsCommandApplicable(string name, string cityDir)
+        // Paths in frontmatter are relative to cityDir. Forward slashes work
+        // even on Windows because Path.Combine normalizes separators.
+        static bool IsCommandApplicable(string commandFileContent, string cityDir)
         {
-            switch (name)
+            string[] hideWhenExists = TextUtils.GetFrontmatterFieldList(commandFileContent, "hide_when_exists");
+            foreach (string rel in hideWhenExists)
             {
-                case "new-city":
-                    return !HasStorytellerWork(cityDir);
-                default:
-                    return true;
+                string full = Path.Combine(cityDir, rel.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(full)) return false;
             }
-        }
 
-        // True if the city dir contains any file the storyteller would have
-        // written. The template scaffolds these subdirs empty (or doesn't
-        // create them at all — embedded resources are files, not dirs); any
-        // content under them means /new-city or a session has run. Also
-        // checks for a playthrough-premise.md / playthrough-goal.md sentinel
-        // under canon/ (those names have shifted across template versions).
-        static readonly string[] s_StorytellerEntitySubdirs =
-        {
-            "sessions", "characters", "companies", "places",
-            "factions", "events", "stories", "secrets",
-        };
-        static bool HasStorytellerWork(string cityDir)
-        {
-            if (string.IsNullOrEmpty(cityDir)) return false;
-            string canonDir = Path.Combine(cityDir, "canon");
-            if (File.Exists(Path.Combine(canonDir, "playthrough-premise.md"))) return true;
-            if (File.Exists(Path.Combine(canonDir, "playthrough-goal.md"))) return true;
-            foreach (string sub in s_StorytellerEntitySubdirs)
+            string[] hideWhenDirNonempty = TextUtils.GetFrontmatterFieldList(commandFileContent, "hide_when_dir_nonempty");
+            foreach (string rel in hideWhenDirNonempty)
             {
-                string dir = Path.Combine(cityDir, sub);
+                string dir = Path.Combine(cityDir, rel.Replace('/', Path.DirectorySeparatorChar));
                 if (!Directory.Exists(dir)) continue;
                 if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any())
-                    return true;
+                    return false;
             }
-            return false;
+            return true;
         }
     }
 
