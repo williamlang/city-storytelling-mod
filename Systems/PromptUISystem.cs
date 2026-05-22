@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.UI.Binding;
@@ -273,20 +274,49 @@ namespace CityStoryMod.Systems
         // independent — could be extracted into a pure helper + tests if the
         // ruleset grows beyond a couple of switch arms.
         //
-        //   new-city  → hide once canon/playthrough-premise.md exists.
-        //               `/new-city` writes that file and is meant to run once
-        //               per city, before any /session-start. Its presence is
-        //               the canonical "this city has been bootstrapped"
-        //               signal (see template/CLAUDE.md → Scaffold arrival).
+        //   new-city  → hide once any storyteller work has happened.
+        //               `/new-city` is "run once per city, before the first
+        //               /session-start". Detection prefers being broad over
+        //               narrow: any file in any entity dir means the city is
+        //               no longer brand-new, regardless of which exact
+        //               canon/playthrough-*.md file the run wrote (the name
+        //               of that file has changed across template versions).
         static bool IsCommandApplicable(string name, string cityDir)
         {
             switch (name)
             {
                 case "new-city":
-                    return !File.Exists(Path.Combine(cityDir, "canon", "playthrough-premise.md"));
+                    return !HasStorytellerWork(cityDir);
                 default:
                     return true;
             }
+        }
+
+        // True if the city dir contains any file the storyteller would have
+        // written. The template scaffolds these subdirs empty (or doesn't
+        // create them at all — embedded resources are files, not dirs); any
+        // content under them means /new-city or a session has run. Also
+        // checks for a playthrough-premise.md / playthrough-goal.md sentinel
+        // under canon/ (those names have shifted across template versions).
+        static readonly string[] s_StorytellerEntitySubdirs =
+        {
+            "sessions", "characters", "companies", "places",
+            "factions", "events", "stories", "secrets",
+        };
+        static bool HasStorytellerWork(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return false;
+            string canonDir = Path.Combine(cityDir, "canon");
+            if (File.Exists(Path.Combine(canonDir, "playthrough-premise.md"))) return true;
+            if (File.Exists(Path.Combine(canonDir, "playthrough-goal.md"))) return true;
+            foreach (string sub in s_StorytellerEntitySubdirs)
+            {
+                string dir = Path.Combine(cityDir, sub);
+                if (!Directory.Exists(dir)) continue;
+                if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any())
+                    return true;
+            }
+            return false;
         }
     }
 
