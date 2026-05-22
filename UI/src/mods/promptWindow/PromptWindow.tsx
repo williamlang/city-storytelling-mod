@@ -10,7 +10,6 @@ import {
   lastErrorBinding,
   submitPrompt,
   cancelRun,
-  clearMessages,
   ChatMessage,
 } from "./bindings";
 
@@ -108,14 +107,6 @@ export function StorytellerToolbar() {
             <span className={styles.status}>
               {tokenSummary || (isRunning ? "Running…" : "Idle")}
             </span>
-            <button
-              type="button"
-              className={styles.clear}
-              onClick={() => clearMessages()}
-              disabled={messages.length === 0}
-            >
-              Clear
-            </button>
             {isRunning ? (
               <button
                 type="button"
