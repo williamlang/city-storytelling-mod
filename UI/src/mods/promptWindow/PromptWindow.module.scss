@@ -12,7 +12,7 @@
   top: 60rem;
   left: 8rem;
   z-index: 9000;
-  width: 420rem;
+  width: 640rem;
   max-height: 560rem;
   background: rgba(15, 22, 30, 0.96);
   color: #e6eef7;
@@ -23,6 +23,51 @@
   flex-direction: column;
   padding: 10rem 12rem;
   gap: 8rem;
+}
+
+// Body is a two-column split: chat/prompt/actions on the left, info pane
+// on the right. Sidebar is intentionally empty for now — meant to grow
+// into a live snapshot / canon info surface.
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+  min-width: 0;
+}
+
+.side {
+  width: 200rem;
+  flex-shrink: 0;
+  margin-left: 12rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  padding-left: 12rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6rem;
+  min-height: 0;
+}
+
+.sideHeader {
+  font-size: 11rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+  color: rgba(230, 238, 247, 0.55);
+  padding: 2rem 0;
+}
+
+.sideBody {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 12rem;
+  color: rgba(230, 238, 247, 0.7);
 }
 
 .header {
@@ -168,9 +213,10 @@
 }
 
 .commandToggleChevron {
-  width: 10rem;
-  height: 10rem;
+  width: 12rem;
+  height: 12rem;
   flex-shrink: 0;
+  display: block;
 }
 
 .commandMenu {

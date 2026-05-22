@@ -136,70 +136,82 @@ export function StorytellerToolbar() {
             </button>
           </div>
 
-          <div className={styles.chat} ref={scrollRef}>
-            {messages.length === 0 && (
-              <div className={styles.empty}>
-                Ask the storyteller to do something. Free-form prompts or pick
-                a command from the menu below.
+          {/* Body splits into main (chat + prompt + actions) and a side
+              panel intended for live snapshot/canon info. The side stays
+              empty for now — wired up later. */}
+          <div className={styles.body}>
+            <div className={styles.main}>
+              <div className={styles.chat} ref={scrollRef}>
+                {messages.length === 0 && (
+                  <div className={styles.empty}>
+                    Ask the storyteller to do something. Free-form prompts or pick
+                    a command from the menu below.
+                  </div>
+                )}
+                {messages.map((m, i) => (
+                  <ChatRow key={i} msg={m} />
+                ))}
+                {lastError && (
+                  <div className={`${styles.row} ${styles.errorRow}`}>
+                    <span className={styles.role}>error</span>
+                    <span className={styles.text}>{lastError}</span>
+                  </div>
+                )}
               </div>
-            )}
-            {messages.map((m, i) => (
-              <ChatRow key={i} msg={m} />
-            ))}
-            {lastError && (
-              <div className={`${styles.row} ${styles.errorRow}`}>
-                <span className={styles.role}>error</span>
-                <span className={styles.text}>{lastError}</span>
-              </div>
-            )}
-          </div>
 
-          <textarea
-            className={styles.prompt}
-            placeholder={isRunning ? "Running…" : "Type a prompt…"}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            rows={3}
-            disabled={isRunning}
-          />
-
-          <div className={styles.footer}>
-            <span className={styles.status}>
-              {tokenSummary || (isRunning ? "Running…" : "Idle")}
-            </span>
-            <div className={styles.actions}>
-              <CommandMenu
-                commands={commands}
-                open={commandMenuOpen}
+              <textarea
+                className={styles.prompt}
+                placeholder={isRunning ? "Running…" : "Type a prompt…"}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                rows={3}
                 disabled={isRunning}
-                onToggle={() => setCommandMenuOpen((v) => !v)}
-                onPick={runCommand}
               />
-              {isRunning ? (
-                <button
-                  type="button"
-                  className={styles.cancel}
-                  onClick={() => cancelRun()}
-                >
-                  Cancel
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.run}
-                  disabled={!canSubmit}
-                  onClick={handleSubmit}
-                >
-                  Run
-                </button>
-              )}
+
+              <div className={styles.footer}>
+                <span className={styles.status}>
+                  {tokenSummary || (isRunning ? "Running…" : "Idle")}
+                </span>
+                <div className={styles.actions}>
+                  <CommandMenu
+                    commands={commands}
+                    open={commandMenuOpen}
+                    disabled={isRunning}
+                    onToggle={() => setCommandMenuOpen((v) => !v)}
+                    onPick={runCommand}
+                  />
+                  {isRunning ? (
+                    <button
+                      type="button"
+                      className={styles.cancel}
+                      onClick={() => cancelRun()}
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.run}
+                      disabled={!canSubmit}
+                      onClick={handleSubmit}
+                    >
+                      Run
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
+
+            <aside className={styles.side}>
+              <div className={styles.sideHeader}>Info</div>
+              <div className={styles.sideBody}>{/* TBD */}</div>
+            </aside>
           </div>
         </div>
       )}
@@ -266,17 +278,17 @@ function CommandMenu({
         <span>Commands</span>
         {/* Inline SVG chevron — CS2's Coherent UI font doesn't ship the
             ▾ glyph (U+25BE), which renders as tofu / a tiny square. SVG
-            guarantees the chevron actually paints. */}
+            guarantees the chevron actually paints. Stroke color is set
+            explicitly because Coherent UI doesn't propagate `color` to
+            SVG `currentColor` references in some builds. */}
         <svg
           viewBox="0 0 10 10"
-          width="10"
-          height="10"
           aria-hidden="true"
           className={styles.commandToggleChevron}
         >
           <path
-            d="M2 3.5 L5 6.5 L8 3.5"
-            stroke="currentColor"
+            d="M2 4 L5 7 L8 4"
+            stroke="#cfe5f5"
             strokeWidth="1.5"
             fill="none"
             strokeLinecap="round"
