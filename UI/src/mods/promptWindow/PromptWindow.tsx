@@ -263,7 +263,26 @@ function CommandMenu({
         disabled={disabled}
         onClick={onToggle}
       >
-        Commands ▾
+        <span>Commands</span>
+        {/* Inline SVG chevron — CS2's Coherent UI font doesn't ship the
+            ▾ glyph (U+25BE), which renders as tofu / a tiny square. SVG
+            guarantees the chevron actually paints. */}
+        <svg
+          viewBox="0 0 10 10"
+          width="10"
+          height="10"
+          aria-hidden="true"
+          className={styles.commandToggleChevron}
+        >
+          <path
+            d="M2 3.5 L5 6.5 L8 3.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
       {open && (
         <div className={styles.commandMenu}>

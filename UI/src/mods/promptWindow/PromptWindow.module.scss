@@ -142,6 +142,9 @@
 // is the primary blue, Commands is the muted-blue secondary — so they're
 // visually differentiated by role, not size.
 .commandToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rem;
   background: rgba(91, 179, 230, 0.18);
   color: #cfe5f5;
   border: 1px solid rgba(91, 179, 230, 0.4);
@@ -162,6 +165,12 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
+}
+
+.commandToggleChevron {
+  width: 10rem;
+  height: 10rem;
+  flex-shrink: 0;
 }
 
 .commandMenu {
@@ -238,13 +247,18 @@
   margin-top: 8rem;
 }
 
-// Right-aligned action group: Commands button + Run/Cancel button. Own
-// gap controls inter-button spacing independent of the footer's gap (which
-// separates status from this group as a whole).
+// Right-aligned action group: Commands button + Run/Cancel button.
+// Inter-button spacing comes from explicit margin-left on every child
+// past the first — flex `gap` is inconsistent in CS2's Coherent UI in
+// some builds, but a regular margin always lands. The footer's gap
+// still separates this group from the status text.
 .actions {
   display: flex;
   align-items: center;
-  gap: 8rem;
+
+  > * + * {
+    margin-left: 12rem;
+  }
 }
 
 .status {
