@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import storytellerIcon from "../../assets/storyteller_icon.svg";
 import styles from "./PromptWindow.module.scss";
 import { useDrag } from "./useDrag";
+import { parseFrontmatter } from "./frontmatter";
 import {
   messagesBinding,
   isRunningBinding,
@@ -343,7 +344,7 @@ function FileModal({
       </div>
       <div className={styles.fileModalBody}>
         {entry ? (
-          <ReactMarkdown>{entry.content}</ReactMarkdown>
+          <FileContent content={entry.content} />
         ) : (
           <div className={styles.fileModalMissing}>
             File no longer in canon tree — it may have been deleted or renamed.
@@ -351,6 +352,31 @@ function FileModal({
         )}
       </div>
     </div>
+  );
+}
+
+// Renders a canon file's content: frontmatter (if any) as a styled
+// metadata block, then the body as markdown. Splitting the two halves
+// stops the YAML `name: value` lines from collapsing into one
+// run-on paragraph (markdown treats single newlines as whitespace) and
+// surfaces the metadata as scannable structure.
+function FileContent({ content }: { content: string }) {
+  const { fields, body } = useMemo(() => parseFrontmatter(content), [content]);
+  const fieldNames = Object.keys(fields);
+  return (
+    <>
+      {fieldNames.length > 0 && (
+        <dl className={styles.fileFrontmatter}>
+          {fieldNames.map((k) => (
+            <div key={k} className={styles.fileFrontmatterRow}>
+              <dt className={styles.fileFrontmatterKey}>{k}</dt>
+              <dd className={styles.fileFrontmatterValue}>{fields[k]}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {body && <ReactMarkdown>{body}</ReactMarkdown>}
+    </>
   );
 }
 

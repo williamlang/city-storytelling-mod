@@ -301,6 +301,46 @@
   color: rgba(230, 238, 247, 0.55);
 }
 
+// Frontmatter metadata block — definition-list style with monospace keys,
+// shown above the body markdown inside FileModal. Each row is a flex
+// container so the key column wraps narrowly and the value column takes
+// the rest. Border-bottom separator on each row so a dense block reads
+// cleanly without being noisy.
+.fileFrontmatter {
+  margin: 0 0 12rem 0;
+  padding: 6rem 10rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(91, 179, 230, 0.25);
+  border-radius: 4rem;
+  font-size: 11rem;
+  line-height: 1.4;
+}
+
+.fileFrontmatterRow {
+  display: flex;
+  gap: 12rem;
+  padding: 3rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  &:last-child { border-bottom: 0; }
+}
+
+.fileFrontmatterKey {
+  width: 90rem;
+  flex-shrink: 0;
+  font-family: monospace;
+  color: rgba(91, 179, 230, 0.85);
+  margin: 0;
+  text-transform: lowercase;
+}
+
+.fileFrontmatterValue {
+  margin: 0;
+  flex: 1;
+  color: rgba(230, 238, 247, 0.92);
+  word-break: break-word;
+}
+
 .header {
   display: flex;
   align-items: center;
