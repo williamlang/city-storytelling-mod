@@ -33,8 +33,25 @@ const registry = new Map<string, LocalBinding<any>>();
 
 export function bindValue<T>(group: string, name: string, fallback: T): LocalBinding<T> {
   const key = `${group}.${name}`;
-  if (!registry.has(key)) registry.set(key, new LocalBinding<T>(fallback));
-  return registry.get(key)!;
+  const existing = registry.get(key);
+  if (existing) {
+    // Dev-mock semantics: subsequent bindValue calls for the same key update
+    // the value. Diverges slightly from production (where bindValue is a
+    // lookup), but it's how the seed fixtures and tests express "give this
+    // binding this value right now." Production code rarely calls bindValue
+    // twice for the same key, so the divergence is harmless in practice.
+    existing.update(fallback);
+    return existing;
+  }
+  const fresh = new LocalBinding<T>(fallback);
+  registry.set(key, fresh);
+  return fresh;
+}
+
+// Test-only: clear the mock registry so each test starts fresh. Not part
+// of the production cs2/api shape — exported here for the Vitest setup.
+export function _resetBindings() {
+  registry.clear();
 }
 
 export function useValue<T>(binding: LocalBinding<T>): T {

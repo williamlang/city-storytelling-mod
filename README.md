@@ -50,8 +50,7 @@ In CS2, with the mod enabled:
 - **Ctrl+Shift+S** — run the storyteller agent against the city folder
 - **Auto-export** — fires every N minutes (configurable; default 5, set to 0 to disable)
 - **Auto session-start on save load** — opt-in; when enabled, the mod writes an open `sessions/` stub the moment a save loads so the agent picks up where the player left off
-
-All export triggers respect the **Export Enabled** toggle in Options → CityStoryMod.
+- **In-game prompt panel** — toolbar icon (top-left) opens the storyteller panel: chat with the model, run slash commands, browse canon files in a sidebar
 
 Snapshots and the rest of the city's content land at:
 
@@ -97,6 +96,62 @@ Working scaffold with a growing schema. Continuing to fill in fields field-by-fi
 ## Reference
 
 See [`CLAUDE.md`](CLAUDE.md) for the full orientation: toolchain setup, reference mods worth studying (Carto, InfoLoom, SceneExplorer), known gotchas, and useful links. See [`template/CLAUDE.md`](template/CLAUDE.md) for the storytelling agent's playbook.
+
+## Contributing
+
+The mod has two halves — C# (running inside CS2) and React/TypeScript (the in-game UI panel) — and each has its own dev loop.
+
+### Setup
+
+Prereqs: the CS2 Modding Toolchain (Windows-only, install from inside CS2 → Options → Modding) plus a recent .NET SDK and Node.js 18+.
+
+```sh
+# C# side: auto-deploys to the Mods folder on build
+dotnet build
+
+# React side: install once, then watch or one-shot build
+cd UI
+npm install
+npm run build       # one-shot; UI bundle lands next to the .dll
+npm run dev         # webpack watch — rebuilds on save
+```
+
+A successful `dotnet build` automatically runs `npm run build` at the end (post-build target in `CityStoryMod.csproj` — see the `RestoreUIBundle` step). Mod.targets wipes the deploy folder between builds and would otherwise nuke the webpack output; the auto-restore keeps both halves in sync.
+
+### Iterating on the UI without CS2
+
+For React-only changes (layout, component logic, state), `npm run dev:web` from `UI/` launches a Vite dev server at http://localhost:5173 with mocked `cs2/*` modules. Edit a file in `UI/src/`, see the change in the browser instantly. Caveats:
+
+- Mocks lie about Coherent UI quirks (rem scaling, missing font glyphs, SVG `currentColor`). Final visual sign-off still requires CS2.
+- The seed data the harness renders against is in [`UI/dev/fixtures/sample-city.ts`](UI/dev/fixtures/sample-city.ts). Edit that file to change what the panel sees on first paint (different messages, different canon tree, error state, mid-run state, etc.).
+- The mocked `cs2/api` lives in [`UI/dev/mocks/cs2-api.tsx`](UI/dev/mocks/cs2-api.tsx). Add a `trigger` handler there to fake a C#-side response when iterating on user actions.
+
+### Tests
+
+Both halves have test suites that **don't** require CS2 to run.
+
+**C# tests** (xUnit + FluentAssertions, in `tests/CityStoryMod.Tests/`) cover the pure-C# subset — string helpers, frontmatter parsing, PATH lookup. Unity-coupled code (`ExportSystem.Export`, ECS queries) is intentionally not tested; in-game verification carries that load. See `CLAUDE.md` → Testing for the philosophy.
+
+```sh
+dotnet test tests/CityStoryMod.Tests/CityStoryMod.Tests.csproj
+```
+
+**JS tests** (Vitest + React Testing Library, alongside source files) cover hook logic and component interactions against the mocked `cs2/*` bindings. Same setup as the dev harness — same mocks, same fixtures.
+
+```sh
+cd UI
+npm test           # one-shot
+npm run test:watch # watch mode
+```
+
+When adding a new React component, drop a `Foo.test.tsx` next to it. Vitest auto-discovers via the `src/**/*.{test,spec}.{ts,tsx}` glob.
+
+### Dev loop summary
+
+- **C# edit:** quit CS2 → `dotnet build` → relaunch CS2 → load save. UI bundle auto-restored as part of build.
+- **React edit, layout/logic only:** `npm run dev:web` running in the background; edit and the browser hot-reloads.
+- **React edit, ready to verify in CS2:** quit CS2 → `dotnet build` (or `npm run build` in `UI/`) → relaunch.
+- **Tests:** `dotnet test` and `npm test` whenever; neither needs CS2.
 
 ## License
 
