@@ -8,7 +8,8 @@ namespace CityStoryMod.Storyteller
     // then hands it to AgentLoop. Two entry points:
     //
     //   Build(commandName)  — loads .claude/commands/<name>.md as the prompt
-    //                         (used by the Ctrl+Shift+S hotkey path)
+    //                         (used when the prompt panel's command dropdown
+    //                         picks a slash command)
     //   BuildFreeForm(text) — uses the given text directly as the user prompt
     //                         (used by the in-game prompt panel)
     //

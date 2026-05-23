@@ -60,9 +60,10 @@ In CS2, with the mod enabled:
 
 - **Toolbar icon (top-left)** — opens the in-game storyteller panel: chat with the model, pick a slash command from a dropdown, browse the city's canon in a sidebar, click any canon entry to open it in a draggable modal with rendered markdown. This is the primary surface.
 - **Ctrl+Shift+E** — trigger a snapshot export immediately.
-- **Ctrl+Shift+S** — run the default storyteller command (legacy hotkey; the panel is more flexible).
 - **Auto-export** — fires every N minutes (configurable; default 5, set to 0 to disable).
 - **Auto session-start on save load** — opt-in; when enabled, writes an open `sessions/` stub the moment a save loads so the agent picks up where the player left off.
+
+> **Heads-up on the prompt box.** There's a soft guardrail in `template/CLAUDE.md` that tells the storyteller to refuse off-scope prompts in-character (so a stray "write me a python script" doesn't burn your Max subscription or corrupt the canon). It's prompt-level only; a determined prompt-injector can talk the model around it, and someone who actually wanted to torch your canon could just delete files directly. Don't leave the game unlocked in a coffee shop.
 
 Snapshots and per-city content land at:
 
@@ -78,7 +79,7 @@ Logs at:
 
 ## Snapshot schema
 
-[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the v0.1 contract; shape finalized, fields filled in iteratively. [`docs/snapshot-wishlist.md`](docs/snapshot-wishlist.md) is the storyteller's voice — what to add next, ranked by narrative leverage.
+[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the v0.1 contract; shape finalized, fields filled in iteratively. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
 
 Currently populated:
 - Metadata header (timestamp, schema version)
@@ -103,14 +104,13 @@ Currently populated:
 | `UI/` | React/TS in-game panel. `src/mods/storyteller/` per-component. `dev/` is the Vite out-of-CS2 harness. |
 | `tests/CityStoryMod.Tests/` | xUnit + FluentAssertions, pure-C# tests against linked source files. |
 | `docs/snapshot-schema.md` | Snapshot JSON contract. |
-| `docs/snapshot-wishlist.md` | Developer planning — fields ranked by narrative leverage. |
 | `Properties/PublishConfiguration.xml` | Manifest CS2 reads to recognize the mod. |
 
 ## Status
 
 Working end-to-end: snapshots export, the agent runs from inside CS2 (no separate CLI required if using API providers), the in-game panel handles free-form prompts and slash commands, the canon browser shows the city's story files live. Template improvements migrate forward automatically without clobbering player edits.
 
-Open issues track the next chunks: per-save branching canon (#12), out-of-canon refusal hardening (#15), optional Carto spatial-data integration (#17). The snapshot schema continues to fill in field-by-field — see [`docs/snapshot-wishlist.md`](docs/snapshot-wishlist.md) for priority order.
+Next chunks tracked on the [open issues](https://github.com/williamlang/city-storytelling-mod/issues).
 
 ## Reference
 

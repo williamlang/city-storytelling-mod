@@ -211,11 +211,8 @@ namespace CityStoryMod.Systems
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             bool hotkey = Input.GetKeyDown(KeyCode.E) && ctrl && shift;
-            bool storytellerHotkey = Input.GetKeyDown(KeyCode.S) && ctrl && shift;
             bool intervalElapsed = settings.IntervalMinutes > 0
                 && (DateTime.UtcNow - _lastExportUtc).TotalMinutes >= settings.IntervalMinutes;
-
-            if (storytellerHotkey) TriggerStorytellerRun();
 
             if (!hotkey && !intervalElapsed && !saveLoadTransition) return;
 
@@ -230,17 +227,6 @@ namespace CityStoryMod.Systems
             {
                 _log.Error(ex, "Export failed.");
             }
-        }
-
-        // Hardcoded command for v1; a per-hotkey or settings-configurable command
-        // picker is a follow-up. story-driven is the most common in-session call,
-        // so default the dispatcher to it.
-        const string DefaultStorytellerCommand = "story-driven";
-
-        void TriggerStorytellerRun()
-        {
-            Mod.Storyteller?.Start(DefaultStorytellerCommand,
-                StorytellerRun.Build(DefaultStorytellerCommand, _log));
         }
 
         const string SchemaVersion = "0.1";
