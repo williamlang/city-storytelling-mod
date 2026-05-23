@@ -18,6 +18,16 @@
   },
   // The dev/ harness uses its own mock implementations of cs2/* and has
   // its own loose typing — don't drag it into the production type-check.
-  // Vite has its own type handling for those files.
-  "exclude": ["dev", "node_modules", "build"]
+  // Test files use Vitest globals + jest-dom matcher extensions that
+  // aren't in the production tsconfig's type radar; Vitest has its own
+  // config that picks them up.
+  "exclude": [
+    "dev",
+    "node_modules",
+    "build",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ]
 }

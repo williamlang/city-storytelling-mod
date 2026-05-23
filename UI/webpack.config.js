@@ -46,7 +46,10 @@ module.exports = {
       {
         test: /\.tsx?$/,
         use: "ts-loader",
-        exclude: /node_modules/,
+        // Skip node_modules and Vitest test files. Tests use jest-dom
+        // matcher extensions + Vitest globals that aren't on webpack's
+        // type radar; webpack would otherwise type-check them and fail.
+        exclude: [/node_modules/, /\.(test|spec)\.tsx?$/, /[\\/]dev[\\/]/],
       },
       {
         test: /\.s?css$/,
