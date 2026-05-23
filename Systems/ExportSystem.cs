@@ -399,36 +399,45 @@ namespace CityStoryMod.Systems
             _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, named_buildings={buildings.Count} -> {file}");
         }
 
-        // Marker file used to detect that the template has already been written into
-        // the city dir. CLAUDE.md is part of every template and must be present for
-        // the in-game agent to have its playbook; if it's missing we (re)extract.
-        const string ScaffoldMarker = "CLAUDE.md";
+        // Syncs the city dir with the embedded template/ tree. Unlike the old
+        // one-shot scaffolder, this runs on every export and migrates
+        // unmodified template files forward when the template evolves. Files
+        // the player has edited are left alone — see TemplateScaffolder for
+        // the full per-file decision tree.
         const string ResourcePrefix = "template/";
 
         void EnsureCityScaffolded(string cityDir)
         {
-            if (File.Exists(Path.Combine(cityDir, ScaffoldMarker))) return;
-
             var asm = typeof(Mod).Assembly;
-            int written = 0;
+            var files = new List<TemplateScaffolder.TemplateFile>();
             foreach (string resourceName in asm.GetManifestResourceNames())
             {
                 if (!resourceName.StartsWith(ResourcePrefix, StringComparison.Ordinal)) continue;
                 string relative = resourceName.Substring(ResourcePrefix.Length);
-                // Resource names use '/' regardless of host OS; rebuild the on-disk
-                // path with the host separator via Path.Combine on the segments.
-                string[] segments = relative.Split('/');
-                string outPath = cityDir;
-                for (int i = 0; i < segments.Length; i++) outPath = Path.Combine(outPath, segments[i]);
-                Directory.CreateDirectory(Path.GetDirectoryName(outPath));
+                byte[] content;
                 using (Stream src = asm.GetManifestResourceStream(resourceName))
-                using (FileStream dst = File.Create(outPath))
+                using (var ms = new MemoryStream())
                 {
-                    src.CopyTo(dst);
+                    src.CopyTo(ms);
+                    content = ms.ToArray();
                 }
-                written++;
+                files.Add(new TemplateScaffolder.TemplateFile
+                {
+                    RelativePath = relative,
+                    Content = content,
+                });
             }
-            _log.Info($"Scaffolded city dir from template: {cityDir} ({written} files)");
+
+            var result = TemplateScaffolder.Sync(cityDir, files);
+            int touched = result.Added + result.Updated;
+            if (touched > 0 || result.Divergent.Count > 0)
+            {
+                _log.Info(
+                    $"Template sync: added={result.Added} updated={result.Updated} "
+                    + $"unchanged={result.Unchanged} divergent={result.Divergent.Count} "
+                    + (result.Divergent.Count > 0 ? $"[divergent: {string.Join(", ", result.Divergent)}]" : "")
+                );
+            }
         }
 
         // Writes an open sessions/SXX-YYYY-MM-DD-open.md stub when the auto-start

@@ -19,6 +19,11 @@
   <ItemGroup>
     <Compile Include="..\..\TextUtils.cs" Link="LinkedSources\TextUtils.cs" />
     <Compile Include="..\..\PathUtils.cs" Link="LinkedSources\PathUtils.cs" />
+    <Compile Include="..\..\TemplateScaffolder.cs" Link="LinkedSources\TemplateScaffolder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <ItemGroup>
