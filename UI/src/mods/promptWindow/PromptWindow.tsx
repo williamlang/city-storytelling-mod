@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "cs2/ui";
 import { useValue } from "cs2/api";
+import ReactMarkdown from "react-markdown";
 import storytellerIcon from "../../assets/storyteller_icon.svg";
 import styles from "./PromptWindow.module.scss";
+import { useDrag } from "./useDrag";
 import {
   messagesBinding,
   isRunningBinding,
@@ -10,42 +12,37 @@ import {
   lastErrorBinding,
   availableCommandsBinding,
   canonTreeBinding,
-  selectedFileBinding,
   submitPrompt,
   cancelRun,
-  selectFile,
   ChatMessage,
   SlashCommand,
   CanonTree,
+  CanonEntry,
 } from "./bindings";
 
 // Top-level Storyteller panel. Toolbar icon (floating variant matches CS2's
-// other top-left tool mods) toggles a movable panel containing:
+// other top-left tool mods) toggles a draggable panel containing:
 //   - chat history (user / assistant rows, scrollable)
 //   - free-form prompt textarea
-//   - command-picker dropdown
-//   - Run / Cancel button, token-usage line
+//   - command-picker dropdown + Run/Cancel
+//   - side panel with a canon browser
 //
-// State that doesn't need to outlive the panel-open session lives locally
-// (open/close, draft prompt text, panel position, dropdown state). Anything
-// the C# side owns (messages, isRunning, tokens, errors, command list) is
-// read via useValue() hooks.
-//
-// Drag: mousedown on the header records the initial pointer + panel-relative
-// position; document-level mousemove updates a {x,y} state that overrides
-// the SCSS default positioning. mouseup ends the drag. Listeners attach
-// only while dragging — no global handlers when idle.
+// Canon files clicked from the sidebar open as separate draggable modals
+// rendered alongside the main panel; multiple can be open at once. Modal
+// state lives at this level so closing the main panel doesn't dismiss
+// them (though that's a debatable UX — for now they stick around).
 export function StorytellerToolbar() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [openModals, setOpenModals] = useState<string[]>([]);
 
   const messagesJson = useValue(messagesBinding);
   const isRunning = useValue(isRunningBinding);
   const tokenSummary = useValue(tokenSummaryBinding);
   const lastError = useValue(lastErrorBinding);
   const commandsJson = useValue(availableCommandsBinding);
+  const canonJson = useValue(canonTreeBinding);
 
   const messages = useMemo<ChatMessage[]>(() => {
     try { return JSON.parse(messagesJson); } catch { return []; }
@@ -55,47 +52,24 @@ export function StorytellerToolbar() {
     try { return JSON.parse(commandsJson); } catch { return []; }
   }, [commandsJson]);
 
+  const canonTree = useMemo<CanonTree>(() => {
+    try { return JSON.parse(canonJson); } catch { return {}; }
+  }, [canonJson]);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages.length]);
 
-  // ---- Drag plumbing ----
-  // Tracks the in-flight drag's pointer-anchor and the panel's position at
-  // drag-start. Stored in a ref (not state) so the global mousemove handler
-  // doesn't have to re-attach when values change.
-  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      setPanelPos({ x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) });
-    };
-    const onUp = () => setDragging(false);
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-  }, [dragging]);
-
-  const headerRef = useRef<HTMLDivElement | null>(null);
-  const beginDrag = (e: React.MouseEvent) => {
-    // Skip when the click is on the close button — let the button's own
-    // handler fire without starting a drag.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const { pos: panelPos, beginDrag } = useDrag();
+  const onHeaderMouseDown = (e: React.MouseEvent) => {
+    // Skip when the click is on the close button so its handler fires
+    // without starting a drag.
     if ((e.target as HTMLElement).closest(`.${styles.close}`)) return;
-    const panel = headerRef.current?.parentElement;
-    const rect = panel?.getBoundingClientRect();
-    if (!rect) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX: rect.left, baseY: rect.top };
-    setDragging(true);
+    beginDrag(e, panelRef.current);
   };
 
-  // ---- Submit / commands ----
   const canSubmit = draft.trim().length > 0 && !isRunning;
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -107,8 +81,23 @@ export function StorytellerToolbar() {
     submitPrompt(`/${cmdName}`);
   };
 
-  // When pos is set, use it as inline style; otherwise the SCSS default
-  // (top-left near the toolbar icon) applies.
+  const openFile = (path: string) => {
+    setOpenModals((prev) => (prev.includes(path) ? prev : [...prev, path]));
+  };
+  const closeFile = (path: string) => {
+    setOpenModals((prev) => prev.filter((p) => p !== path));
+  };
+
+  // Flatten the tree once so FileModal can look up content by path without
+  // re-walking the tree on each render.
+  const flatCanon = useMemo<Record<string, CanonEntry>>(() => {
+    const out: Record<string, CanonEntry> = {};
+    for (const sub of Object.keys(canonTree)) {
+      for (const e of canonTree[sub]) out[e.path] = e;
+    }
+    return out;
+  }, [canonTree]);
+
   const panelStyle = panelPos
     ? { top: `${panelPos.y}px`, left: `${panelPos.x}px` }
     : undefined;
@@ -124,12 +113,8 @@ export function StorytellerToolbar() {
       </Button>
 
       {open && (
-        <div className={styles.panel} style={panelStyle}>
-          <div
-            className={styles.header}
-            ref={headerRef}
-            onMouseDown={beginDrag}
-          >
+        <div className={styles.panel} style={panelStyle} ref={panelRef}>
+          <div className={styles.header} onMouseDown={onHeaderMouseDown}>
             <span className={styles.title}>Storyteller</span>
             <button
               type="button"
@@ -140,9 +125,6 @@ export function StorytellerToolbar() {
             </button>
           </div>
 
-          {/* Body splits into main (chat + prompt + actions) and a side
-              panel intended for live snapshot/canon info. The side stays
-              empty for now — wired up later. */}
           <div className={styles.body}>
             <div className={styles.main}>
               <div className={styles.chat} ref={scrollRef}>
@@ -212,83 +194,25 @@ export function StorytellerToolbar() {
               </div>
             </div>
 
-            <CanonBrowser />
+            <CanonBrowser
+              tree={canonTree}
+              openPaths={openModals}
+              onOpen={openFile}
+            />
           </div>
         </div>
       )}
+
+      {openModals.map((path, i) => (
+        <FileModal
+          key={path}
+          entry={flatCanon[path]}
+          path={path}
+          cascadeIndex={i}
+          onClose={() => closeFile(path)}
+        />
+      ))}
     </>
-  );
-}
-
-// Canon browser sidebar. Top half: a tree of entity files grouped by
-// subdir (characters, companies, places, etc.) — fed by canonTreeBinding,
-// which the C# side scans on every storyteller run-finish. Bottom half:
-// content of the currently-selected file, fed by selectedFileBinding (lazy
-// — C# only reads on click). secrets/ is filtered server-side when the
-// city's settings.json has secrets_visibility != "shown".
-function CanonBrowser() {
-  const canonJson = useValue(canonTreeBinding);
-  const selectedFile = useValue(selectedFileBinding);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-
-  const tree = useMemo<CanonTree>(() => {
-    try { return JSON.parse(canonJson); } catch { return {}; }
-  }, [canonJson]);
-
-  const subdirs = Object.keys(tree);
-  const isEmpty = subdirs.length === 0;
-
-  const handleSelect = (path: string) => {
-    setSelectedPath(path);
-    selectFile(path);
-  };
-
-  return (
-    <aside className={styles.side}>
-      <div className={styles.sideHeader}>Canon</div>
-      <div className={styles.canonTree}>
-        {isEmpty && (
-          <div className={styles.canonEmpty}>
-            No canon yet. Run <code>/new-city</code> to bootstrap.
-          </div>
-        )}
-        {subdirs.map((sub) => (
-          <div key={sub} className={styles.canonGroup}>
-            <div className={styles.canonGroupHeader}>{sub}</div>
-            {tree[sub].map((entry) => (
-              <button
-                key={entry.path}
-                type="button"
-                className={`${styles.canonItem} ${
-                  selectedPath === entry.path ? styles.canonItemSelected : ""
-                }`}
-                onClick={() => handleSelect(entry.path)}
-                title={entry.path}
-              >
-                {entry.name}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
-      {selectedPath && (
-        <div className={styles.canonContent}>
-          <div className={styles.canonContentHeader}>
-            {selectedPath}
-            <button
-              type="button"
-              className={styles.canonContentClose}
-              onClick={() => { setSelectedPath(null); selectFile(""); }}
-            >
-              ×
-            </button>
-          </div>
-          <pre className={styles.canonContentBody}>
-            {selectedFile || "(empty)"}
-          </pre>
-        </div>
-      )}
-    </aside>
   );
 }
 
@@ -299,6 +223,132 @@ function ChatRow({ msg }: { msg: ChatMessage }) {
       <span className={styles.role}>{msg.role}</span>
       <div className={styles.body}>
         <div className={styles.text}>{msg.text}</div>
+      </div>
+    </div>
+  );
+}
+
+// Canon browser. Each subdir (characters, places, etc.) is a collapsible
+// group, all default-collapsed so a city with hundreds of files doesn't
+// dump a wall of names on the player. Click a file → caller opens it in
+// a new draggable modal. Selection visuals show which files currently
+// have a modal open.
+function CanonBrowser({
+  tree,
+  openPaths,
+  onOpen,
+}: {
+  tree: CanonTree;
+  openPaths: string[];
+  onOpen: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggle = (sub: string) =>
+    setExpanded((prev) => ({ ...prev, [sub]: !prev[sub] }));
+
+  const subdirs = Object.keys(tree);
+  const isEmpty = subdirs.length === 0;
+
+  return (
+    <aside className={styles.side}>
+      <div className={styles.sideHeader}>Canon</div>
+      <div className={styles.canonTree}>
+        {isEmpty && (
+          <div className={styles.canonEmpty}>
+            No canon yet. Run <code>/new-city</code> to bootstrap.
+          </div>
+        )}
+        {subdirs.map((sub) => {
+          const open = !!expanded[sub];
+          const entries = tree[sub];
+          return (
+            <div key={sub} className={styles.canonGroup}>
+              <button
+                type="button"
+                className={styles.canonGroupHeader}
+                onClick={() => toggle(sub)}
+              >
+                <span className={styles.canonGroupCaret}>{open ? "▼" : "▶"}</span>
+                <span className={styles.canonGroupName}>{sub}</span>
+                <span className={styles.canonGroupCount}>{entries.length}</span>
+              </button>
+              {open && (
+                <div className={styles.canonGroupBody}>
+                  {entries.map((entry) => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      className={`${styles.canonItem} ${
+                        openPaths.includes(entry.path) ? styles.canonItemSelected : ""
+                      }`}
+                      onClick={() => onOpen(entry.path)}
+                      title={entry.path}
+                    >
+                      {entry.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+// Single canon file rendered as a draggable modal with markdown content.
+// Multiple instances of this can coexist (one per open path). cascadeIndex
+// staggers initial positions so newly-opened modals don't all stack at
+// the exact same spot.
+function FileModal({
+  entry,
+  path,
+  cascadeIndex,
+  onClose,
+}: {
+  entry: CanonEntry | undefined;
+  path: string;
+  cascadeIndex: number;
+  onClose: () => void;
+}) {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const { pos, beginDrag } = useDrag();
+
+  const onHeaderMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest(`.${styles.fileModalClose}`)) return;
+    beginDrag(e, modalRef.current);
+  };
+
+  // Initial cascade offset before the user has dragged.
+  const offset = cascadeIndex * 24;
+  const style = pos
+    ? { top: `${pos.y}px`, left: `${pos.x}px` }
+    : { top: `${100 + offset}rem`, left: `${500 + offset}rem` };
+
+  return (
+    <div className={styles.fileModal} style={style} ref={modalRef}>
+      <div
+        className={styles.fileModalHeader}
+        onMouseDown={onHeaderMouseDown}
+      >
+        <span className={styles.fileModalPath}>{path}</span>
+        <button
+          type="button"
+          className={styles.fileModalClose}
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+      <div className={styles.fileModalBody}>
+        {entry ? (
+          <ReactMarkdown>{entry.content}</ReactMarkdown>
+        ) : (
+          <div className={styles.fileModalMissing}>
+            File no longer in canon tree — it may have been deleted or renamed.
+          </div>
+        )}
       </div>
     </div>
   );

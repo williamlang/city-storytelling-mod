@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>CityStoryMod — UI Dev Harness</title>
+    <style>
+      /*
+        Our SCSS uses CS2's rem unit where 1rem ≈ 1px (the game scales rem
+        differently from a browser default of 16px). Pin html to 1px so
+        widths like `40rem` render at the same pixel size they do in CS2.
+        Body text size is set explicitly because rem inheritance would
+        otherwise make text 1px tall.
+      */
+      html { font-size: 1px; }
+      body {
+        margin: 0;
+        background: linear-gradient(135deg, #1a3550 0%, #2a4a3a 100%);
+        font-family: system-ui, sans-serif;
+        font-size: 12px;
+        color: #e6eef7;
+        min-height: 100vh;
+      }
+      /*
+        Out-of-CS2 the toolbar icon row doesn't exist; pad the top a bit
+        so our `top: 60rem` panel positioning doesn't paste under the
+        browser chrome.
+      */
+      .dev-banner {
+        padding: 10px 16px;
+        background: rgba(0, 0, 0, 0.3);
+        color: rgba(230, 238, 247, 0.7);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dev-banner">
+      CityStoryMod UI dev harness — bindings are mocked. Refresh after C# changes
+      have no effect; this is React-only iteration.
+    </div>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

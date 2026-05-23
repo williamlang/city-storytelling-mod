@@ -15,5 +15,9 @@
     "skipLibCheck": true,
     "typeRoots": ["./types"],
     "resolveJsonModule": true
-  }
+  },
+  // The dev/ harness uses its own mock implementations of cs2/* and has
+  // its own loose typing — don't drag it into the production type-check.
+  // Vite has its own type handling for those files.
+  "exclude": ["dev", "node_modules", "build"]
 }

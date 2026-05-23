@@ -12,7 +12,6 @@ export const tokenSummaryBinding = bindValue<string>(GROUP, "tokenSummary", "");
 export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
 export const availableCommandsBinding = bindValue<string>(GROUP, "availableCommands", "[]");
 export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
-export const selectedFileBinding = bindValue<string>(GROUP, "selectedFile", "");
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
@@ -33,15 +32,15 @@ export interface SlashCommand {
 // Subdir keys correspond to canon/ characters/ companies/ places/ factions/
 // events/ stories/ sessions/ secrets/. Empty subdirs are dropped, so the
 // caller can `Object.keys(tree)` and render headers for whatever's there.
+// File content is eager-loaded server-side (capped at 20KB) so opening a
+// modal is instant and many can be open simultaneously without per-modal
+// async fetches.
 export interface CanonEntry {
-  name: string;  // filename stem
-  path: string;  // relative path under cityDir, e.g. "characters/foo.md"
+  name: string;    // filename stem
+  path: string;    // relative path under cityDir, e.g. "characters/foo.md"
+  content: string; // markdown source (already capped + truncated on C# side)
 }
 export type CanonTree = Record<string, CanonEntry[]>;
-
-export function selectFile(relPath: string) {
-  trigger(GROUP, "selectFile", relPath);
-}
 
 export function submitPrompt(prompt: string) {
   trigger(GROUP, "submitPrompt", prompt);

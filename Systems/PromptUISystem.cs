@@ -42,7 +42,6 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _lastErrorBinding;
         ValueBinding<string> _availableCommandsBinding;
         ValueBinding<string> _canonTreeBinding;
-        ValueBinding<string> _selectedFileBinding;
 
         // Caches the city dir we last scanned for slash commands / canon
         // tree. OnUpdate rescans (cheap directory listing) when
@@ -74,19 +73,16 @@ namespace CityStoryMod.Systems
             _lastErrorBinding = new ValueBinding<string>(Group, "lastError", "");
             _availableCommandsBinding = new ValueBinding<string>(Group, "availableCommands", "[]");
             _canonTreeBinding = new ValueBinding<string>(Group, "canonTree", "{}");
-            _selectedFileBinding = new ValueBinding<string>(Group, "selectedFile", "");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
             AddBinding(_lastErrorBinding);
             AddBinding(_availableCommandsBinding);
             AddBinding(_canonTreeBinding);
-            AddBinding(_selectedFileBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
             AddBinding(new TriggerBinding(Group, "clearMessages", OnClearMessages));
-            AddBinding(new TriggerBinding<string>(Group, "selectFile", OnSelectFile));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -329,11 +325,17 @@ namespace CityStoryMod.Systems
         };
 
         // Walks each canon subdir under cityDir, lists *.md files, returns
-        // a JSON object of {subdir → [{name, path}, ...]} for the React
-        // sidebar to render. Skips secrets/ entirely when settings.json's
-        // secrets_visibility is anything other than "shown" (default
-        // "hidden" — see template/CLAUDE.md → Secrets). Empty subdirs are
-        // dropped so the sidebar doesn't show headers with no entries.
+        // a JSON object of {subdir → [{name, path, content}, ...]} for the
+        // React sidebar. File contents are inlined (eager-load) so the JS
+        // side can open multiple file modals at once without a per-modal
+        // async fetch. Per-file content is capped at 20KB; larger files
+        // get a truncated tail marker. Total JSON for a typical city is
+        // <300KB — well within what a ValueBinding handles per update.
+        //
+        // Skips secrets/ entirely when settings.json's secrets_visibility
+        // is anything other than "shown" (default "hidden" — see
+        // template/CLAUDE.md → Secrets). Empty subdirs are dropped so the
+        // sidebar doesn't show headers with no entries.
         static string ScanCanonTree(string cityDir)
         {
             if (string.IsNullOrEmpty(cityDir)) return "{}";
@@ -354,63 +356,31 @@ namespace CityStoryMod.Systems
                 {
                     string name = Path.GetFileNameWithoutExtension(path);
                     string rel = sub + "/" + Path.GetFileName(path);
-                    entries.Add(new { name, path = rel });
+                    string content = SafeReadFile(path);
+                    entries.Add(new { name, path = rel, content });
                 }
                 if (entries.Count > 0) tree[sub] = entries;
             }
             return JsonConvert.SerializeObject(tree);
         }
 
-        // Handles JS "selectFile" trigger. Reads the requested file under
-        // the active city dir and pushes its content onto the selectedFile
-        // binding. Sandbox: rejects any path that resolves outside cityDir
-        // (defends against `..` escapes from the JS side). Caps content at
-        // 50KB so a runaway file doesn't choke the binding.
-        void OnSelectFile(string relPath)
+        // 20KB per-file cap with a truncation tail. Errors return a one-line
+        // placeholder so the JSON stays well-formed and the React side sees
+        // something useful in the modal instead of an empty body.
+        static string SafeReadFile(string path)
         {
-            if (string.IsNullOrEmpty(relPath))
-            {
-                _selectedFileBinding.Update("");
-                return;
-            }
-            string cityDir = Mod.LastExportedCityDir;
-            if (string.IsNullOrEmpty(cityDir))
-            {
-                _selectedFileBinding.Update("");
-                return;
-            }
-            string cityFull = Path.GetFullPath(cityDir);
-            string fullPath;
-            try { fullPath = Path.GetFullPath(Path.Combine(cityFull, relPath)); }
-            catch (Exception ex)
-            {
-                _log.Warn($"PromptUISystem: invalid canon file path '{relPath}': {ex.Message}");
-                _selectedFileBinding.Update("");
-                return;
-            }
-            if (!fullPath.StartsWith(cityFull, StringComparison.OrdinalIgnoreCase))
-            {
-                _log.Warn($"PromptUISystem: rejected canon file path outside cityDir: {relPath}");
-                _selectedFileBinding.Update("");
-                return;
-            }
-            if (!File.Exists(fullPath))
-            {
-                _selectedFileBinding.Update("");
-                return;
-            }
             try
             {
-                string content = File.ReadAllText(fullPath);
-                const int maxLen = 50000;
+                string content = File.ReadAllText(path);
+                const int maxLen = 20000;
                 if (content.Length > maxLen)
-                    content = content.Substring(0, maxLen) + "\n\n[truncated — file is larger than 50KB]";
-                _selectedFileBinding.Update(content);
+                    content = content.Substring(0, maxLen) + "\n\n*[truncated — file is larger than 20KB]*";
+                return content;
             }
             catch (Exception ex)
             {
-                _log.Warn($"PromptUISystem: failed to read canon file {fullPath}: {ex.Message}");
-                _selectedFileBinding.Update("");
+                _log.Warn($"PromptUISystem: failed to read canon file {path}: {ex.Message}");
+                return $"*[error reading file: {ex.Message}]*";
             }
         }
 
