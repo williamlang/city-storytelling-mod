@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "cs2/ui";
 import { useValue } from "cs2/api";
-import ReactMarkdown from "react-markdown";
 import storytellerIcon from "../../assets/storyteller_icon.svg";
 import styles from "./PromptWindow.module.scss";
 import { useDrag } from "./useDrag";
 import { parseFrontmatter } from "./frontmatter";
+import { MarkdownLite } from "./MarkdownLite";
 import {
   messagesBinding,
   isRunningBinding,
@@ -375,7 +375,7 @@ function FileContent({ content }: { content: string }) {
           ))}
         </dl>
       )}
-      {body && <ReactMarkdown>{body}</ReactMarkdown>}
+      {body && <MarkdownLite>{body}</MarkdownLite>}
     </>
   );
 }
