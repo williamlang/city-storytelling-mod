@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { StorytellerToolbar } from "../src/mods/promptWindow/PromptWindow";
+import { StorytellerToolbar } from "../src/mods/storyteller/StorytellerToolbar";
 import { seedSampleCity } from "./fixtures/sample-city";
 
 // Seed mock bindings BEFORE rendering so the component sees realistic

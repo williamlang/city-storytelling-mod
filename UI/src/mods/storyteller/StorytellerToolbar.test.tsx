@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { bindValue } from "cs2/api";
-import { StorytellerToolbar } from "./PromptWindow";
+import { StorytellerToolbar } from "./StorytellerToolbar";
 
 // End-to-end-ish tests against the storyteller panel via the mocked cs2/*
 // bindings. We seed each binding fresh per test to avoid one test's
