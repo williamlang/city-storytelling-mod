@@ -405,5 +405,298 @@ namespace CityStoryMod.Tests
             double[][] square = { new[] { 0d, 0d }, new[] { 10d, 0d }, new[] { 10d, 10d }, new[] { 0d, 10d }, new[] { 0d, 0d } };
             CartoProcessor.PointInPolygon(x, y, square).Should().Be(expected);
         }
+
+        // -- MapTile parsing + footprint --
+
+        // Same Area_Boundary.json shape but with MapTile features alongside
+        // District. Carto emits these together; the processor must split them.
+        const string SampleAreaWithMapTiles = @"{
+          ""type"": ""FeatureCollection"",
+          ""features"": [
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [[
+                [0.000, 0.000], [0.005, 0.000], [0.005, 0.005], [0.000, 0.005], [0.000, 0.000]
+              ]] },
+              ""properties"": { ""Object"": ""MapTile"", ""Unlocked"": true }
+            },
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [[
+                [0.005, 0.000], [0.010, 0.000], [0.010, 0.005], [0.005, 0.005], [0.005, 0.000]
+              ]] },
+              ""properties"": { ""Object"": ""MapTile"", ""Unlocked"": false }
+            },
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [[
+                [0.001, 0.001], [0.002, 0.001], [0.002, 0.002], [0.001, 0.002], [0.001, 0.001]
+              ]] },
+              ""properties"": { ""Name"": ""Old Halverson"", ""Object"": ""District"" }
+            }
+          ]
+        }";
+
+        [Fact]
+        public void ParseMapTiles_filters_to_MapTile_objects()
+        {
+            var tiles = CartoProcessor.ParseMapTiles(SampleAreaWithMapTiles);
+            tiles.Should().HaveCount(2);
+        }
+
+        [Fact]
+        public void ParseMapTiles_reads_unlocked_property()
+        {
+            var tiles = CartoProcessor.ParseMapTiles(SampleAreaWithMapTiles);
+            tiles.Count(t => t.Unlocked).Should().Be(1);
+            tiles.Count(t => !t.Unlocked).Should().Be(1);
+        }
+
+        [Fact]
+        public void ComputeFootprint_uses_MapTile_bounds_when_present()
+        {
+            var districts = CartoProcessor.ParseDistricts(SampleAreaWithMapTiles);
+            var tiles = CartoProcessor.ParseMapTiles(SampleAreaWithMapTiles);
+            var fp = CartoProcessor.ComputeFootprint(tiles, districts);
+
+            fp.HasGeometry.Should().BeTrue();
+            fp.TileCount.Should().Be(2);
+            fp.UnlockedCount.Should().Be(1);
+            // 0.010° × 0.005° span → ~1113 m × ~556 m.
+            fp.WidthM.Should().BeApproximately(0.010 * DegToM, 1.0);
+            fp.HeightM.Should().BeApproximately(0.005 * DegToM, 1.0);
+        }
+
+        [Fact]
+        public void ComputeFootprint_falls_back_to_district_bounds_when_no_tiles()
+        {
+            var districts = CartoProcessor.ParseDistricts(SampleTwoAdjacentDistricts);
+            var fp = CartoProcessor.ComputeFootprint(new System.Collections.Generic.List<CartoProcessor.MapTile>(), districts);
+
+            fp.HasGeometry.Should().BeTrue();
+            fp.TileCount.Should().Be(0);
+            // Two 0.001° squares side-by-side → 0.002° × 0.001° envelope.
+            fp.WidthM.Should().BeApproximately(0.002 * DegToM, 1.0);
+            fp.HeightM.Should().BeApproximately(0.001 * DegToM, 1.0);
+        }
+
+        [Fact]
+        public void ComputeFootprint_returns_empty_when_no_tiles_and_no_districts()
+        {
+            var fp = CartoProcessor.ComputeFootprint(
+                new System.Collections.Generic.List<CartoProcessor.MapTile>(),
+                new System.Collections.Generic.List<CartoProcessor.District>());
+            fp.HasGeometry.Should().BeFalse();
+        }
+
+        [Fact]
+        public void RenderIndexMarkdown_includes_footprint_section_when_present()
+        {
+            var districts = CartoProcessor.ParseDistricts(SampleAreaWithMapTiles);
+            var tiles = CartoProcessor.ParseMapTiles(SampleAreaWithMapTiles);
+            CartoProcessor.RecenterCoordinates(districts, new System.Collections.Generic.List<CartoProcessor.Building>(),
+                tiles, new System.Collections.Generic.List<CartoProcessor.Road>());
+            var fp = CartoProcessor.ComputeFootprint(tiles, districts);
+
+            string md = CartoProcessor.RenderIndexMarkdown(districts,
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                fp);
+
+            md.Should().Contain("## Map footprint");
+            md.Should().Contain("2 total, 1 unlocked");
+        }
+
+        [Fact]
+        public void RenderIndexMarkdown_omits_footprint_section_when_no_geometry()
+        {
+            string md = CartoProcessor.RenderIndexMarkdown(
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new CartoProcessor.Footprint { HasGeometry = false });
+            md.Should().NotContain("## Map footprint");
+        }
+
+        // -- Road parsing + rendering --
+
+        // Two segments of a named highway, one anonymous side street.
+        const string SampleNetworkCenterline = @"{
+          ""type"": ""FeatureCollection"",
+          ""features"": [
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""LineString"", ""coordinates"": [
+                [0.000, 0.000], [0.001, 0.000]
+              ] },
+              ""properties"": { ""Name"": ""Riverside Highway"", ""Object"": ""Road"", ""Category"": ""Car, Large"", ""Form"": ""Highway"", ""Length"": 250.0, ""Lane"": 4, ""Limit"": 100 }
+            },
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""LineString"", ""coordinates"": [
+                [0.001, 0.000], [0.002, 0.000]
+              ] },
+              ""properties"": { ""Name"": ""Riverside Highway"", ""Object"": ""Road"", ""Category"": ""Car, Large"", ""Form"": ""Highway"", ""Length"": 250.0, ""Lane"": 4, ""Limit"": 100 }
+            },
+            {
+              ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""LineString"", ""coordinates"": [
+                [0.000, 0.001], [0.001, 0.001]
+              ] },
+              ""properties"": { ""Name"": """", ""Object"": ""Road"", ""Category"": ""Car, Small"", ""Form"": ""Street"", ""Length"": 110.0, ""Lane"": 2, ""Limit"": 30 }
+            }
+          ]
+        }";
+
+        [Fact]
+        public void ParseRoads_reads_properties_and_geometry()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            roads.Should().HaveCount(3);
+
+            var highway = roads.First(r => r.Name == "Riverside Highway");
+            highway.Object.Should().Be("Road");
+            highway.Category.Should().Be("Car, Large");
+            highway.Form.Should().Be("Highway");
+            highway.Length.Should().Be(250.0);
+            highway.Lane.Should().Be(4);
+            highway.Limit.Should().Be(100);
+            highway.Centerline.Should().NotBeNull();
+            highway.Centerline.Length.Should().Be(2);
+        }
+
+        [Fact]
+        public void RenderRoadsMarkdown_groups_named_roads_and_summarizes_by_object()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            string md = CartoProcessor.RenderRoadsMarkdown(roads);
+
+            md.Should().Contain("# Road network");
+            md.Should().Contain("3 segment(s)");
+            md.Should().Contain("Road:");                  // Object summary line
+            md.Should().Contain("**Riverside Highway**");  // grouped, not duplicated
+            md.Should().Contain("2 segments");             // segment-group annotation
+            // Combined length 250 + 250 = 500 m → 0.50 km.
+            md.Should().Contain("0.50 km");
+        }
+
+        [Fact]
+        public void RenderRoadsMarkdown_reports_no_named_roads_when_all_anonymous()
+        {
+            string anonOnly = @"{
+              ""type"": ""FeatureCollection"",
+              ""features"": [
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[0,0],[0.001,0]] },
+                  ""properties"": { ""Name"": """", ""Object"": ""Road"", ""Length"": 111.0 } }
+              ]
+            }";
+            var roads = CartoProcessor.ParseRoads(anonOnly);
+            string md = CartoProcessor.RenderRoadsMarkdown(roads);
+            md.Should().Contain("(none — the city has no player-named roads yet)");
+        }
+
+        [Fact]
+        public void RenderIndexMarkdown_includes_road_network_summary_when_roads_present()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            string md = CartoProcessor.RenderIndexMarkdown(
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                roads,
+                null);
+
+            md.Should().Contain("## Road network");
+            md.Should().Contain("3 segment(s) total, 2 named");
+            md.Should().Contain("processed/roads.md");
+        }
+
+        // -- Cycle 2b: terrain / water classifiers + quadrant logic --
+
+        [Theory]
+        // Glenville (the real city) — stdev 28 on a 191 m range, mean 96.
+        // Relief / stdev = 6.8x → triggers the "localized high point" tag.
+        [InlineData(28, 191, 96, "Mostly flat, with a localized high point.")]
+        // Uniform flat plain — small stdev, small relief, no high point.
+        [InlineData(15, 60, 30, "Mostly flat.")]
+        // Gently rolling farmland.
+        [InlineData(50, 200, 100, "Gently rolling.")]
+        [InlineData(100, 350, 200, "Hilly.")]
+        [InlineData(200, 900, 500, "Rugged / mountainous.")]
+        public void ClassifyTerrain_returns_human_reading(double stdev, double relief, double mean, string expected)
+        {
+            CartoProcessor.ClassifyTerrain(stdev, relief, mean).Should().Be(expected);
+        }
+
+        [Fact]
+        public void ClassifyWater_landlocked_when_essentially_no_water()
+        {
+            CartoProcessor.ClassifyWater(0.5, new[] { 0d, 0d, 0d, 0d }).Should().Be("Essentially landlocked.");
+        }
+
+        [Fact]
+        public void ClassifyWater_flags_lake_district_when_spread_across_quadrants()
+        {
+            // 36% water, spread across NW + NE + SW quadrants (Glenville-ish).
+            string r = CartoProcessor.ClassifyWater(36, new[] { 25d, 30d, 22d, 5d });
+            r.Should().Contain("Heavy water");
+            r.Should().Contain("spread across most of the map");
+            r.Should().Contain("complex lake district");
+        }
+
+        [Fact]
+        public void ClassifyWater_flags_coastline_when_water_is_concentrated()
+        {
+            // 30% water all in the SE quadrant (a corner coast).
+            string r = CartoProcessor.ClassifyWater(30, new[] { 0d, 0d, 0d, 60d });
+            r.Should().Contain("Heavy water");
+            r.Should().Contain("concentrated on one side");
+            r.Should().Contain("coastline or large concentrated lake");
+        }
+
+        [Theory]
+        // Width 4, Height 4 → halfW=2, halfH=2. Quadrants (using row-major idx):
+        //   NW = idx { 0,1, 4,5 }, NE = { 2,3, 6,7 }, SW = { 8,9, 12,13 }, SE = { 10,11, 14,15 }.
+        [InlineData(0, 4, 4, "NW")]
+        [InlineData(3, 4, 4, "NE")]
+        [InlineData(12, 4, 4, "SW")]
+        [InlineData(15, 4, 4, "SE")]
+        public void QuadrantOf_maps_pixel_index_to_compass_label(long idx, int w, int h, string expected)
+        {
+            CartoProcessor.QuadrantOf(idx, w, h).Should().Be(expected);
+        }
+
+        [Fact]
+        public void QuadrantOf_returns_null_for_invalid_index()
+        {
+            CartoProcessor.QuadrantOf(-1, 4, 4).Should().BeNull();
+        }
+
+        [Fact]
+        public void RenderIndexMarkdown_dedupes_outside_district_decorations()
+        {
+            // Simulate CS2's pre-populated decoration pattern: many cairns
+            // and stone monuments, all with empty district assignment, all
+            // sharing the same Name. The new render should collapse repeats.
+            var buildings = new System.Collections.Generic.List<CartoProcessor.Building>();
+            for (int i = 0; i < 7; i++)
+                buildings.Add(new CartoProcessor.Building { Name = "Cairn 01", Category = "Decoration" });
+            for (int i = 0; i < 4; i++)
+                buildings.Add(new CartoProcessor.Building { Name = "Old Mill Ruins", Category = "Decoration" });
+            buildings.Add(new CartoProcessor.Building { Name = "Castle Ruins", Category = "Decoration" });
+
+            string md = CartoProcessor.RenderIndexMarkdown(
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                buildings);
+
+            // Each unique name should appear exactly once.
+            int cairnCount = (md.Length - md.Replace("**Cairn 01**", "").Length) / "**Cairn 01**".Length;
+            cairnCount.Should().Be(1);
+            md.Should().Contain("**Cairn 01** (× 7)");
+            md.Should().Contain("**Old Mill Ruins** (× 4)");
+            // Castle Ruins is unique — no × annotation.
+            md.Should().Contain("**Castle Ruins**");
+            md.Should().NotContain("Castle Ruins** (×");
+        }
     }
 }

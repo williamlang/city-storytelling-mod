@@ -1,4 +1,4 @@
-# Snapshot schema (v0.1)
+# Snapshot schema (v0.3)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -27,16 +27,37 @@ This document defines the contract. The mod is the producer; the agent is the co
 
 Spatial geometry and per-district building lists are NOT in the snapshot. Those live in `carto/processed/index.md` and `carto/processed/districts/<slug>.md`, produced by `CartoProcessor` from Carto's raw GeoJSON exports. The snapshot owns city stats, demographics, trade, diffs, and the small entity classes Carto doesn't cover (outside connections, water sources). The agent reads both surfaces for different purposes.
 
+## v0.3 — world identity, road network, terrain
+
+Adds:
+- **`map.*`** block in the snapshot. The map is the world the city sits inside; the city is the player's project on that world. At founding time the agent wants both.
+- **`carto/processed/roads.md`** chunk + **Road network** + **Map footprint** sections in `carto/processed/index.md` — emitted by an expanded CartoProcessor reading Carto's Network and MapTile features.
+- **First-Carto-on-new-city auto-trigger** — when a new city dir is scaffolded, ExportSystem fires Carto immediately so the storyteller has spatial context the first time it runs against the dir.
+- (Future) `carto/processed/elevation.md` and `carto/processed/water.md` from Carto's Elevation and Depth GeoTIFFs.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
   "captured_at_utc": "2026-05-17T22:55:49Z",
   "captured_at_ingame": null,
+
+  "map": {
+    "name": "Lakeland",               // From Game.UI.MapMetadataSystem.mapName.
+    "theme": "North American",        // Asset-pack style; drives building / vehicle look.
+    "latitude": 62.04,                // Real-world latitude (degrees) — bigger = farther north.
+    "longitude": 28.51,               // Real-world longitude — combines with latitude as a climate anchor.
+    "temperature_min_c": -14.86,      // Coldest temperature seen across the year.
+    "temperature_max_c": 25.79,       // Warmest.
+    "cloudiness": 0.21,                // 0..1 fraction of the year cloudy.
+    "precipitation": 0.07,             // 0..1 fraction of the year wet.
+    "ground_water_availability": 0,    // CS2 metric; 0 on a fresh save before the city is built.
+    "surface_water_availability": 0
+  },
 
   "city": {
     "name": null,
@@ -198,6 +219,7 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 ## Versioning
 
 - `0.1` — initial skeleton. Embedded spatial data (`districts[]`, `buildings[]`, etc.) and per-building churn diff.
-- `0.2` — current. Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
+- `0.2` — Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
+- `0.3` — current. Added `map.*` block (world identity). Carto pipeline expanded to include Network (roads) + MapTile (footprint); new-city Carto auto-trigger on save-load edge.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

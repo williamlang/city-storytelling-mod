@@ -77,6 +77,22 @@ namespace CityStoryMod.Systems
         PrefabSystem _prefabSystem;
         FieldInfo _playerMoneyField;
 
+        // Game.UI.MapMetadataSystem — held reflectively so we don't pull in
+        // Game.UI as a compile-time reference for one type. Resolved lazily
+        // on first export. The [diag] dump on first run surfaced these
+        // additional fields beyond the original mapName.
+        object _mapMetadataSystem;
+        PropertyInfo _p_mapName;
+        PropertyInfo _p_mapTheme;
+        PropertyInfo _p_mapLatitude;
+        PropertyInfo _p_mapLongitude;
+        PropertyInfo _p_mapCloudiness;
+        PropertyInfo _p_mapPrecipitation;
+        PropertyInfo _p_mapGroundWater;
+        PropertyInfo _p_mapSurfaceWater;
+        PropertyInfo _p_mapTemperatureRange;     // returns Bounds1 { float min, max }
+        bool _mapMetadataLogged;
+
         // City singleton fields, identified by name (see [diag] log dumps in the OnCreate path
         // for the source of truth). Reflection by name is brittle to CS2 updates but explicit;
         // if a future patch renames a field, the diag log will surface the new name.
@@ -169,6 +185,41 @@ namespace CityStoryMod.Systems
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             _promptUI = World.GetOrCreateSystemManaged<PromptUISystem>();
+
+            // MapMetadataSystem lives in Game.UI; resolve reflectively from
+            // NameSystem's assembly (also Game.UI, already referenced) to
+            // avoid pulling more of Game.UI as a compile reference. Carto
+            // accesses the same system via the standard ECS GetOrCreate
+            // pattern (see Carto's Instance.cs:61). Failure is non-fatal —
+            // map.* fields stay null and a warning lands in the log.
+            try
+            {
+                Type mapMetaType = typeof(NameSystem).Assembly.GetType("Game.UI.MapMetadataSystem");
+                if (mapMetaType != null)
+                {
+                    var getOrCreate = typeof(World).GetMethod("GetOrCreateSystemManaged", Type.EmptyTypes);
+                    if (getOrCreate != null)
+                    {
+                        _mapMetadataSystem = getOrCreate.MakeGenericMethod(mapMetaType).Invoke(World, null);
+                        const BindingFlags pf = BindingFlags.Public | BindingFlags.Instance;
+                        _p_mapName             = mapMetaType.GetProperty("mapName", pf);
+                        _p_mapTheme            = mapMetaType.GetProperty("theme", pf);
+                        _p_mapLatitude         = mapMetaType.GetProperty("latitude", pf);
+                        _p_mapLongitude        = mapMetaType.GetProperty("longitude", pf);
+                        _p_mapCloudiness       = mapMetaType.GetProperty("cloudiness", pf);
+                        _p_mapPrecipitation    = mapMetaType.GetProperty("precipitation", pf);
+                        _p_mapGroundWater      = mapMetaType.GetProperty("groundWaterAvailability", pf);
+                        _p_mapSurfaceWater     = mapMetaType.GetProperty("surfaceWaterAvailability", pf);
+                        _p_mapTemperatureRange = mapMetaType.GetProperty("temperatureRange", pf);
+                    }
+                }
+                if (_mapMetadataSystem == null || _p_mapName == null)
+                    _log.Warn("MapMetadataSystem or mapName property not found; map.name will stay null.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"MapMetadataSystem resolution failed: {ex.Message}; map.* will stay null.");
+            }
 
             _playerMoneyField = typeof(PlayerMoney)
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
@@ -306,15 +357,10 @@ namespace CityStoryMod.Systems
             }
         }
 
-        // 0.2 — Phase 3 of the Carto integration. Removed spatial fields that
-        // now live in the storyteller-facing markdown chunks under
-        // carto/processed/: districts[], buildings[], roads[], other_named[],
-        // diff.buildings, diff.roads, diff.districts. The snapshot is now the
-        // canonical source for city stats, demographics, trade, and bulk
-        // diff signals (zone deltas, outside_connections, water_sources);
-        // spatial geometry and per-district building lists come from Carto
-        // chunks. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.2";
+        // 0.3 — Added `map.*` block (map name + future fields from
+        // MapMetadataSystem) so the storyteller has the world's identity at
+        // founding time, not just the city's. See docs/snapshot-schema.md.
+        const string SchemaVersion = "0.3";
 
         void Export(string triggeredBy)
         {
@@ -325,10 +371,28 @@ namespace CityStoryMod.Systems
                 LogCityComponentsOnce();
             }
             if (!_citizenFirstDiagged) DiagFirstCitizenOnce();
+            if (!_mapMetadataLogged)
+            {
+                _mapMetadataLogged = true;
+                LogMapMetadataOnce();
+            }
 
             int citizensTotal = _citizenQuery.CalculateEntityCount();
             string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
             string ingameDate = _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd");
+
+            // Map identity. Pulled in a small helper-light style so a single
+            // bad property doesn't drop the whole block.
+            string mapName        = ReadMapString(_p_mapName);
+            string mapTheme       = ReadMapString(_p_mapTheme);
+            float? mapLatitude    = ReadMapFloat(_p_mapLatitude);
+            float? mapLongitude   = ReadMapFloat(_p_mapLongitude);
+            float? mapCloudiness  = ReadMapFloat(_p_mapCloudiness);
+            float? mapPrecip      = ReadMapFloat(_p_mapPrecipitation);
+            float? mapGroundWater = ReadMapFloat(_p_mapGroundWater);
+            float? mapSurfaceWater = ReadMapFloat(_p_mapSurfaceWater);
+            float? mapTempMin = null, mapTempMax = null;
+            ReadMapBounds1(_p_mapTemperatureRange, out mapTempMin, out mapTempMax);
 
             long? money = _playerMoneyField != null
                 ? Convert.ToInt64(_playerMoneyField.GetValue(EntityManager.GetComponentData<PlayerMoney>(_citySystem.City)))
@@ -410,6 +474,25 @@ namespace CityStoryMod.Systems
                 captured_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 captured_at_ingame = ingameDate,
 
+                // v0.3 — world identity. The city is the player's; the map is
+                // the world the city sits inside. At founding time the agent
+                // wants both. Climate fields (lat/lng/temperature/cloudiness/
+                // precipitation) plus surface/ground water availability give
+                // the storyteller a real geography to anchor canon to.
+                map = new
+                {
+                    name = mapName,
+                    theme = mapTheme,
+                    latitude = mapLatitude,
+                    longitude = mapLongitude,
+                    temperature_min_c = mapTempMin,
+                    temperature_max_c = mapTempMax,
+                    cloudiness = mapCloudiness,
+                    precipitation = mapPrecip,
+                    ground_water_availability = mapGroundWater,
+                    surface_water_availability = mapSurfaceWater,
+                },
+
                 city = new
                 {
                     name = cityName,
@@ -461,6 +544,16 @@ namespace CityStoryMod.Systems
             // story branching is tracked as a future feature (see GitHub issues).
             string citySlug = TextUtils.Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
+
+            // New-city detection: latched BEFORE we create the city dir. The
+            // first Carto export will create <dir>/carto/ as a side-effect, so
+            // checking the carto subdir's absence here gives "first export
+            // for this city" semantics that survive across CS2 launches.
+            // Latch is consumed below to gate the auto-Carto trigger so a
+            // mid-session interval export of an already-scaffolded city
+            // doesn't re-trigger Carto.
+            bool isNewCity = !Directory.Exists(Path.Combine(dir, "carto"));
+
             Directory.CreateDirectory(dir);
             EnsureCityScaffolded(dir);
 
@@ -483,12 +576,28 @@ namespace CityStoryMod.Systems
 
             _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, outside_connections={named.outsideConnections.Count}, water_sources={named.waterSources.Count} -> {file}");
 
-            // Carto exports are explicitly NOT triggered on the snapshot cadence.
-            // The pipeline is synchronous, main-thread-only (ECS), and grows
-            // linearly with city size — a few hundred ms on a small city, multi-
-            // second on a large one. The player triggers it manually via the
-            // Refresh map button in the storyteller window when they want the
-            // agent to have fresh spatial context. See RequestCartoExport.
+            // First-Carto-on-new-city auto-trigger. The agent's founding
+            // prompt needs spatial context (map footprint, starting roads,
+            // outside connections, eventually elevation) to ask the player
+            // a meaningful question about the story to be told. Without
+            // this, the storyteller's first run sees only the snapshot's
+            // city stats — which are essentially zero at t=0.
+            //
+            // Gated on the save-load edge so we don't fire mid-session if a
+            // hypothetical future flow surfaces a fresh city dir during play.
+            // Gated on isNewCity so re-loading an established city doesn't
+            // re-run Carto (the storyteller-window button covers that case).
+            if (triggeredBy == "save-load" && isNewCity && CartoBridge.IsAvailable)
+            {
+                _log.Info("New city detected (no carto/ dir yet); auto-triggering first Carto export for storytelling context.");
+                RequestCartoExport();
+            }
+
+            // Otherwise: Carto exports are NOT on the snapshot cadence —
+            // the pipeline is synchronous, main-thread-only (ECS), and grows
+            // linearly with city size. The player triggers refreshes manually
+            // via the Refresh map button in the storyteller window. See
+            // RequestCartoExport.
         }
 
         // User-triggered Carto export. Called from PromptUISystem when the
@@ -693,6 +802,94 @@ namespace CityStoryMod.Systems
             int underscore = inner.IndexOf('_');
             if (underscore <= 0 || underscore >= inner.Length - 1) return (null, null);
             return (inner.Substring(0, underscore).ToLowerInvariant(), inner.Substring(underscore + 1));
+        }
+
+        // Pull a string-typed MapMetadataSystem property. Returns null on
+        // missing property, missing system, exception, or empty/whitespace.
+        string ReadMapString(PropertyInfo p)
+        {
+            if (_mapMetadataSystem == null || p == null) return null;
+            try
+            {
+                string v = (string)p.GetValue(_mapMetadataSystem);
+                return string.IsNullOrWhiteSpace(v) ? null : v;
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Reading map.{p.Name} failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Pull a float-typed MapMetadataSystem property.
+        float? ReadMapFloat(PropertyInfo p)
+        {
+            if (_mapMetadataSystem == null || p == null) return null;
+            try { return Convert.ToSingle(p.GetValue(_mapMetadataSystem)); }
+            catch (Exception ex)
+            {
+                _log.Warn($"Reading map.{p.Name} failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Pull min/max out of a Colossal.Mathematics.Bounds1 value-typed
+        // property. Read reflectively to avoid the Colossal.Mathematics
+        // compile-time dependency — same pattern as the rest of this file.
+        void ReadMapBounds1(PropertyInfo p, out float? min, out float? max)
+        {
+            min = null; max = null;
+            if (_mapMetadataSystem == null || p == null) return;
+            try
+            {
+                object bounds = p.GetValue(_mapMetadataSystem);
+                if (bounds == null) return;
+                Type t = bounds.GetType();
+                var fMin = t.GetField("min") ?? t.GetField("Min") ?? t.GetField("m_Min");
+                var fMax = t.GetField("max") ?? t.GetField("Max") ?? t.GetField("m_Max");
+                if (fMin != null) min = Convert.ToSingle(fMin.GetValue(bounds));
+                if (fMax != null) max = Convert.ToSingle(fMax.GetValue(bounds));
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Reading map.{p.Name} bounds failed: {ex.Message}");
+            }
+        }
+
+        // One-time dump of MapMetadataSystem's full property surface. We only
+        // wire `mapName` into the snapshot now; this log surfaces everything
+        // else the system exposes (theme, size, climate, image, etc.) so
+        // future cycles can add fields by name without re-spelunking.
+        void LogMapMetadataOnce()
+        {
+            if (_mapMetadataSystem == null)
+            {
+                _log.Info("[diag] MapMetadataSystem: not resolved; map.* will stay null.");
+                return;
+            }
+            try
+            {
+                Type t = _mapMetadataSystem.GetType();
+                var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(p => p.GetIndexParameters().Length == 0)
+                    .OrderBy(p => p.Name)
+                    .Select(p =>
+                    {
+                        object value;
+                        try { value = p.GetValue(_mapMetadataSystem); }
+                        catch (Exception ex) { value = $"<error: {ex.GetType().Name}>"; }
+                        // Truncate big strings / collection ToStrings to keep the log readable.
+                        string display = value?.ToString() ?? "null";
+                        if (display.Length > 120) display = display.Substring(0, 117) + "...";
+                        return $"{p.Name}:{p.PropertyType.Name}={display}";
+                    })
+                    .ToArray();
+                _log.Info($"[diag] {t.FullName} properties: {string.Join(", ", props)}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"[diag] LogMapMetadataOnce failed: {ex.Message}");
+            }
         }
 
         void LogCityComponentsOnce()

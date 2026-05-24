@@ -15,8 +15,11 @@ namespace CityStoryMod.Storyteller
     //
     // Options has 30+ fields covering projection, content selection, and side
     // effects. We construct a minimal one with sensible defaults plus the
-    // handful of fields we actually care about (Systems=Area,
-    // Features=District, VectorFormat=GeoJSON, CompletionDialog/Sound=false).
+    // handful of fields we actually care about
+    // (Systems=Area+Building+Network+Raster,
+    // Features=District+Building+MapTile+Road,
+    // VectorFormat=GeoJSON, RasterFormat=GeoTIFF,
+    // RasterKinds=Elevation+Depth, CompletionDialog/Sound=false).
     //
     // Soft assembly coupling: no compile-time reference to Carto.dll, so our
     // DLL survives Carto rebuilds across CS2 patches as long as the public
@@ -37,6 +40,8 @@ namespace CityStoryMod.Storyteller
         const string RasterKindTypeName = "Carto.IO.RasterKind";
         const string PropertyEnumTypeName = "Carto.IO.Property";
         const string ErrorEnumTypeName = "Carto.IO.Error";
+        const string CoordTypeName = "Carto.Geodata.Coord";
+        const string HemisphereTypeName = "Carto.Geodata.Hemisphere";
 
         static bool _resolved;
         static bool _available;
@@ -60,16 +65,29 @@ namespace CityStoryMod.Storyteller
         // Pre-computed enum values for our request shape. Looked up by name at
         // resolve time so we survive Carto reordering bit positions.
         static object _formatGeoJson;
+        static object _formatGeoTiff;
         static object _formatUnknown;
         static object _systemAreaValue;
         static object _systemBuildingValue;
+        static object _systemNetworkValue;
         static object _systemsCombinedValue;
         static object _featuresCombinedValue;
         static object _vectorKindBoundary;
-        static object _rasterKindUnknown;
-        // Property enum values we want emitted on districts and buildings.
+        static object _vectorKindCenterline;
+        static object _rasterKindsCombined;
+        // Property enum values we want emitted on districts, buildings, networks.
         static object[] _propertyValuesForArea;
         static object[] _propertyValuesForBuilding;
+        static object[] _propertyValuesForNetwork;
+
+        // A pre-built Coord(0, 0, Hemisphere.North, 31) used as SourceCoordinates.
+        // The default Options.SourceCoordinates has crs = CRS.Game, which makes
+        // TagManager's tiepoint.Hemisphere getter throw a NotSupportedException
+        // when the GeoTIFF writer runs (vector exports don't go through
+        // TagManager so they were silently fine). The 4-arg ctor produces a
+        // UTM-CRS Coord that Carto's metadata writer accepts. Zone 31 is
+        // arbitrary — we don't use the projected coordinates downstream.
+        static object _utmSourceCoordinates;
 
         public static bool IsAvailable
         {
@@ -148,8 +166,11 @@ namespace CityStoryMod.Storyteller
             Set(opts, "Systems", _systemsCombinedValue);
             Set(opts, "Features", _featuresCombinedValue);
             Set(opts, "VectorFormat", _formatGeoJson);
-            Set(opts, "RasterFormat", _formatUnknown);
-            Set(opts, "RasterKinds", _rasterKindUnknown);
+            Set(opts, "RasterFormat", _formatGeoTiff);
+            Set(opts, "RasterKinds", _rasterKindsCombined);
+            // Override default SourceCoordinates (crs=Game, which breaks the
+            // GeoTIFF tag writer). See _utmSourceCoordinates declaration.
+            if (_utmSourceCoordinates != null) Set(opts, "SourceCoordinates", _utmSourceCoordinates);
             Set(opts, "CompletionDialog", false);
             Set(opts, "CompletionSound", false);
             Set(opts, "Created", DateTime.Now);
@@ -167,17 +188,24 @@ namespace CityStoryMod.Storyteller
             Set(opts, "Errors", Activator.CreateInstance(errorsType));
 
             // VectorKinds: Dictionary<Carto.IO.System, Carto.IO.VectorKind>
-            //   = { Area → Boundary, Building → Boundary }
+            //   Area    → Boundary       (district polygons + MapTile polygons)
+            //   Building→ Boundary       (named civic/service building outlines)
+            //   Network → Centerline     (road/track linestrings down the middle)
+            // Carto's NetworkSystem only writes Centerline output — Boundary
+            // would give us road footprints, but for storytelling the centerline
+            // is what carries length, name, and adjacency information.
             Type vectorKindsType = typeof(System.Collections.Generic.Dictionary<,>)
                 .MakeGenericType(_systemEnumType, _vectorKindEnumType);
             IDictionary vectorKinds = (IDictionary)Activator.CreateInstance(vectorKindsType);
             vectorKinds[_systemAreaValue] = _vectorKindBoundary;
             vectorKinds[_systemBuildingValue] = _vectorKindBoundary;
+            vectorKinds[_systemNetworkValue] = _vectorKindCenterline;
             Set(opts, "VectorKinds", vectorKinds);
 
             // Properties: Dictionary<Carto.IO.System, HashSet<Carto.IO.Property>>
             //   Area     → {Name, Object, Resident, Employee, Unlocked}
             //   Building → {Name, Object, Category, Resident, Employee}
+            //   Network  → {Name, Object, Category, Form, Length, Lane, Limit}
             Type hashSetOfPropertyType = typeof(System.Collections.Generic.HashSet<>)
                 .MakeGenericType(_propertyEnumType);
             MethodInfo addToSet = hashSetOfPropertyType.GetMethod("Add", new[] { _propertyEnumType });
@@ -188,11 +216,15 @@ namespace CityStoryMod.Storyteller
             IEnumerable buildingPropertySet = (IEnumerable)Activator.CreateInstance(hashSetOfPropertyType);
             foreach (object propValue in _propertyValuesForBuilding) addToSet.Invoke(buildingPropertySet, new[] { propValue });
 
+            IEnumerable networkPropertySet = (IEnumerable)Activator.CreateInstance(hashSetOfPropertyType);
+            foreach (object propValue in _propertyValuesForNetwork) addToSet.Invoke(networkPropertySet, new[] { propValue });
+
             Type propertiesType = typeof(System.Collections.Generic.Dictionary<,>)
                 .MakeGenericType(_systemEnumType, hashSetOfPropertyType);
             IDictionary properties = (IDictionary)Activator.CreateInstance(propertiesType);
             properties[_systemAreaValue] = areaPropertySet;
             properties[_systemBuildingValue] = buildingPropertySet;
+            properties[_systemNetworkValue] = networkPropertySet;
             Set(opts, "Properties", properties);
 
             // Display: Dictionary<(Carto.IO.Property, Carto.IO.System), bool>.
@@ -319,15 +351,18 @@ namespace CityStoryMod.Storyteller
             // Enum-value lookups. Wrapped so a missing name surfaces as an
             // incompatibility message instead of a raw exception.
             if (!TryParseEnum(fileFormatType, "GeoJSON", out _formatGeoJson)
+                || !TryParseEnum(fileFormatType, "GeoTIFF", out _formatGeoTiff)
                 || !TryParseEnum(fileFormatType, "Unknown", out _formatUnknown)
                 || !TryParseEnum(_systemEnumType, "Area", out _systemAreaValue)
                 || !TryParseEnum(_systemEnumType, "Building", out _systemBuildingValue)
-                || !TryCombineFlags(_systemEnumType, out _systemsCombinedValue, "Area", "Building")
-                || !TryCombineFlags(_featureEnumType, out _featuresCombinedValue, "District", "Building")
+                || !TryParseEnum(_systemEnumType, "Network", out _systemNetworkValue)
+                || !TryCombineFlags(_systemEnumType, out _systemsCombinedValue, "Area", "Building", "Network", "Raster")
+                || !TryCombineFlags(_featureEnumType, out _featuresCombinedValue, "District", "Building", "MapTile", "Road")
                 || !TryParseEnum(_vectorKindEnumType, "Boundary", out _vectorKindBoundary)
-                || !TryParseEnum(_rasterKindEnumType, "Unknown", out _rasterKindUnknown))
+                || !TryParseEnum(_vectorKindEnumType, "Centerline", out _vectorKindCenterline)
+                || !TryCombineFlags(_rasterKindEnumType, out _rasterKindsCombined, "Elevation", "Depth"))
             {
-                LogIncompatible(version, "expected enum values missing (FileFormat.GeoJSON+Unknown / System.Area+Building / Feature.District+Building / VectorKind.Boundary / RasterKind.Unknown)");
+                LogIncompatible(version, "expected enum values missing (FileFormat.GeoJSON+GeoTIFF+Unknown / System.Area+Building+Network+Raster / Feature.District+Building+MapTile+Road / VectorKind.Boundary+Centerline / RasterKind.Elevation+Depth)");
                 return;
             }
 
@@ -336,8 +371,34 @@ namespace CityStoryMod.Storyteller
             // for these systems — just the fields the processor uses.
             string[] areaPropNames = { "Name", "Object", "Resident", "Employee", "Unlocked" };
             string[] buildingPropNames = { "Name", "Object", "Category", "Resident", "Employee" };
+            string[] networkPropNames = { "Name", "Object", "Category", "Form", "Length", "Lane", "Limit" };
             if (!TryResolvePropertyEnumValues(version, areaPropNames, out _propertyValuesForArea)) return;
             if (!TryResolvePropertyEnumValues(version, buildingPropNames, out _propertyValuesForBuilding)) return;
+            if (!TryResolvePropertyEnumValues(version, networkPropNames, out _propertyValuesForNetwork)) return;
+
+            // Build the UTM-CRS SourceCoordinates Coord we'll inject into
+            // every Options instance. Required for GeoTIFF metadata writes —
+            // see _utmSourceCoordinates field doc. Failure here disables
+            // raster exports but leaves vector exports working.
+            Type coordType = asm.GetType(CoordTypeName);
+            Type hemisphereType = asm.GetType(HemisphereTypeName);
+            if (coordType != null && hemisphereType != null)
+            {
+                var ctor = coordType.GetConstructor(new[] { typeof(double), typeof(double), hemisphereType, typeof(int) });
+                if (ctor != null && TryParseEnum(hemisphereType, "North", out object northValue))
+                {
+                    try { _utmSourceCoordinates = ctor.Invoke(new object[] { 0.0, 0.0, northValue, 31 }); }
+                    catch (Exception ex) { Mod.Log?.Warn($"CartoBridge: building UTM SourceCoordinates failed: {ex.Message}; rasters will throw."); }
+                }
+                else
+                {
+                    Mod.Log?.Warn("CartoBridge: Coord(double,double,Hemisphere,int) ctor or Hemisphere.North missing; rasters will throw.");
+                }
+            }
+            else
+            {
+                Mod.Log?.Warn("CartoBridge: Carto.Geodata.Coord / Hemisphere types missing; rasters will throw.");
+            }
 
             _version = version;
             _available = true;
