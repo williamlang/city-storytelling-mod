@@ -90,6 +90,7 @@ namespace CityStoryMod.Systems
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
             AddBinding(new TriggerBinding(Group, "clearMessages", OnClearMessages));
             AddBinding(new TriggerBinding(Group, "refreshGeography", OnRefreshGeography));
+            AddBinding(new TriggerBinding<string>(Group, "uiLog", OnUILog));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -287,6 +288,16 @@ namespace CityStoryMod.Systems
         {
             _log.Info("OnRefreshGeography trigger received from UI.");
             World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
+        }
+
+        // JS-side diagnostic pipe. The UI calls trigger("CityStoryMod",
+        // "uiLog", message); we relay each message to the mod log so
+        // browser-style console output from Coherent (which has no
+        // user-accessible devtools) lands in Logs/CityStoryMod.log next
+        // to everything else.
+        void OnUILog(string message)
+        {
+            _log.Info("[UI] " + (message ?? ""));
         }
 
         static string FormatTokens(TokenUsage u)

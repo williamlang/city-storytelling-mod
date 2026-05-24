@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "react";
 import styles from "./storyteller.module.scss";
 import { useDrag } from "./useDrag";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter, extractMarkdownLinks } from "./frontmatter";
 import { MarkdownLite } from "./MarkdownLite";
 import type { CanonEntry } from "./bindings";
 
@@ -35,8 +35,15 @@ export function FileModal({
     beginDrag(e, modalRef.current);
   };
 
-  // Initial cascade offset before the user has dragged.
-  const offset = cascadeIndex * 24;
+  // Initial cascade offset before the user has dragged. The cascade
+  // wraps after roughly half a dozen stacked modals so we don't run
+  // straight off the right or bottom edge — for the unbounded case
+  // see the modal's max-width / max-height CSS, which also caps the
+  // already-on-screen modal so it doesn't clip content.
+  const cascadeStep = 24;
+  const cascadeWrap = 6;
+  const wrappedIndex = cascadeIndex % cascadeWrap;
+  const offset = wrappedIndex * cascadeStep;
   const style = pos
     ? { top: `${pos.y}px`, left: `${pos.x}px` }
     : { top: `${100 + offset}rem`, left: `${500 + offset}rem` };
@@ -55,7 +62,7 @@ export function FileModal({
       </div>
       <div className={styles.fileModalBody}>
         {entry ? (
-          <FileContent content={entry.content} onOpenFile={onOpenFile} />
+          <FileContent content={entry.content} basePath={path} onOpenFile={onOpenFile} />
         ) : (
           <div className={styles.fileModalMissing}>
             File no longer in canon tree — it may have been deleted or renamed.
@@ -75,16 +82,23 @@ export function FileModal({
 // (today).
 function FileContent({
   content,
+  basePath,
   onOpenFile,
 }: {
   content: string;
+  basePath: string;
   onOpenFile?: (path: string) => void;
 }) {
   const { fields, body } = useMemo(() => parseFrontmatter(content), [content]);
   const fieldNames = Object.keys(fields);
+  // Surface every internal cross-reference in the body as a clickable
+  // list row. Done out-of-prose because Coherent UI's layout engine
+  // mistreats inline elements; the prose body just shows link text.
+  const links = useMemo(() => extractMarkdownLinks(body), [body]);
+
   return (
     <>
-      {fieldNames.length > 0 && (
+      {(fieldNames.length > 0 || links.length > 0) && (
         <dl className={styles.fileFrontmatter}>
           {fieldNames.map((k) => (
             <div key={k} className={styles.fileFrontmatterRow}>
@@ -92,9 +106,69 @@ function FileContent({
               <dd className={styles.fileFrontmatterValue}>{fields[k]}</dd>
             </div>
           ))}
+          {links.length > 0 && (
+            <div className={styles.fileFrontmatterRow}>
+              <dt className={styles.fileFrontmatterKey}>links</dt>
+              <dd className={styles.fileFrontmatterValue}>
+                <div className={styles.fileLinkList}>
+                  {links.map((link) => {
+                    const resolved = resolveCanonHref(basePath, link.href);
+                    const isExternal = /^https?:\/\//i.test(link.href);
+                    return (
+                      <button
+                        key={link.href}
+                        type="button"
+                        className={styles.fileLinkItem}
+                        disabled={isExternal || !onOpenFile}
+                        onClick={
+                          isExternal || !onOpenFile
+                            ? undefined
+                            : () => onOpenFile(resolved)
+                        }
+                        title={resolved}
+                      >
+                        {link.text}
+                      </button>
+                    );
+                  })}
+                </div>
+              </dd>
+            </div>
+          )}
         </dl>
       )}
-      {body && <MarkdownLite onLinkClick={onOpenFile}>{body}</MarkdownLite>}
+      {body && (
+        <div className={styles.fileMarkdownBody}>
+          <MarkdownLite>{body}</MarkdownLite>
+        </div>
+      )}
     </>
   );
+}
+
+// Resolve a markdown link's href against the directory of the file
+// containing the link.
+//   - "characters/foo.md"  (already has a slash) → returned unchanged.
+//   - "foo.md"             (no slash, same dir)  → "<basedir>/foo.md".
+//   - "../foo.md"          (parent dir)          → walk up one level.
+//   - Absolute paths / URLs → returned unchanged.
+export function resolveCanonHref(basePath: string, href: string): string {
+  if (/^https?:\/\//i.test(href)) return href;
+  if (href.startsWith("/")) return href.replace(/^\/+/, "");
+
+  // Split basePath into directory segments (drop the filename).
+  const baseSegs = basePath.split("/");
+  baseSegs.pop();  // remove filename
+
+  // Apply each segment of href, honoring ./ and ../
+  const hrefSegs = href.split("/");
+  for (const seg of hrefSegs) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      if (baseSegs.length > 0) baseSegs.pop();
+      continue;
+    }
+    baseSegs.push(seg);
+  }
+  return baseSegs.join("/");
 }

@@ -18,6 +18,18 @@ export default defineConfig({
       "mod.json": path.resolve(__dirname, "mod.json"),
     },
   },
+  // Mirror webpack DefinePlugin / Vite `define` so tests don't blow up on
+  // build-time globals like __BUILD_TIME__. Value isn't load-bearing in
+  // tests — just needs to be defined.
+  //
+  // Note: we *can't* run tests against production React (the way vite.config
+  // does for `npm run dev:web`) — React Testing Library depends on `act()`,
+  // which throws "not supported in production builds" inside react.production.
+  // RTL must run under dev React. The dev harness is the closer-to-game
+  // environment; tests stay on dev React.
+  define: {
+    __BUILD_TIME__: JSON.stringify("test"),
+  },
   plugins: [react()],
   test: {
     environment: "jsdom",

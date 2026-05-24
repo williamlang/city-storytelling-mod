@@ -59,3 +59,11 @@ export function clearMessages() {
 export function refreshGeography() {
   trigger(GROUP, "refreshGeography");
 }
+
+// Pipe a diagnostic message to the C# mod log. Coherent UI has no
+// user-accessible devtools, so console.log goes nowhere a player can
+// reach. This trigger relays to PromptUISystem.OnUILog, which writes
+// to Logs/CityStoryMod.log as `[UI] <message>`.
+export function uiLog(message: string) {
+  trigger(GROUP, "uiLog", message);
+}

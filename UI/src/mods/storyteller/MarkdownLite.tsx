@@ -1,5 +1,4 @@
 import { Fragment } from "react";
-import styles from "./storyteller.module.scss";
 
 // Minimal markdown renderer for canon files. Handles the shapes that
 // template/ documents actually use:
@@ -7,7 +6,7 @@ import styles from "./storyteller.module.scss";
 //   **bold**
 //   *italic* / _italic_
 //   `inline code`
-//   [link text](href)
+//   [link text](href)   ← rendered as plain text; see below
 //   ```fenced code blocks```
 //   - bullet lists
 //   1. ordered lists
@@ -19,18 +18,21 @@ import styles from "./storyteller.module.scss";
 // below — but we explicitly avoid react-markdown's remark/micromark
 // dependency chain because it doesn't load cleanly in CS2's Coherent
 // UI runtime (whole UI bundle fails to register).
+//
+// LINKS ARE RENDERED AS PLAIN TEXT. CS2's Coherent layout engine
+// mistreats inline elements badly — `display: inline` computes
+// correctly but the element is rendered block-sized on its own line,
+// and the global stylesheet overrides our `display: inline-block`
+// override with higher priority. After much CSS spelunking we gave
+// up and surfaced cross-references as a clickable LIST in FileModal
+// instead, generated from `extractMarkdownLinks(body)`. The prose
+// shows only the link text, no markup, no click target.
 
 export interface MarkdownLiteProps {
   children: string;
-  // Called when a relative-path markdown link is clicked. Receives the
-  // raw href as written in the markdown (e.g., "characters/annika.md").
-  // External links (http://, https://) bypass this — they render as
-  // styled anchors but don't navigate, since Coherent UI can't open
-  // external URLs from inside the game.
-  onLinkClick?: (href: string) => void;
 }
 
-export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
+export function MarkdownLite({ children }: MarkdownLiteProps) {
   const lines = (children ?? "").split(/\r?\n/);
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -63,7 +65,7 @@ export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
     if (headerMatch) {
       const level = headerMatch[1].length;
       const Tag = `h${level}` as keyof JSX.IntrinsicElements;
-      blocks.push(<Tag key={blocks.length}>{renderInline(headerMatch[2], onLinkClick)}</Tag>);
+      blocks.push(<Tag key={blocks.length}>{renderInline(headerMatch[2])}</Tag>);
       i++;
       continue;
     }
@@ -73,7 +75,7 @@ export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
         const item = lines[i].replace(/^\s*[-*]\s+/, "");
-        items.push(<li key={items.length}>{renderInline(item, onLinkClick)}</li>);
+        items.push(<li key={items.length}>{renderInline(item)}</li>);
         i++;
       }
       blocks.push(<ul key={blocks.length}>{items}</ul>);
@@ -85,7 +87,7 @@ export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         const item = lines[i].replace(/^\s*\d+\.\s+/, "");
-        items.push(<li key={items.length}>{renderInline(item, onLinkClick)}</li>);
+        items.push(<li key={items.length}>{renderInline(item)}</li>);
         i++;
       }
       blocks.push(<ol key={blocks.length}>{items}</ol>);
@@ -100,7 +102,7 @@ export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
         i++;
       }
       blocks.push(
-        <blockquote key={blocks.length}>{renderInline(quoteLines.join(" "), onLinkClick)}</blockquote>
+        <blockquote key={blocks.length}>{renderInline(quoteLines.join(" "))}</blockquote>
       );
       continue;
     }
@@ -122,17 +124,19 @@ export function MarkdownLite({ children, onLinkClick }: MarkdownLiteProps) {
       paraLines.push(lines[i]);
       i++;
     }
-    blocks.push(<p key={blocks.length}>{renderInline(paraLines.join(" "), onLinkClick)}</p>);
+    blocks.push(<p key={blocks.length}>{renderInline(paraLines.join(" "))}</p>);
   }
 
   return <>{blocks}</>;
 }
 
 // Inline formatting — link, bold, italic, code, applied left-to-right.
-// Tokens are non-greedy; nested formatting (bold inside italic, link
-// text containing bold, etc.) isn't supported because the template/
-// files don't use it.
-function renderInline(text: string, onLinkClick?: (href: string) => void): React.ReactNode {
+// Tokens are non-greedy; nested formatting isn't supported because the
+// template/ files don't use it.
+//
+// Links are replaced with their bare text — no element, no class, no
+// click handler. See header comment for rationale.
+function renderInline(text: string): React.ReactNode {
   // Combined tokenizer. Capture-group layout:
   //   1: full link    2: link text     3: link href
   //   4: full bold    5: bold text
@@ -150,7 +154,7 @@ function renderInline(text: string, onLinkClick?: (href: string) => void): React
     if (match.index > lastIndex) {
       out.push(text.slice(lastIndex, match.index));
     }
-    if (match[1]) out.push(renderLink(match[2], match[3], onLinkClick, key++));
+    if (match[1]) out.push(match[2]); // link → plain text only
     else if (match[4]) out.push(<strong key={key++}>{match[5]}</strong>);
     else if (match[6]) out.push(<em key={key++}>{match[7]}</em>);
     else if (match[8]) out.push(<em key={key++}>{match[9]}</em>);
@@ -159,43 +163,21 @@ function renderInline(text: string, onLinkClick?: (href: string) => void): React
   }
   if (lastIndex < text.length) out.push(text.slice(lastIndex));
 
-  return out.length === 1 ? out[0] : <Fragment>{out}</Fragment>;
-}
-
-function renderLink(
-  text: string,
-  href: string,
-  onLinkClick: ((href: string) => void) | undefined,
-  key: number
-): React.ReactNode {
-  const isExternal = /^https?:\/\//i.test(href);
-  if (isExternal) {
-    // Coherent UI can't navigate to external URLs from inside the game,
-    // so the link is presentational — shows the title attr so a curious
-    // player can read the destination but clicks are no-ops.
-    return (
-      <a key={key} className={styles.canonLinkExternal} title={href}>
-        {text}
-      </a>
-    );
+  if (out.length === 0) return "";
+  if (out.length === 1) return out[0];
+  // Collapse adjacent strings into one — keeps the React child array
+  // from being [string, string, string] which Coherent's reconciler
+  // has occasionally mishandled. Inline elements (bold/em/code) stay
+  // as their own entries.
+  const collapsed: React.ReactNode[] = [];
+  for (const node of out) {
+    const last = collapsed[collapsed.length - 1];
+    if (typeof node === "string" && typeof last === "string") {
+      collapsed[collapsed.length - 1] = last + node;
+    } else {
+      collapsed.push(node);
+    }
   }
-  // Internal link — relative path to another canon file. Click opens
-  // another FileModal via the threaded onLinkClick callback.
-  const handle = onLinkClick
-    ? (e: React.MouseEvent) => {
-        e.preventDefault();
-        onLinkClick(href);
-      }
-    : undefined;
-  return (
-    <a
-      key={key}
-      className={styles.canonLink}
-      title={href}
-      onClick={handle}
-      role="button"
-    >
-      {text}
-    </a>
-  );
+  if (collapsed.length === 1) return collapsed[0];
+  return <Fragment>{collapsed}</Fragment>;
 }

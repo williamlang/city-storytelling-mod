@@ -23,6 +23,34 @@ export interface ParsedFrontmatter {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
+// Extract every `[text](href)` markdown link from a body string,
+// deduped by href, preserving first-occurrence order. Used to surface
+// canon-file cross-references as a clickable list in the FileModal
+// header rather than as inline elements in the prose body — Coherent
+// UI's layout engine has serious trouble with inline elements (see
+// MarkdownLite.tsx for the history), so we render links as plain text
+// in the prose and as clickable rows in a sidebar-style list.
+export interface MarkdownLink {
+  text: string;
+  href: string;
+}
+
+export function extractMarkdownLinks(body: string): MarkdownLink[] {
+  if (!body) return [];
+  const pattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const seen = new Set<string>();
+  const out: MarkdownLink[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) {
+    const text = match[1];
+    const href = match[2];
+    if (seen.has(href)) continue;
+    seen.add(href);
+    out.push({ text, href });
+  }
+  return out;
+}
+
 export function parseFrontmatter(text: string): ParsedFrontmatter {
   if (!text) return { fields: {}, body: text ?? "" };
   const match = FRONTMATTER_RE.exec(text);

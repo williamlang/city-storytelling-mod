@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter, extractMarkdownLinks } from "./frontmatter";
 
 describe("parseFrontmatter", () => {
   it("extracts key:value pairs from a leading --- block", () => {
@@ -64,5 +64,40 @@ describe("parseFrontmatter", () => {
     const { fields, body } = parseFrontmatter(md);
     expect(fields).toEqual({ name: "Annika" });
     expect(body).toBe("First paragraph.\n\n---\n\nSecond paragraph.");
+  });
+});
+
+describe("extractMarkdownLinks", () => {
+  it("returns one entry per unique link in source order", () => {
+    const body =
+      "He met [Magnus](magnus.md) at the bar, then later " +
+      "[Erik](erik.md), then back to [Magnus](magnus.md) again.";
+    expect(extractMarkdownLinks(body)).toEqual([
+      { text: "Magnus", href: "magnus.md" },
+      { text: "Erik", href: "erik.md" },
+    ]);
+  });
+
+  it("returns an empty array for body with no links", () => {
+    expect(extractMarkdownLinks("Just prose, no links.")).toEqual([]);
+  });
+
+  it("handles relative paths with ../ segments", () => {
+    const body = "See [Hayloft](../places/hayloft-steakhouse.md) for details.";
+    expect(extractMarkdownLinks(body)).toEqual([
+      { text: "Hayloft", href: "../places/hayloft-steakhouse.md" },
+    ]);
+  });
+
+  it("includes external URLs (caller decides how to display them)", () => {
+    const body = "See [docs](https://example.com/foo) for the spec.";
+    expect(extractMarkdownLinks(body)).toEqual([
+      { text: "docs", href: "https://example.com/foo" },
+    ]);
+  });
+
+  it("returns empty for empty input", () => {
+    expect(extractMarkdownLinks("")).toEqual([]);
+    expect(extractMarkdownLinks(null as any)).toEqual([]);
   });
 });

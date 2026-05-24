@@ -54,10 +54,6 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OllamaBaseUrl]"] =
                 "Base URL of your Ollama server. Defaults to http://localhost:11434. Change if you run Ollama on a different host or port (e.g. a beefier home server). Only used when Provider is Ollama.",
 
-            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.GhostwriterStatus]"] = "Ghostwriter status",
-            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.GhostwriterStatus]"] =
-                "Current state of the in-game ghostwriter. Updates when you open this panel — it doesn't tick while open, so re-open the panel to refresh.",
-
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] = "Open story folder",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] =
                 "Opens the current city's story folder in your file explorer (or the parent folder if no city has been exported yet). Read snapshots, canon, and session files there.",

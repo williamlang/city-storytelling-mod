@@ -1,9 +1,16 @@
 const path = require("path");
+const webpack = require("webpack");
 const MOD = require("./mod.json");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CSSPresencePlugin } = require("./tools/css-presence");
 const TerserPlugin = require("terser-webpack-plugin");
 const gray = (text) => `\x1b[90m${text}\x1b[0m`;
+
+// Build timestamp surfaced in the in-game storyteller header so we can
+// sanity-check that the bundle running in CS2 matches what we just
+// built. Format: yyyy-MM-dd HH:mm (local time) — short enough to fit
+// next to the panel title.
+const BUILD_TIME = new Date().toISOString().slice(0, 16).replace("T", " ");
 
 const CSII_USERDATAPATH = process.env.CSII_USERDATAPATH;
 
@@ -110,12 +117,15 @@ module.exports = {
   plugins: [
     new MiniCssExtractPlugin(),
     new CSSPresencePlugin(),
+    new webpack.DefinePlugin({
+      __BUILD_TIME__: JSON.stringify(BUILD_TIME),
+    }),
     {
       apply(compiler) {
         let runCount = 0;
         compiler.hooks.done.tap("AfterDonePlugin", (stats) => {
           console.log(stats.toString({ colors: true }));
-          console.log(`\n🔨 ${!runCount++ ? "Built" : "Updated"} ${MOD.id}`);
+          console.log(`\n🔨 ${!runCount++ ? "Built" : "Updated"} ${MOD.id}  (build: ${BUILD_TIME})`);
           console.log("   " + gray(OUTPUT_DIR) + "\n");
         });
       },

@@ -191,7 +191,12 @@ export function StorytellerToolbar() {
       {open && (
         <div className={styles.panel} style={panelStyle} ref={panelRef}>
           <div className={styles.header} onMouseDown={onHeaderMouseDown}>
-            <span className={styles.title}>Ghostwriter</span>
+            <span className={styles.title}>
+              Ghostwriter
+              <span className={styles.buildStamp} title="Bundle build time">
+                {__BUILD_TIME__}
+              </span>
+            </span>
             <button
               type="button"
               className={styles.close}

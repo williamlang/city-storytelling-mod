@@ -168,21 +168,25 @@
 }
 
 // Canon file modal — standalone draggable window, multiple can be open.
-// Renders markdown via react-markdown; styles below scope to the modal
-// body so they don't bleed into the main chat panel.
+// Deliberately simple layout: NO flexbox, NO viewport-unit calc(), NO
+// nested width inheritance. Just a fixed-width box with a normal-flow
+// header block above a body block that owns its own max-height +
+// scroll. This pattern is what reliably contains content in Coherent
+// UI; earlier attempts using `display: flex; flex-direction: column`
+// with `flex: 1; min-height: 0` on the body silently let content
+// overflow past the modal edges.
 .fileModal {
   position: fixed;
   z-index: 9050;
   width: 480rem;
-  max-height: 600rem;
   background: rgba(15, 22, 30, 0.97);
   color: #e6eef7;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8rem;
   box-shadow: 0 6rem 20rem rgba(0, 0, 0, 0.6);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow: hidden;     // clip the corners of the header/body to the
+                        // modal's border-radius
+  box-sizing: border-box;
 }
 
 .fileModalHeader {
@@ -194,6 +198,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   cursor: grab;
   user-select: none;
+  box-sizing: border-box;
 
   &:active {
     cursor: grabbing;
@@ -225,12 +230,22 @@
 }
 
 .fileModalBody {
-  flex: 1;
+  max-height: 500rem;       // explicit, NOT flex-derived. Body owns
+                            // its own scroll viewport regardless of
+                            // whatever's above it.
   overflow-y: auto;
+  overflow-x: hidden;       // any horizontal overflow gets clipped
+                            // — content should never spill out the
+                            // side of the modal.
+  word-break: break-word;   // legacy property, supported in Coherent.
+                            // Long unbroken tokens (paths, URLs)
+                            // break to stay inside the width.
+  overflow-wrap: break-word;
   padding: 12rem 16rem;
   font-size: 12rem;
   line-height: 1.5;
   color: rgba(230, 238, 247, 0.9);
+  box-sizing: border-box;
 
   // react-markdown emits standard tags — style each so the file reads
   // like prose, not a `pre` dump.
@@ -248,8 +263,6 @@
 
   ul, ol { margin: 6rem 0; padding-left: 20rem; }
   li { margin: 2rem 0; }
-
-  a { text-decoration: none; }
 
   code {
     font-family: monospace;
@@ -287,12 +300,10 @@
     margin: 12rem 0;
   }
 
-  a {
-    color: #5bb3e6;
-    text-decoration: none;
-
-    &:hover { text-decoration: underline; }
-  }
+  // No inline link styling — links render as plain text in the body
+  // and are surfaced separately as clickable rows in the frontmatter
+  // (see .fileLinkList). Coherent UI mistreats inline elements badly;
+  // sidestepping the whole problem keeps the prose clean and readable.
 
   strong { color: #ffffff; font-weight: 600; }
   em { color: rgba(230, 238, 247, 0.95); }
@@ -316,6 +327,40 @@
   border-radius: 4rem;
   font-size: 11rem;
   line-height: 1.4;
+}
+
+// Wrapper around the rendered markdown body. Mirrors the frontmatter
+// box's containment posture: explicit width with box-sizing so padding
+// doesn't push past the parent's edge, and word-break so long tokens
+// stay inside.
+.fileMarkdownBody {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: break-word;
+
+  // CS2's global stylesheet sets `display: flex; flex-direction: row;
+  // flex-wrap: nowrap` on every block element — including <p>, <h1..6>,
+  // <ul>, <ol>, <blockquote>, <pre>. That turns each markdown block
+  // into a single-row flex container whose inline children become flex
+  // items: text segments and link spans are laid out left-to-right
+  // with no wrapping, blow past the modal's right edge, and visually
+  // reorder relative to source. Forcing `display: block` on these
+  // restores normal block + inline-flow rendering so prose wraps as
+  // a paragraph and links wrap as phrases.
+  // (Confirmed via getComputedStyle dump in Logs/CityStoryMod.log —
+  // every <p> reported `display: flex` until this override was added.)
+  p, h1, h2, h3, h4, h5, h6, blockquote, pre {
+    display: block;
+  }
+  ul, ol {
+    display: block;
+    list-style-position: inside;
+  }
+  li {
+    display: list-item;
+  }
 }
 
 .fileFrontmatterRow {
@@ -358,6 +403,18 @@
 .title {
   font-size: 14rem;
   font-weight: 600;
+}
+
+// Tiny build-time stamp next to the panel title, so a stale UI bundle
+// can be ruled out at a glance. Webpack DefinePlugin / Vite `define`
+// inject the value; see UI/webpack.config.js and UI/vite.config.ts.
+.buildStamp {
+  margin-left: 8rem;
+  font-size: 10rem;
+  font-weight: 400;
+  color: rgba(230, 238, 247, 0.4);
+  font-family: monospace;
+  user-select: text;
 }
 
 .close {
@@ -729,25 +786,53 @@
   }
 }
 
-// Internal markdown link inside canon — clickable, opens another file
-// modal via the threaded onLinkClick callback.
-.canonLink {
-  color: #6ea8ff;
-  cursor: pointer;
-  border-bottom: 1px dashed rgba(110, 168, 255, 0.4);
-
-  &:hover {
-    color: #9bc4ff;
-    border-bottom-color: rgba(155, 196, 255, 0.7);
-  }
+// Internal markdown link — bare-minimum styling: color + cursor only.
+// No text-decoration, display, white-space, word-break, or
+// overflow-wrap overrides. Span's defaults give us inline wrappable
+// `display: inline-block` not `display: inline`. Coherent UI's layout
+// engine has a bug where `display: inline` on a span computes as
+// "inline" via getComputedStyle but is rendered as a block-sized,
+// own-line element (rect width = parent width, on its own row).
+// `inline-block` is the workaround that Coherent actually flows
+// inline. Tradeoff: an inline-block link is an atomic unit, so very
+// long link text won't wrap mid-phrase — instead it goes to the next
+// line as a single chunk. Acceptable; link text is rarely long enough
+// to need mid-link wrapping. (Confirmed in Logs/CityStoryMod.log
+// after switching from inline to inline-block.)
+// Link list in the FileModal frontmatter — one row per internal
+// reference in the body. Stacked vertically inside the frontmatter
+// `dd` cell. Each item is a block-level button so CS2's global
+// `display: flex` on spans (and its layout-engine bug treating
+// `display: inline` as block-sized) doesn't matter — buttons + flex
+// are first-class in Coherent UI and behave correctly.
+.fileLinkList {
+  display: flex;
+  flex-direction: column;
+  gap: 4rem;
+  width: 100%;
 }
 
-// External (http(s)://) link — Coherent UI can't navigate, so this is
-// presentational only. Different color cues that it's "outside" the
-// game; title attr shows the destination on hover.
-.canonLinkExternal {
-  color: rgba(230, 238, 247, 0.75);
-  cursor: help;
-  text-decoration: underline dotted rgba(230, 238, 247, 0.4);
-  text-underline-offset: 2px;
+.fileLinkItem {
+  display: flex;
+  align-items: center;
+  background: rgba(91, 179, 230, 0.10);
+  border: 1px solid rgba(91, 179, 230, 0.25);
+  border-radius: 4rem;
+  padding: 4rem 8rem;
+  color: #9bc4ff;
+  font-size: 12rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+
+  &:hover:not(:disabled) {
+    background: rgba(91, 179, 230, 0.18);
+    border-color: rgba(91, 179, 230, 0.45);
+    color: #c8dfff;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 }

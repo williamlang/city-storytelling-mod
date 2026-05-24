@@ -107,6 +107,73 @@ export function seedSampleCity() {
         "long-running set of dinners at the country club.\n\n" +
         "## Threats\n\n" +
         "Annika's procurement reform. The Eastside neighbourhood association." },
+
+      // -- Layout test fixtures: long prose + internal cross-links --
+      // patricia-kovach exercises link-followed-by-text (the "space-eating"
+      // bug), same-dir relative links (magnus-lindgren.md), cross-dir links
+      // (../events/...), and content long enough to force the body to
+      // scroll inside the modal's max-height. magnus-lindgren and
+      // erik-lindgren exist as link targets so the path-resolution code
+      // path can be exercised in the harness too.
+      { name: "patricia-kovach", path: "characters/patricia-kovach.md", content:
+        "---\n" +
+        "name: Patricia Kovach\n" +
+        "role: Selkirk Co-op board member\n" +
+        "age: 58\n" +
+        "status: active\n" +
+        "agenda: Hold the line on rural electric rates; protect her father's legacy\n" +
+        "---\n\n" +
+        "She knew [Magnus Lindgren](magnus-lindgren.md) the way everyone in the panhandle's " +
+        "small-town infrastructure community knew Magnus: as a name from the mill-and-co-op " +
+        "era, a man who had served on Selkirk's member board for one term in 1979 and had " +
+        "spoken at exactly one annual meeting in fifty years. He had voted against a proposed " +
+        "rate increase. The increase had passed anyway. Magnus had been polite about it. Pat " +
+        "remembered him from her father's stories.\n\n" +
+        "She met [Erik](erik-lindgren.md) for the first time on May 28, 2026 — see " +
+        "[the Selkirk meeting](../events/2026-05-28-selkirk-meeting.md). She liked him; " +
+        "the project gets a quiet ally as long as Erik plays it straight.\n\n" +
+        "On July 8, 2026, Erik called her from his kitchen before filing the [Crossing " +
+        "Ridge wind permit](../events/2026-07-08-permit-filing.md). She told him the " +
+        "co-op's lawyers would not block it. That was as close to a public endorsement as " +
+        "she has ever given anyone outside her family.\n\n" +
+        "## Long paragraph to test wrapping\n\n" +
+        "Patricia drives a 2017 Subaru Outback with 198,000 miles on it. She refuses to " +
+        "replace it because the new ones are bigger and she does not like bigger cars. " +
+        "She lives in a 1948 farmhouse on twelve acres west of Bonners Ferry that she " +
+        "inherited from her father in 2003. The barn is full of equipment her husband " +
+        "Reidar used before he died in 2019. She has not sold any of it. She tells people " +
+        "she will, eventually. She will not. The neighbours know this and have stopped " +
+        "asking. The barn is part of the property the way the kitchen is part of the house." },
+
+      { name: "magnus-lindgren", path: "characters/magnus-lindgren.md", content:
+        "---\n" +
+        "name: Magnus Lindgren\n" +
+        "role: Millworker, co-op board (1979–80)\n" +
+        "age: 91\n" +
+        "status: deceased (2025-10-08)\n" +
+        "---\n\n" +
+        "Norwegian-American GI, returned from the Pacific in 1945. Worked the green chain " +
+        "at Halverson Lumber from 1946 until the closure in 1989. Married Astrid in 1948. " +
+        "Father of [Erik](erik-lindgren.md); stepfather to [Bjorn](bjorn-lindgren.md), " +
+        "Astrid's son from her first marriage.\n\n" +
+        "Served one term on the Selkirk Co-op member board in 1979. Voted against a rate " +
+        "increase. The increase passed anyway. He was polite about it." },
+
+      { name: "erik-lindgren", path: "characters/erik-lindgren.md", content:
+        "---\n" +
+        "name: Erik Lindgren\n" +
+        "role: Engineer; mill-restart applicant\n" +
+        "age: 64\n" +
+        "status: active\n" +
+        "---\n\n" +
+        "Son of [Magnus](magnus-lindgren.md) and Astrid. Returned to Halverson Crossing " +
+        "in 2024 after thirty years in Spokane. Filed the [mill-restart application]" +
+        "(../events/2026-07-28-mill-restart-decision.md) on July 28, 2026." },
+
+      { name: "bjorn-lindgren", path: "characters/bjorn-lindgren.md", content:
+        "---\nname: Bjorn Lindgren\nrole: Millworker\nstatus: deceased (1974)\n---\n\n" +
+        "Astrid's son from her first marriage; raised by [Magnus](magnus-lindgren.md) " +
+        "as his own from age 13." },
     ],
     companies: [
       { name: "halverson-civil", path: "companies/halverson-civil.md", content:
@@ -137,6 +204,19 @@ export function seedSampleCity() {
         "---\ntitle: 2024 Mayoral Election\ndate: 2024-11-05\ntype: election\n---\n\n" +
         "Annika Bergström defeats two-term incumbent **Henrik Lassen** by 4.2 points. " +
         "Margin: 1,847 votes." },
+      { name: "2026-05-28-selkirk-meeting", path: "events/2026-05-28-selkirk-meeting.md", content:
+        "---\ntitle: Selkirk co-op board meeting\ndate: 2026-05-28\n---\n\n" +
+        "First meeting where Erik appeared as the wind project applicant. " +
+        "[Patricia](../characters/patricia-kovach.md) spoke briefly in his favor." },
+      { name: "2026-07-08-permit-filing", path: "events/2026-07-08-permit-filing.md", content:
+        "---\ntitle: Crossing Ridge wind permit filed\ndate: 2026-07-08\n---\n\n" +
+        "[Erik](../characters/erik-lindgren.md) filed the formal permit for the Crossing " +
+        "Ridge turbine cluster. The Selkirk Co-op declined to oppose." },
+      { name: "2026-07-28-mill-restart-decision", path: "events/2026-07-28-mill-restart-decision.md", content:
+        "---\ntitle: Mill-restart application filed\ndate: 2026-07-28\n---\n\n" +
+        "[Erik Lindgren](../characters/erik-lindgren.md) filed the application to restart " +
+        "the Halverson Lumber green chain on July 28, 2026. The application sat on the " +
+        "county planning desk for eleven days before anyone read it." },
     ],
     sessions: [],
     stories: [],
