@@ -20,6 +20,7 @@
     <Compile Include="..\..\TextUtils.cs" Link="LinkedSources\TextUtils.cs" />
     <Compile Include="..\..\PathUtils.cs" Link="LinkedSources\PathUtils.cs" />
     <Compile Include="..\..\TemplateScaffolder.cs" Link="LinkedSources\TemplateScaffolder.cs" />
+    <Compile Include="..\..\Storyteller\CartoProcessor.cs" Link="LinkedSources\CartoProcessor.cs" />
   </ItemGroup>
 
   <ItemGroup>

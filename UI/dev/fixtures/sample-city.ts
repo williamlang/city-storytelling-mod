@@ -33,6 +33,12 @@ export function seedSampleCity() {
   bindValue("CityStoryMod", "tokenSummary", "in 4823 • out 1102 • cache r12300/w800");
   bindValue("CityStoryMod", "lastError", "");
 
+  // Carto-bridge state. Seed `cartoAvailable=true` so the Refresh map button
+  // renders in the harness; toggle `cartoExporting` here to preview the
+  // disabled/Updating state.
+  bindValue("CityStoryMod", "cartoAvailable", true);
+  bindValue("CityStoryMod", "cartoExporting", false);
+
   bindValue("CityStoryMod", "availableCommands", JSON.stringify([
     { name: "session-start", description: "Open a session — state scan + checklist of opening tasks", order: 20 },
     { name: "story-driven", description: "Generate concrete story-driven gameplay choices with for/against framing", order: 30 },

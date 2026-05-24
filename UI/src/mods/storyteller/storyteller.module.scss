@@ -249,6 +249,8 @@
   ul, ol { margin: 6rem 0; padding-left: 20rem; }
   li { margin: 2rem 0; }
 
+  a { text-decoration: none; }
+
   code {
     font-family: monospace;
     font-size: 11rem;
@@ -370,6 +372,45 @@
   &:hover {
     color: #ff8c8c;
   }
+}
+
+// Slim banner between the header and the chat body. Shown only while
+// ExportSystem is running (or about to run) Carto's synchronous spatial
+// export. The main thread will block for a beat — this is the player-
+// facing acknowledgement so the freeze doesn't look like a crash.
+.cartoBanner {
+  display: flex;
+  align-items: center;
+  gap: 6rem;
+  background: rgba(80, 140, 220, 0.16);
+  border: 1px solid rgba(80, 140, 220, 0.4);
+  border-radius: 4rem;
+  color: rgba(230, 238, 247, 0.85);
+  font-size: 11rem;
+  padding: 4rem 8rem;
+  margin-top: 6rem;
+}
+
+.cartoBannerDot {
+  width: 6rem;
+  height: 6rem;
+  border-radius: 50%;
+  background: #6ea8ff;
+  animation: cartoBannerPulse 1s ease-in-out infinite;
+}
+
+@keyframes cartoBannerPulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+
+// Success variant for the post-completion "Map data updated" message.
+// Quieter green; same shape and placement as the in-progress banner so
+// the transition reads as a continuation of the same status surface.
+.cartoBannerOk {
+  background: rgba(80, 180, 120, 0.16);
+  border-color: rgba(80, 180, 120, 0.4);
+  color: rgba(220, 240, 230, 0.9);
 }
 
 .chat {
@@ -642,4 +683,71 @@
   &:hover {
     background: #c95555;
   }
+}
+
+// Secondary action — quieter than .run/.cancel. Used for the Refresh map
+// button alongside the primary chat controls so it reads as a side action,
+// not a competing primary CTA.
+.secondary {
+  background: transparent;
+  color: rgba(230, 238, 247, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4rem;
+  padding: 5rem 10rem;
+  font-size: 12rem;
+  cursor: pointer;
+
+  &:disabled {
+    color: rgba(230, 238, 247, 0.4);
+    cursor: not-allowed;
+  }
+
+  &:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+}
+
+// Sits at the bottom of the canon sidebar when at least one canon
+// modal is open. Quick way to wipe the screen of stacked modals
+// without clicking each × individually.
+.canonCloseAll {
+  flex-shrink: 0;
+  background: transparent;
+  color: rgba(230, 238, 247, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4rem;
+  padding: 5rem 10rem;
+  font-size: 11rem;
+  cursor: pointer;
+  margin-top: 4rem;
+
+  &:hover {
+    color: #e6eef7;
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.32);
+  }
+}
+
+// Internal markdown link inside canon — clickable, opens another file
+// modal via the threaded onLinkClick callback.
+.canonLink {
+  color: #6ea8ff;
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(110, 168, 255, 0.4);
+
+  &:hover {
+    color: #9bc4ff;
+    border-bottom-color: rgba(155, 196, 255, 0.7);
+  }
+}
+
+// External (http(s)://) link — Coherent UI can't navigate, so this is
+// presentational only. Different color cues that it's "outside" the
+// game; title attr shows the destination on hover.
+.canonLinkExternal {
+  color: rgba(230, 238, 247, 0.75);
+  cursor: help;
+  text-decoration: underline dotted rgba(230, 238, 247, 0.4);
+  text-underline-offset: 2px;
 }

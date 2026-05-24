@@ -18,7 +18,7 @@ namespace CityStoryMod
 
         public static Dictionary<string, string> EnglishEntries() => new()
         {
-            ["Options.SECTION[CityStoryMod.CityStoryMod.Mod]"] = "City Story Mod",
+            ["Options.SECTION[CityStoryMod.CityStoryMod.Mod]"] = "Ghostwriter",
 
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] = "Auto-export interval (minutes)",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
@@ -30,7 +30,7 @@ namespace CityStoryMod
 
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] = "LLM provider",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] =
-                "Which LLM service drives the in-game storyteller. Anthropic (API) uses a direct key against api.anthropic.com — paste a key below and you're done. Anthropic (Claude Code CLI) shells out to the `claude` command on your PATH and uses whatever credentials you've logged into the CLI with (including a Max subscription) — requires Claude Code to be installed and `claude --version` to work in the same shell CS2 was launched from. OpenAI / Gemini / Ollama use their respective HTTP APIs.",
+                "Which LLM service drives the in-game ghostwriter. Anthropic (API) uses a direct key against api.anthropic.com — paste a key below and you're done. Anthropic (Claude Code CLI) shells out to the `claude` command on your PATH and uses whatever credentials you've logged into the CLI with (including a Max subscription) — requires Claude Code to be installed and `claude --version` to work in the same shell CS2 was launched from. OpenAI / Gemini / Ollama use their respective HTTP APIs.",
 
             // Dropdown labels for each LlmProvider enum value. CS2 builds the locale
             // key for enum dropdowns as Options.<asset-id>.<ENUMTYPE-UPPER>[<Value>]
@@ -54,9 +54,9 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OllamaBaseUrl]"] =
                 "Base URL of your Ollama server. Defaults to http://localhost:11434. Change if you run Ollama on a different host or port (e.g. a beefier home server). Only used when Provider is Ollama.",
 
-            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] = "Storyteller status",
-            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.StorytellerStatus]"] =
-                "Current state of the in-game storyteller. Updates when you open this panel — it doesn't tick while open, so re-open the panel to refresh.",
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.GhostwriterStatus]"] = "Ghostwriter status",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.GhostwriterStatus]"] =
+                "Current state of the in-game ghostwriter. Updates when you open this panel — it doesn't tick while open, so re-open the panel to refresh.",
 
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] = "Open story folder",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] =

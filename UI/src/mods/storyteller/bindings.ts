@@ -12,6 +12,8 @@ export const tokenSummaryBinding = bindValue<string>(GROUP, "tokenSummary", "");
 export const lastErrorBinding = bindValue<string>(GROUP, "lastError", "");
 export const availableCommandsBinding = bindValue<string>(GROUP, "availableCommands", "[]");
 export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
+export const cartoExportingBinding = bindValue<boolean>(GROUP, "cartoExporting", false);
+export const cartoAvailableBinding = bindValue<boolean>(GROUP, "cartoAvailable", false);
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
@@ -52,4 +54,8 @@ export function cancelRun() {
 
 export function clearMessages() {
   trigger(GROUP, "clearMessages");
+}
+
+export function refreshGeography() {
+  trigger(GROUP, "refreshGeography");
 }

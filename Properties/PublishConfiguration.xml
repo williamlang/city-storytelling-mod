@@ -1,17 +1,26 @@
 <Publish>
   <!-- ModId is assigned by PDX Mods on first publish; leave empty for local-only builds -->
   <ModId Value="" />
-  <DisplayName Value="City Story Mod" />
-  <ShortDescription Value="Exports city state (citizens, companies, districts, trade) to JSON for the City Storytelling project." />
+  <DisplayName Value="Ghostwriter" />
+  <ShortDescription Value="An AI ghostwriter that turns your CS2 playthrough into a living narrative — named characters, civic events, and unfolding stories driven by what you build." />
   <LongDescription>
-A Cities: Skylines II mod that exports rich city state to JSON snapshots, feeding the sibling **City Storytelling** project where playthroughs become grounded fiction.
+**Ghostwriter** is a Cities: Skylines II mod that quietly writes the story of your city in the background while you play. As you build, an LLM-driven agent observes your city's state, names characters who plausibly drive its decisions, records civic events as they happen, and weaves them into ongoing narrative threads.
 
-This mod is the sensor: it queries the game's ECS for citizens, companies, districts, buildings, and trade flows, and writes snapshot files. An external agent consumes those snapshots and weaves them into characters, events, and stories that shape later sessions.
+The mod has three halves running together: a C# sensor that exports rich ECS state to JSON snapshots, a per-city storytelling workspace the agent reasons against, and an in-game React panel for talking to the ghostwriter without alt-tabbing.
+
+You stay the city's builder; the ghostwriter writes in your voice.
   </LongDescription>
   <Tag Value="Code Mod" />
   <ModVersion Value="0.0.1" />
   <GameVersion Value="1.5.*" />
-  <Dependency Id="" />
+  <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
+       API Ghostwriter uses to populate per-city GeoJSON exports the agent
+       reads. Paradox Mods auto-installs Carto when players subscribe to
+       this mod. Version compatibility is checked at runtime by capability
+       probe (see Storyteller/CartoBridge.cs) — we don't pin a version here
+       because PublishConfiguration.xml doesn't support version constraints
+       on <Dependency>. -->
+  <Dependency Id="87428" />
   <ChangeLog>
 * Initial scaffold &#8212; hello-mod skeleton, no exports yet.
   </ChangeLog>

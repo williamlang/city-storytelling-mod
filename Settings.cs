@@ -45,7 +45,7 @@ namespace CityStoryMod
         // if an open session already exists, so it never stacks duplicates.
         public bool AutoSessionStartOnSaveLoad { get; set; }
 
-        // LLM credentials for the in-game storyteller. Key/model are kept generic
+        // LLM credentials for the in-game ghostwriter. Key/model are kept generic
         // (not Anthropic-prefixed) so they apply to whichever provider is selected
         // below — switch provider, paste a different key, paste a matching model
         // id, no schema migration. Key is stored in CS2's settings file plain; the
@@ -75,16 +75,16 @@ namespace CityStoryMod
         [SettingsUIHidden]
         public bool IsCliProvider => Provider == LlmProvider.AnthropicCLI;
 
-        // Read-only status surface for the in-game storyteller dispatcher. CS2's
+        // Read-only status surface for the in-game ghostwriter dispatcher. CS2's
         // settings UI has no dedicated read-only display widget, so this is a text
         // input whose setter discards writes — the getter recomputes on each render.
         // Caveat: the panel doesn't tick; "Running… 12s elapsed" reflects state at
         // panel-open time, not live progress. Acceptable for the MVP flow (player
         // triggers via hotkey in-game, opens Options to check status).
         [SettingsUITextInput]
-        public string StorytellerStatus
+        public string GhostwriterStatus
         {
-            get => ComposeStorytellerStatus();
+            get => ComposeGhostwriterStatus();
             set { /* discarded — read-only surface */ }
         }
 
@@ -104,7 +104,7 @@ namespace CityStoryMod
             OllamaBaseUrl = "http://localhost:11434";
         }
 
-        static string ComposeStorytellerStatus()
+        static string ComposeGhostwriterStatus()
         {
             StorytellerDispatcher d = Mod.Storyteller;
             if (d == null) return "(not initialized)";

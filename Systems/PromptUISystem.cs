@@ -42,6 +42,8 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _lastErrorBinding;
         ValueBinding<string> _availableCommandsBinding;
         ValueBinding<string> _canonTreeBinding;
+        ValueBinding<bool> _cartoExportingBinding;
+        ValueBinding<bool> _cartoAvailableBinding;
 
         // Caches the city dir we last scanned for slash commands / canon
         // tree. OnUpdate rescans (cheap directory listing) when
@@ -73,16 +75,21 @@ namespace CityStoryMod.Systems
             _lastErrorBinding = new ValueBinding<string>(Group, "lastError", "");
             _availableCommandsBinding = new ValueBinding<string>(Group, "availableCommands", "[]");
             _canonTreeBinding = new ValueBinding<string>(Group, "canonTree", "{}");
+            _cartoExportingBinding = new ValueBinding<bool>(Group, "cartoExporting", false);
+            _cartoAvailableBinding = new ValueBinding<bool>(Group, "cartoAvailable", false);
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
             AddBinding(_lastErrorBinding);
             AddBinding(_availableCommandsBinding);
             AddBinding(_canonTreeBinding);
+            AddBinding(_cartoExportingBinding);
+            AddBinding(_cartoAvailableBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
             AddBinding(new TriggerBinding(Group, "clearMessages", OnClearMessages));
+            AddBinding(new TriggerBinding(Group, "refreshGeography", OnRefreshGeography));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -176,6 +183,15 @@ namespace CityStoryMod.Systems
                 _canonTreeBinding.Update(ScanCanonTree(cityDir));
             }
 
+            // Reflect Carto availability into the UI. CartoBridge.IsAvailable
+            // resolves lazily on first access, so we let the bridge handle the
+            // resolve and just mirror its state. Cheap — one property read.
+            bool cartoAvail = CartoBridge.IsAvailable;
+            if (cartoAvail != _cartoAvailableBinding.value)
+            {
+                _cartoAvailableBinding.Update(cartoAvail);
+            }
+
             if (_pendingRunStart)
             {
                 _pendingRunStart = false;
@@ -205,6 +221,17 @@ namespace CityStoryMod.Systems
 
         // ---- Trigger handlers (called from JS, main thread) ----
 
+        // Slash commands that benefit from fresh spatial data. When the user
+        // submits one of these, we kick off a Carto export in parallel with the
+        // agent run — Carto's ~hundreds-of-ms write completes well before the
+        // agent's first LLM round-trip returns, so by the time the agent reaches
+        // for the carto/ files via a tool call they're guaranteed to be fresh.
+        static readonly HashSet<string> _cartoRefreshingCommands = new HashSet<string>
+        {
+            "new-city",
+            "session-end",
+        };
+
         void OnSubmitPrompt(string prompt)
         {
             if (string.IsNullOrWhiteSpace(prompt)) return;
@@ -216,8 +243,29 @@ namespace CityStoryMod.Systems
                 _log.Warn("PromptUISystem: dispatcher not initialized — prompt dropped.");
                 return;
             }
+
+            string command = ExtractSlashCommand(prompt);
+            if (command != null && _cartoRefreshingCommands.Contains(command))
+            {
+                _log.Info($"OnSubmitPrompt: /{command} triggers a Carto refresh.");
+                World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
+            }
+
             StorytellerDispatcher.RunFunc runFunc = StorytellerRun.BuildFreeForm(prompt, _log);
             dispatcher.Start("ui-prompt", runFunc);
+        }
+
+        // Returns the command name (without leading "/") if the prompt starts
+        // with a slash command, otherwise null. Case-insensitive — matches the
+        // lookup against the registered set.
+        static string ExtractSlashCommand(string prompt)
+        {
+            string trimmed = prompt.TrimStart();
+            if (trimmed.Length < 2 || trimmed[0] != '/') return null;
+            int end = 1;
+            while (end < trimmed.Length && !char.IsWhiteSpace(trimmed[end])) end++;
+            if (end <= 1) return null;
+            return trimmed.Substring(1, end - 1).ToLowerInvariant();
         }
 
         void OnCancelRun()
@@ -233,6 +281,12 @@ namespace CityStoryMod.Systems
             _liveUsage = default;
             _tokenSummaryBinding.Update("");
             _lastErrorBinding.Update("");
+        }
+
+        void OnRefreshGeography()
+        {
+            _log.Info("OnRefreshGeography trigger received from UI.");
+            World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
         }
 
         static string FormatTokens(TokenUsage u)
@@ -398,6 +452,15 @@ namespace CityStoryMod.Systems
                 _log.Warn($"PromptUISystem: failed to parse settings.json at {path}: {ex.Message}");
                 return null;
             }
+        }
+
+        // Called by ExportSystem to drive the storyteller window's "spatial
+        // export in progress" indicator. Main-thread only; the caller flips
+        // the binding to true one tick before invoking Carto's synchronous
+        // export, then back to false after it returns.
+        public void SetCartoExporting(bool exporting)
+        {
+            _cartoExportingBinding?.Update(exporting);
         }
     }
 

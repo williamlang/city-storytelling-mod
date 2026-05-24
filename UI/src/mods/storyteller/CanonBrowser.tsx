@@ -16,10 +16,13 @@ export function CanonBrowser({
   tree,
   openPaths,
   onOpen,
+  onCloseAll,
 }: {
   tree: CanonTree;
   openPaths: string[];
   onOpen: (path: string) => void;
+  // Dismisses every currently-open file modal. Hidden when nothing is open.
+  onCloseAll: () => void;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (sub: string) =>
@@ -72,6 +75,16 @@ export function CanonBrowser({
           );
         })}
       </div>
+      {openPaths.length > 0 && (
+        <button
+          type="button"
+          className={styles.canonCloseAll}
+          onClick={onCloseAll}
+          title="Close every open canon file modal"
+        >
+          Close all ({openPaths.length})
+        </button>
+      )}
     </aside>
   );
 }

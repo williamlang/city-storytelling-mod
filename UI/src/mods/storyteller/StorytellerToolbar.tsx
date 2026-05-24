@@ -11,8 +11,11 @@ import {
   lastErrorBinding,
   availableCommandsBinding,
   canonTreeBinding,
+  cartoExportingBinding,
+  cartoAvailableBinding,
   submitPrompt,
   cancelRun,
+  refreshGeography,
 } from "./bindings";
 import type { ChatMessage, SlashCommand, CanonTree, CanonEntry } from "./bindings";
 import { ChatRow } from "./ChatRow";
@@ -41,12 +44,31 @@ export function StorytellerToolbar() {
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [openModals, setOpenModals] = useState<string[]>([]);
 
+  // Local "pending" state for the Refresh map button. The C# cartoExporting
+  // binding round-trips through Coherent UI, but the main thread blocks
+  // during Carto's synchronous export — so the binding flips true → false
+  // entirely while the UI can't composite a new frame, and the user sees
+  // zero visual change. Tracking pending locally guarantees instant feedback
+  // on click. Auto-clears after 6 s as a safety net.
+  const [refreshPending, setRefreshPending] = useState(false);
+  // Minimum hold timestamp: how long the pending state must stay visible
+  // regardless of when the C# side flips the binding back to false. Without
+  // this, a sub-second Carto export clears the indicator before the player
+  // can register the visual change.
+  const [refreshPendingUntil, setRefreshPendingUntil] = useState(0);
+  // Sticky post-completion confirmation. When set, the footer shows
+  // "Map updated" for a few seconds so the player knows their click did
+  // something even if they missed the "Updating…" transition.
+  const [refreshConfirm, setRefreshConfirm] = useState<string | null>(null);
+
   const messagesJson = useValue(messagesBinding);
   const isRunning = useValue(isRunningBinding);
   const tokenSummary = useValue(tokenSummaryBinding);
   const lastError = useValue(lastErrorBinding);
   const commandsJson = useValue(availableCommandsBinding);
   const canonJson = useValue(canonTreeBinding);
+  const cartoExporting = useValue(cartoExportingBinding);
+  const cartoAvailable = useValue(cartoAvailableBinding);
 
   const messages = useMemo<ChatMessage[]>(() => {
     try { return JSON.parse(messagesJson); } catch { return []; }
@@ -64,6 +86,55 @@ export function StorytellerToolbar() {
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages.length]);
+
+  // Safety net: if neither the C# binding flip nor the minimum-hold timer
+  // clears refreshPending, drop it after 6 s. Catches the rare error path
+  // where Carto throws before the binding can flip back to false.
+  useEffect(() => {
+    if (!refreshPending) return;
+    const t = setTimeout(() => {
+      setRefreshPending(false);
+      setRefreshPendingUntil(0);
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [refreshPending]);
+
+  // Clear pending when the C# binding goes false AND the minimum hold time
+  // has elapsed. The minimum hold makes sure a sub-second Carto export
+  // doesn't blink the "Updating…" indicator faster than the player can see.
+  useEffect(() => {
+    if (cartoExporting || !refreshPending) return;
+    const now = Date.now();
+    const remaining = refreshPendingUntil - now;
+    if (remaining <= 0) {
+      setRefreshPending(false);
+      setRefreshConfirm("Map data updated");
+    } else {
+      const t = setTimeout(() => {
+        setRefreshPending(false);
+        setRefreshConfirm("Map data updated");
+      }, remaining);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartoExporting, refreshPending, refreshPendingUntil]);
+
+  // Confirmation message clears itself after a few seconds so it doesn't
+  // permanently pin to the footer.
+  useEffect(() => {
+    if (!refreshConfirm) return;
+    const t = setTimeout(() => setRefreshConfirm(null), 4000);
+    return () => clearTimeout(t);
+  }, [refreshConfirm]);
+
+  const refreshDisabled = refreshPending || cartoExporting;
+  const handleRefreshClick = () => {
+    if (refreshDisabled) return;
+    setRefreshPending(true);
+    setRefreshPendingUntil(Date.now() + 1500);  // minimum visible hold
+    setRefreshConfirm(null);
+    refreshGeography();
+  };
 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { pos: panelPos, beginDrag } = useDrag();
@@ -91,6 +162,7 @@ export function StorytellerToolbar() {
   const closeFile = (path: string) => {
     setOpenModals((prev) => prev.filter((p) => p !== path));
   };
+  const closeAllFiles = () => setOpenModals([]);
 
   // Flatten the tree once so FileModal can look up content by path
   // without re-walking the tree on each render.
@@ -111,7 +183,7 @@ export function StorytellerToolbar() {
       <Button
         variant="floating"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Storyteller"
+        aria-label="Ghostwriter"
       >
         <img src={storytellerIcon} className={styles.toolbarIcon} alt="" />
       </Button>
@@ -119,7 +191,7 @@ export function StorytellerToolbar() {
       {open && (
         <div className={styles.panel} style={panelStyle} ref={panelRef}>
           <div className={styles.header} onMouseDown={onHeaderMouseDown}>
-            <span className={styles.title}>Storyteller</span>
+            <span className={styles.title}>Ghostwriter</span>
             <button
               type="button"
               className={styles.close}
@@ -129,12 +201,23 @@ export function StorytellerToolbar() {
             </button>
           </div>
 
+          {(refreshPending || cartoExporting) ? (
+            <div className={styles.cartoBanner}>
+              <span className={styles.cartoBannerDot} />
+              Updating spatial data…
+            </div>
+          ) : refreshConfirm ? (
+            <div className={`${styles.cartoBanner} ${styles.cartoBannerOk}`}>
+              {refreshConfirm}
+            </div>
+          ) : null}
+
           <div className={styles.body}>
             <div className={styles.main}>
               <div className={styles.chat} ref={scrollRef}>
                 {messages.length === 0 && (
                   <div className={styles.empty}>
-                    Ask the storyteller to do something. Free-form prompts or pick
+                    Ask the ghostwriter to do something. Free-form prompts or pick
                     a command from the menu below.
                   </div>
                 )}
@@ -169,6 +252,17 @@ export function StorytellerToolbar() {
                   {tokenSummary || (isRunning ? "Running…" : "Idle")}
                 </span>
                 <div className={styles.actions}>
+                  {cartoAvailable && (
+                    <button
+                      type="button"
+                      className={styles.secondary}
+                      disabled={refreshDisabled}
+                      title="Update spatial data via Carto. Locks the main thread briefly."
+                      onClick={handleRefreshClick}
+                    >
+                      {refreshDisabled ? "Updating…" : "Refresh map"}
+                    </button>
+                  )}
                   <CommandMenu
                     commands={commands}
                     open={commandMenuOpen}
@@ -202,6 +296,7 @@ export function StorytellerToolbar() {
               tree={canonTree}
               openPaths={openModals}
               onOpen={openFile}
+              onCloseAll={closeAllFiles}
             />
           </div>
         </div>
@@ -214,6 +309,7 @@ export function StorytellerToolbar() {
           path={path}
           cascadeIndex={i}
           onClose={() => closeFile(path)}
+          onOpenFile={openFile}
         />
       ))}
     </>

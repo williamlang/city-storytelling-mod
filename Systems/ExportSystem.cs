@@ -31,39 +31,40 @@ namespace CityStoryMod.Systems
         static readonly ILog _log = Mod.Log;
 
         EntityQuery _citizenQuery;
-        EntityQuery _districtQuery;
-        EntityQuery _renamedBuildingQuery;
-        EntityQuery _allBuildingsQuery;
-        EntityQuery _customNameQuery;
+        EntityQuery _allBuildingsQuery;       // shared by zone-count bulk pass + district zones
+        EntityQuery _customNameQuery;         // backs outside_connections + water_sources
+        EntityQuery _districtQuery;           // per-district zone tracking
+        EntityQuery _namedBuildingQuery;      // CustomName-tagged buildings for churn diff
         bool _cityComponentsLogged;
-        bool _buildingFirstDiagged;
         bool _citizenFirstDiagged;
         readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
 
-        // Previous-snapshot state for the embedded diff block. Reset on mod reload
-        // (CS2 launch), so cross-session diffs need a future enhancement to read the
-        // last on-disk snapshot on first export.
-        Dictionary<string, BuildingFingerprint> _prevBuildings;
+        // Previous-snapshot state for the diff block. Reset on mod reload
+        // (CS2 launch). Cross-session diffs need a future enhancement to
+        // read the last on-disk snapshot on first export.
         Dictionary<string, int> _prevZoneCounts;
-        Dictionary<string, NameRef> _prevRoads;
         Dictionary<string, NameRef> _prevOutsideConnections;
         Dictionary<string, NameRef> _prevWaterSources;
-        Dictionary<string, NameRef> _prevDistricts;
+        Dictionary<string, Dictionary<string, int>> _prevDistrictZones;   // districtName → {zoneType → count}
+        Dictionary<string, NamedBuilding> _prevNamedBuildings;            // entityId → fingerprint
         DateTime? _prevIngameDate;
         string _prevSnapshotId;
 
-        struct BuildingFingerprint
+        // Slim per-export record of a CustomName-tagged building. Backs the
+        // churn diff that surfaces "Inger Brevik Elementary opened in March".
+        // Type comes from BuildingTypeFromMarkers so the agent can react
+        // differently to a new school vs a new low-density house being named
+        // by the player.
+        struct NamedBuilding
         {
             public string Id;
             public string Name;
             public string Type;
-            public string CompanySubtype;  // null when no company renter
-            public string DistrictId;
-            public bool HasCompany;
+            public string DistrictName;   // null if not in any district
         }
 
-        // Lightweight id+name pair used for renaming/add/remove detection on the
-        // simpler entity classes (roads, outside connections, water sources, districts).
+        // Lightweight id+name pair used for renaming/add/remove detection on
+        // the simple entity classes that stay in the snapshot.
         struct NameRef
         {
             public string Id;
@@ -99,6 +100,16 @@ namespace CityStoryMod.Systems
         // is on) writes an open sessions/ stub.
         bool _inGameLastTick;
 
+        // One-tick deferral for Carto's export call. Set at the end of a snapshot
+        // export; consumed at the start of the next OnUpdate. The deferral lets
+        // PromptUISystem flush the cartoExporting=true binding to Coherent UI on
+        // frame N so the indicator paints before the synchronous Carto pipeline
+        // blocks the main thread on frame N+1. Carto's ECS queries (EntityQuery,
+        // EntityManager) are main-thread-only, so true async isn't possible.
+        string _pendingCartoDir;
+
+        PromptUISystem _promptUI;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -108,12 +119,22 @@ namespace CityStoryMod.Systems
                 All = new[] { ComponentType.ReadOnly<District>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
-            _renamedBuildingQuery = GetEntityQuery(new EntityQueryDesc
+            // Story-worthy buildings: anything player-renamed (CustomName),
+            // OR a city-paid civic facility (CityServiceUpkeep — catches
+            // schools, fire stations, police, hospitals, transformers, water
+            // pumping, etc.), OR a specialized extractor (private but
+            // landscape-significant: oil fields, mines, farms, forestries).
+            // CS2 sometimes leaves CustomName unattached on freshly-placed
+            // civic buildings for a while after construction completes;
+            // the service-marker filter catches them anyway.
+            _namedBuildingQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[]
+                All = new[] { ComponentType.ReadOnly<Building>() },
+                Any = new[]
                 {
-                    ComponentType.ReadOnly<Building>(),
                     ComponentType.ReadOnly<CustomName>(),
+                    ComponentType.ReadOnly<Game.City.CityServiceUpkeep>(),
+                    ComponentType.ReadOnly<ExtractorProperty>(),
                 },
                 None = new[]
                 {
@@ -147,6 +168,7 @@ namespace CityStoryMod.Systems
             _timeSystem = World.GetOrCreateSystemManaged<TimeSystem>();
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _promptUI = World.GetOrCreateSystemManaged<PromptUISystem>();
 
             _playerMoneyField = typeof(PlayerMoney)
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
@@ -184,6 +206,61 @@ namespace CityStoryMod.Systems
             // Drain completed storyteller runs every tick — cheap when idle (one
             // null check) and decoupled from the export gates below.
             Mod.Storyteller?.Tick();
+
+            // Drain any Carto export deferred from the previous tick. The deferral
+            // gives Coherent UI one frame to paint the cartoExporting indicator
+            // before this synchronous call blocks the main thread.
+            if (_pendingCartoDir != null)
+            {
+                string dir = _pendingCartoDir;
+                _pendingCartoDir = null;
+                try
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var carto = CartoBridge.TryExport(dir, _log);
+                    sw.Stop();
+                    if (carto == null)
+                    {
+                        _log.Info("Carto bridge unavailable; skipping spatial export.");
+                    }
+                    else if (carto.Success)
+                    {
+                        // Carto's FilesWritten counts NEW files only (it diffs the
+                        // output directory before/after). Overwrites of existing
+                        // files don't appear in the count, so "0 files" is the
+                        // common case once the directory has been populated once.
+                        // Report it as "completed" + duration instead — much
+                        // less misleading when reviewing logs.
+                        int n = carto.FilesWritten.Length;
+                        string detail = n > 0 ? $"{n} new file(s)" : "overwrote existing";
+                        _log.Info($"Carto export completed in {sw.ElapsedMilliseconds}ms ({detail}) → {dir}.");
+
+                        // Carto wrote raw GeoJSON; now produce the
+                        // storyteller-facing markdown chunks the agent
+                        // actually reads (carto/processed/index.md +
+                        // carto/processed/districts/<slug>.md).
+                        var procSw = System.Diagnostics.Stopwatch.StartNew();
+                        var procResult = CartoProcessor.Process(dir);
+                        procSw.Stop();
+                        if (procResult.Success)
+                        {
+                            _log.Info($"CartoProcessor wrote {procResult.DistrictsWritten} district chunk(s), {procResult.NamedBuildingsAssigned} buildings assigned, in {procSw.ElapsedMilliseconds}ms → {procResult.IndexPath}");
+                        }
+                        else
+                        {
+                            _log.Warn($"CartoProcessor failed: {procResult.ErrorMessage}");
+                        }
+                    }
+                    else
+                    {
+                        _log.Warn($"Carto export failed: {carto.ErrorMessage}");
+                    }
+                }
+                finally
+                {
+                    _promptUI?.SetCartoExporting(false);
+                }
+            }
 
             var settings = Mod.Settings;
             if (settings == null) return;
@@ -229,7 +306,15 @@ namespace CityStoryMod.Systems
             }
         }
 
-        const string SchemaVersion = "0.1";
+        // 0.2 — Phase 3 of the Carto integration. Removed spatial fields that
+        // now live in the storyteller-facing markdown chunks under
+        // carto/processed/: districts[], buildings[], roads[], other_named[],
+        // diff.buildings, diff.roads, diff.districts. The snapshot is now the
+        // canonical source for city stats, demographics, trade, and bulk
+        // diff signals (zone deltas, outside_connections, water_sources);
+        // spatial geometry and per-district building lists come from Carto
+        // chunks. See docs/snapshot-schema.md.
+        const string SchemaVersion = "0.2";
 
         void Export(string triggeredBy)
         {
@@ -280,29 +365,38 @@ namespace CityStoryMod.Systems
             int? xp = null;
             if (_f_xp != null && EntityManager.HasComponent<XP>(_citySystem.City))
                 xp = Convert.ToInt32(_f_xp.GetValue(EntityManager.GetComponentData<XP>(_citySystem.City)));
-            var (districts, districtPrints) = CollectDistricts();
-            var (buildings, buildingPrints) = CollectRenamedBuildings();
+            // Bulk geometry (district polygons, building polygons) lives in
+            // carto/processed/. Snapshot collects only the temporal-signal
+            // data that has no Carto counterpart: city stats, demographics,
+            // zone counts, outside_connections, water_sources, per-district
+            // zone counts (for subdivision detection), and CustomName-tagged
+            // building churn (for "Inger Brevik Elementary opened" signals).
             object demographics = CollectDemographics();
             Dictionary<string, int> zoneCounts = CollectZoneCounts();
             var named = CollectOtherNamedEntities();
+            Dictionary<string, Dictionary<string, int>> districtZones = CollectDistrictZones();
+            Dictionary<Entity, string> districtNameByEntity = CollectDistrictNamesByEntity();
+            Dictionary<string, NamedBuilding> namedBuildings = CollectNamedBuildings(districtNameByEntity);
             DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
 
-            object diff = _prevBuildings != null
-                ? ComputeDiff(buildingPrints, zoneCounts, currentIngameDate,
-                    named.roadsFingerprints, named.outsideConnectionsFingerprints,
-                    named.waterSourcesFingerprints, districtPrints)
+            // Diff is null on the first snapshot of a session (no prior to
+            // compare against); populated thereafter.
+            object diff = _prevZoneCounts != null
+                ? ComputeDiff(zoneCounts, currentIngameDate,
+                    named.outsideConnectionsFingerprints,
+                    named.waterSourcesFingerprints,
+                    districtZones, namedBuildings)
                 : null;
 
             // Advance the previous-snapshot pointers for the next export.
-            _prevBuildings = buildingPrints;
             _prevZoneCounts = zoneCounts;
-            _prevRoads = named.roadsFingerprints;
             _prevOutsideConnections = named.outsideConnectionsFingerprints;
             _prevWaterSources = named.waterSourcesFingerprints;
-            _prevDistricts = districtPrints;
+            _prevDistrictZones = districtZones;
+            _prevNamedBuildings = namedBuildings;
             _prevIngameDate = currentIngameDate;
             _prevSnapshotId = snapshotId;
 
@@ -334,13 +428,18 @@ namespace CityStoryMod.Systems
                     zones = zoneCounts,
                 },
 
-                districts = districts,
-                buildings = buildings,
-                roads = named.roads,
+                // v0.2: districts[], buildings[], roads[], other_named[] are
+                // no longer emitted — they live in carto/processed/ as
+                // storyteller-facing markdown. outside_connections and
+                // water_sources stay (Carto doesn't surface those).
                 outside_connections = named.outsideConnections,
                 water_sources = named.waterSources,
-                other_named = named.other,
                 citizens_sample = new object[0],
+
+                // Per-district zone counts. Same shape as city.zones but
+                // keyed by district name (matching Carto chunks). Backs the
+                // diff.district_zone_deltas signal for subdivision detection.
+                district_zones = districtZones,
 
                 demographics = demographics,
                 diff = diff,
@@ -382,7 +481,43 @@ namespace CityStoryMod.Systems
 
             Mod.LastExportedCityDir = dir;
 
-            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, districts={districts.Count}, named_buildings={buildings.Count} -> {file}");
+            _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, outside_connections={named.outsideConnections.Count}, water_sources={named.waterSources.Count} -> {file}");
+
+            // Carto exports are explicitly NOT triggered on the snapshot cadence.
+            // The pipeline is synchronous, main-thread-only (ECS), and grows
+            // linearly with city size — a few hundred ms on a small city, multi-
+            // second on a large one. The player triggers it manually via the
+            // Refresh map button in the storyteller window when they want the
+            // agent to have fresh spatial context. See RequestCartoExport.
+        }
+
+        // User-triggered Carto export. Called from PromptUISystem when the
+        // player clicks Refresh map in the storyteller window. Sets up the
+        // same deferred-tick pattern Export() used to drive automatically —
+        // flip the cartoExporting binding now so Coherent UI paints the
+        // indicator on this frame, then run the synchronous Carto pipeline
+        // on the next OnUpdate tick.
+        public void RequestCartoExport()
+        {
+            if (!CartoBridge.IsAvailable)
+            {
+                _log.Info("RequestCartoExport: Carto unavailable; ignoring.");
+                return;
+            }
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir))
+            {
+                _log.Info("RequestCartoExport: no city dir known yet; ignoring.");
+                return;
+            }
+            if (_pendingCartoDir != null)
+            {
+                _log.Info("RequestCartoExport: export already pending; ignoring (deferred slot full).");
+                return;
+            }
+            _pendingCartoDir = Path.Combine(cityDir, "carto");
+            _promptUI?.SetCartoExporting(true);
+            _log.Info($"RequestCartoExport: queued; will run on next tick → {_pendingCartoDir}");
         }
 
         // Syncs the city dir with the embedded template/ tree. Unlike the old
@@ -478,124 +613,6 @@ namespace CityStoryMod.Systems
                 "(Session in progress — populated by /session-end.)\n";
             File.WriteAllText(filepath, body);
             _log.Info($"Auto session-start wrote {filename}");
-        }
-
-        class DistrictAgg
-        {
-            public string Id;
-            public string Name;
-            public int Population;
-            public int Jobs;
-            public Dictionary<string, int> Zones = new Dictionary<string, int>();
-            public List<string> NamedBuildingIds = new List<string>();
-        }
-
-        (List<object>, Dictionary<string, NameRef>) CollectDistricts()
-        {
-            var prints = new Dictionary<string, NameRef>();
-            using var districts = _districtQuery.ToEntityArray(Allocator.Temp);
-            if (districts.Length == 0) return (new List<object>(), prints);
-
-            var aggs = new Dictionary<Entity, DistrictAgg>(districts.Length);
-            for (int i = 0; i < districts.Length; i++)
-            {
-                var d = districts[i];
-                string id = EntityId(d);
-                string name = _nameSystem.GetRenderedLabelName(d);
-                aggs[d] = new DistrictAgg { Id = id, Name = name };
-                prints[id] = new NameRef { Id = id, Name = name };
-            }
-
-            // Pass 1: every building, attribute to its district.
-            using (var buildings = _allBuildingsQuery.ToEntityArray(Allocator.Temp))
-            {
-                for (int i = 0; i < buildings.Length; i++)
-                {
-                    var b = buildings[i];
-                    var d = DistrictEntityOf(b);
-                    if (d == Entity.Null || !aggs.TryGetValue(d, out var agg)) continue;
-
-                    string type = BuildingTypeFromMarkers(b) ?? "other";
-                    agg.Zones.TryGetValue(type, out int prev);
-                    agg.Zones[type] = prev + 1;
-
-                    if (EntityManager.HasComponent<CustomName>(b))
-                        agg.NamedBuildingIds.Add(EntityId(b));
-                }
-            }
-
-            // Pass 2: every citizen, attribute home + work to their district(s).
-            const BindingFlags bf = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            var hhField = typeof(HouseholdMember).GetField("m_Household", bf)
-                ?? typeof(HouseholdMember).GetFields(bf).FirstOrDefault(f => f.FieldType == typeof(Entity));
-            var workplaceField = typeof(Worker).GetField("m_Workplace", bf);
-
-            using (var citizens = _citizenQuery.ToEntityArray(Allocator.Temp))
-            {
-                bool diaggedHH = false;
-                for (int i = 0; i < citizens.Length; i++)
-                {
-                    var c = citizens[i];
-
-                    // Home district via HouseholdMember -> Household -> PropertyRenter -> Building -> CurrentDistrict
-                    if (hhField != null && EntityManager.HasComponent<HouseholdMember>(c))
-                    {
-                        if (!diaggedHH) { diaggedHH = true; DumpFieldsOnce<HouseholdMember>(c, "citizen"); }
-                        var hhm = EntityManager.GetComponentData<HouseholdMember>(c);
-                        var hh = (Entity)hhField.GetValue(hhm);
-                        if (hh != Entity.Null && EntityManager.HasComponent<PropertyRenter>(hh))
-                        {
-                            var b = EntityManager.GetComponentData<PropertyRenter>(hh).m_Property;
-                            if (b != Entity.Null)
-                            {
-                                var d = DistrictEntityOf(b);
-                                if (d != Entity.Null && aggs.TryGetValue(d, out var agg))
-                                    agg.Population++;
-                            }
-                        }
-                    }
-
-                    // Work district via Worker.m_Workplace (may be a company or a building directly)
-                    if (workplaceField != null && EntityManager.HasComponent<Worker>(c))
-                    {
-                        var w = EntityManager.GetComponentData<Worker>(c);
-                        var workplace = (Entity)workplaceField.GetValue(w);
-                        if (workplace != Entity.Null)
-                        {
-                            Entity workBuilding = workplace;
-                            if (EntityManager.HasComponent<PropertyRenter>(workplace))
-                                workBuilding = EntityManager.GetComponentData<PropertyRenter>(workplace).m_Property;
-                            if (workBuilding != Entity.Null)
-                            {
-                                var d = DistrictEntityOf(workBuilding);
-                                if (d != Entity.Null && aggs.TryGetValue(d, out var agg))
-                                    agg.Jobs++;
-                            }
-                        }
-                    }
-                }
-            }
-
-            var result = new List<object>(aggs.Count);
-            foreach (var agg in aggs.Values)
-            {
-                result.Add(new
-                {
-                    id = agg.Id,
-                    name = agg.Name,
-                    population = agg.Population,
-                    jobs = agg.Jobs,
-                    zones = agg.Zones,
-                    named_buildings = agg.NamedBuildingIds,
-                });
-            }
-            return (result, prints);
-        }
-
-        Entity DistrictEntityOf(Entity building)
-        {
-            if (!EntityManager.HasComponent<CurrentDistrict>(building)) return Entity.Null;
-            return EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
         }
 
         struct NamedEntitiesResult
@@ -726,165 +743,22 @@ namespace CityStoryMod.Systems
             }
         }
 
-        (List<object>, Dictionary<string, BuildingFingerprint>) CollectRenamedBuildings()
-        {
-            var result = new List<object>();
-            var prints = new Dictionary<string, BuildingFingerprint>();
-            using var entities = _renamedBuildingQuery.ToEntityArray(Allocator.Temp);
-            // Cap the per-entity component diag at 5 buildings to avoid log spam in large cities.
-            int diagBudget = _buildingFirstDiagged ? 0 : 5;
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-
-                string prefabName = null;
-                Entity prefabEntity = Entity.Null;
-                if (EntityManager.HasComponent<PrefabRef>(e))
-                {
-                    prefabEntity = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
-                    if (prefabEntity != Entity.Null && _prefabSystem.TryGetPrefab(prefabEntity, out PrefabBase prefabBase))
-                    {
-                        prefabName = prefabBase.name;
-                    }
-                }
-
-                // Classify primarily from instance-marker components (most reliable),
-                // fall back to heuristic name parsing if no marker matched.
-                string type = BuildingTypeFromMarkers(e) ?? BuildingTypeFromPrefabName(prefabName);
-
-                // Diag: dump components of up to 5 renamed buildings + their prefabs on the
-                // first export so we get the full marker-taxonomy in one shot.
-                if (diagBudget > 0)
-                {
-                    diagBudget--;
-                    DumpComponentsOnce($"Building({_nameSystem.GetRenderedLabelName(e)} / prefab={prefabName})", e);
-                    if (prefabEntity != Entity.Null) DumpComponentsOnce($"BuildingPrefab({prefabName})", prefabEntity);
-                    // Also dump the field layout of building-stat components, once per type.
-                    // Efficiency turned out to not be IComponentData (likely IBufferElementData);
-                    // skipping here and investigating next batch.
-                    DumpFieldsOnce<BuildingCondition>(e, "building");
-                    DumpFieldsOnce<CitizenPresence>(e, "building");
-                }
-
-                int? condition = ReadFirstInt<BuildingCondition>(e);
-                // CitizenPresence has m_Delta (SByte, recent change) and m_Presence (Byte, current
-                // headcount-ish). We want the absolute presence value.
-                int? citizensPresent = ReadIntField<CitizenPresence>(e, "m_Presence");
-                int? renterCount = EntityManager.HasBuffer<Renter>(e)
-                    ? EntityManager.GetBuffer<Renter>(e, isReadOnly: true).Length
-                    : (int?)null;
-
-                // Walk the Renter buffer and find the first CompanyData entry, folding its
-                // info inline. Most renamed buildings are 1:1 with a company (signature
-                // industrials, named extractors, custom-named shops); we surface that one.
-                object company = null;
-                string companySubtype = null;
-                if (EntityManager.HasBuffer<Renter>(e))
-                {
-                    var renters = EntityManager.GetBuffer<Renter>(e, isReadOnly: true);
-                    for (int j = 0; j < renters.Length; j++)
-                    {
-                        var renter = renters[j].m_Renter;
-                        if (renter == Entity.Null || !EntityManager.HasComponent<CompanyData>(renter)) continue;
-                        int headcount = EntityManager.HasBuffer<Employee>(renter)
-                            ? EntityManager.GetBuffer<Employee>(renter, isReadOnly: true).Length
-                            : 0;
-                        string rawCompanyName = _nameSystem.GetRenderedLabelName(renter);
-                        var (cSector, cSubtype) = ParseCompanyType(rawCompanyName);
-                        companySubtype = cSubtype;
-                        company = new
-                        {
-                            id = EntityId(renter),
-                            name = rawCompanyName,
-                            custom_named = EntityManager.HasComponent<CustomName>(renter),
-                            sector = cSector,
-                            subtype = cSubtype,
-                            headcount = headcount,
-                        };
-                        break;
-                    }
-                }
-
-                string id = EntityId(e);
-                string renderedName = _nameSystem.GetRenderedLabelName(e);
-                string districtId = DistrictIdOf(e);
-
-                result.Add(new
-                {
-                    id = id,
-                    name = renderedName,
-                    custom_named = true,
-                    prefab_name = prefabName,
-                    type = type,
-                    efficiency = (float?)null,
-                    condition = condition,
-                    citizens_present = citizensPresent,
-                    renter_count = renterCount,
-                    company = company,
-                    district_id = districtId,
-                });
-                prints[id] = new BuildingFingerprint
-                {
-                    Id = id,
-                    Name = renderedName,
-                    Type = type,
-                    CompanySubtype = companySubtype,
-                    DistrictId = districtId,
-                    HasCompany = company != null,
-                };
-            }
-            if (!_buildingFirstDiagged && entities.Length > 0) _buildingFirstDiagged = true;
-            return (result, prints);
-        }
-
+        // Diff block: bulk signals that surface temporal change between
+        // snapshots. Spatial geometry stays in carto/processed/; this is
+        // where "what just happened in the city" lives.
         object ComputeDiff(
-            Dictionary<string, BuildingFingerprint> current,
             Dictionary<string, int> currentZoneCounts,
             DateTime currentIngameDate,
-            Dictionary<string, NameRef> currentRoads,
             Dictionary<string, NameRef> currentOutsideConnections,
             Dictionary<string, NameRef> currentWaterSources,
-            Dictionary<string, NameRef> currentDistricts)
+            Dictionary<string, Dictionary<string, int>> currentDistrictZones,
+            Dictionary<string, NamedBuilding> currentNamedBuildings)
         {
-            var added = new List<object>();
-            var removed = new List<object>();
-            var changed = new List<object>();
-
-            foreach (var kv in current)
-            {
-                if (!_prevBuildings.TryGetValue(kv.Key, out var prev))
-                {
-                    added.Add(new { id = kv.Value.Id, name = kv.Value.Name, type = kv.Value.Type });
-                    continue;
-                }
-                var changes = new Dictionary<string, object>();
-                if (kv.Value.Name != prev.Name)
-                    changes["name"] = new { from = prev.Name, to = kv.Value.Name };
-                if (kv.Value.Type != prev.Type)
-                    changes["type"] = new { from = prev.Type, to = kv.Value.Type };
-                if (kv.Value.DistrictId != prev.DistrictId)
-                    changes["district_id"] = new { from = prev.DistrictId, to = kv.Value.DistrictId };
-                if (kv.Value.CompanySubtype != prev.CompanySubtype)
-                    changes["company_subtype"] = new { from = prev.CompanySubtype, to = kv.Value.CompanySubtype };
-                if (kv.Value.HasCompany != prev.HasCompany)
-                    changes["has_company"] = new { from = prev.HasCompany, to = kv.Value.HasCompany };
-                if (changes.Count > 0)
-                    changed.Add(new { id = kv.Value.Id, name = kv.Value.Name, changes });
-            }
-
-            foreach (var kv in _prevBuildings)
-            {
-                if (!current.ContainsKey(kv.Key))
-                {
-                    removed.Add(new { id = kv.Value.Id, name = kv.Value.Name, type = kv.Value.Type });
-                }
-            }
-
             int? ingameDaysElapsed = _prevIngameDate.HasValue
                 ? (int)(currentIngameDate - _prevIngameDate.Value).TotalDays
                 : (int?)null;
 
-            // Only emit zones that actually changed.
+            // City-wide zone changes. Only emit zones that actually changed.
             var zonesDelta = new Dictionary<string, object>();
             if (_prevZoneCounts != null)
             {
@@ -901,22 +775,91 @@ namespace CityStoryMod.Systems
                 }
             }
 
-            var roadsDiff = DiffNameRefs(_prevRoads, currentRoads);
+            // Per-district zone changes. Surfaces subdivision-opening signals
+            // ("Pine Quarter +45 residential"). Only emits districts where at
+            // least one zone type changed; within a district, only the changed
+            // zone types appear.
+            var districtZoneDeltas = new Dictionary<string, object>();
+            if (_prevDistrictZones != null)
+            {
+                foreach (var kv in currentDistrictZones)
+                {
+                    var perZone = new Dictionary<string, object>();
+                    _prevDistrictZones.TryGetValue(kv.Key, out var prevZones);
+                    foreach (var zk in kv.Value)
+                    {
+                        int prev = 0;
+                        prevZones?.TryGetValue(zk.Key, out prev);
+                        if (prev != zk.Value)
+                            perZone[zk.Key] = new { from = prev, to = zk.Value, delta = zk.Value - prev };
+                    }
+                    // Zone types that existed before and dropped to 0 / missing now.
+                    if (prevZones != null)
+                    {
+                        foreach (var pz in prevZones)
+                        {
+                            if (!kv.Value.ContainsKey(pz.Key) && pz.Value != 0)
+                                perZone[pz.Key] = new { from = pz.Value, to = 0, delta = -pz.Value };
+                        }
+                    }
+                    if (perZone.Count > 0) districtZoneDeltas[kv.Key] = perZone;
+                }
+                // Districts that existed before but are gone now (renamed or removed).
+                foreach (var pv in _prevDistrictZones)
+                {
+                    if (currentDistrictZones.ContainsKey(pv.Key)) continue;
+                    var dropped = new Dictionary<string, object>();
+                    foreach (var pz in pv.Value)
+                    {
+                        if (pz.Value != 0)
+                            dropped[pz.Key] = new { from = pz.Value, to = 0, delta = -pz.Value };
+                    }
+                    if (dropped.Count > 0) districtZoneDeltas[pv.Key] = dropped;
+                }
+            }
+
+            // Named-building churn. Catches CS2's auto-named civic buildings
+            // ("Halverson Crossing High School" appearing) AND player-renamed
+            // buildings (intentional canon links). Type comes from
+            // BuildingTypeFromMarkers so the agent can react differently to a
+            // new school vs a new low-density house.
+            var nbAdded = new List<object>();
+            var nbRemoved = new List<object>();
+            var nbRenamed = new List<object>();
+            if (_prevNamedBuildings != null)
+            {
+                foreach (var kv in currentNamedBuildings)
+                {
+                    if (!_prevNamedBuildings.TryGetValue(kv.Key, out var prev))
+                    {
+                        nbAdded.Add(new { id = kv.Value.Id, name = kv.Value.Name, type = kv.Value.Type, district = kv.Value.DistrictName });
+                        continue;
+                    }
+                    if (prev.Name != kv.Value.Name)
+                    {
+                        nbRenamed.Add(new { id = kv.Value.Id, from = prev.Name, to = kv.Value.Name, type = kv.Value.Type, district = kv.Value.DistrictName });
+                    }
+                }
+                foreach (var pv in _prevNamedBuildings)
+                {
+                    if (!currentNamedBuildings.ContainsKey(pv.Key))
+                        nbRemoved.Add(new { id = pv.Value.Id, name = pv.Value.Name, type = pv.Value.Type, district = pv.Value.DistrictName });
+                }
+            }
+
             var ocDiff = DiffNameRefs(_prevOutsideConnections, currentOutsideConnections);
             var wsDiff = DiffNameRefs(_prevWaterSources, currentWaterSources);
-            var districtsDiff = DiffNameRefs(_prevDistricts, currentDistricts);
 
             return new
             {
                 since_snapshot_id = _prevSnapshotId,
                 since_captured_at_ingame = _prevIngameDate?.ToString("yyyy-MM-dd"),
                 ingame_days_elapsed = ingameDaysElapsed,
-                buildings = new { added, removed, changed },
                 zones_delta = zonesDelta,
-                roads = new { added = roadsDiff.added, removed = roadsDiff.removed, changed = roadsDiff.changed },
+                district_zone_deltas = districtZoneDeltas,
+                named_buildings = new { added = nbAdded, removed = nbRemoved, renamed = nbRenamed },
                 outside_connections = new { added = ocDiff.added, removed = ocDiff.removed, changed = ocDiff.changed },
                 water_sources = new { added = wsDiff.added, removed = wsDiff.removed, changed = wsDiff.changed },
-                districts = new { added = districtsDiff.added, removed = districtsDiff.removed, changed = districtsDiff.changed },
             };
         }
 
@@ -970,6 +913,91 @@ namespace CityStoryMod.Systems
                 counts[type] = prev + 1;
             }
             return counts;
+        }
+
+        // Returns { districtName → { zoneType → count } } for all districts.
+        // Backs the per-district zone delta in the diff so the agent can spot
+        // subdivision openings ("Pine Quarter grew by 45 residential lots").
+        // Keyed by district name (matching Carto chunks) rather than ECS id so
+        // the agent can cross-reference snapshot deltas with carto/processed/
+        // chunks without needing to resolve entity-id mappings.
+        Dictionary<string, Dictionary<string, int>> CollectDistrictZones()
+        {
+            var result = new Dictionary<string, Dictionary<string, int>>();
+            using var districts = _districtQuery.ToEntityArray(Allocator.Temp);
+            if (districts.Length == 0) return result;
+
+            var districtNameByEntity = new Dictionary<Entity, string>(districts.Length);
+            for (int i = 0; i < districts.Length; i++)
+            {
+                string name = _nameSystem.GetRenderedLabelName(districts[i]);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                districtNameByEntity[districts[i]] = name;
+                result[name] = new Dictionary<string, int>();
+            }
+
+            using var buildings = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < buildings.Length; i++)
+            {
+                var b = buildings[i];
+                if (!EntityManager.HasComponent<CurrentDistrict>(b)) continue;
+                var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                if (d == Entity.Null) continue;
+                if (!districtNameByEntity.TryGetValue(d, out string districtName)) continue;
+
+                string type = BuildingTypeFromMarkers(b) ?? "other";
+                var zones = result[districtName];
+                zones.TryGetValue(type, out int prev);
+                zones[type] = prev + 1;
+            }
+            return result;
+        }
+
+        // Walks CustomName-tagged buildings and produces a slim fingerprint
+        // per entity. Catches both player-renamed buildings (intentional canon
+        // links) and CS2's auto-named civic/service buildings ("Halverson
+        // Crossing Fire & Rescue", "Selkirk Power Transformer"). Backs the
+        // named-buildings churn diff — "Inger Brevik Elementary opened" type
+        // signals — without re-introducing the full v0.1 buildings[] payload.
+        Dictionary<string, NamedBuilding> CollectNamedBuildings(Dictionary<Entity, string> districtNameByEntity)
+        {
+            var result = new Dictionary<string, NamedBuilding>();
+            using var entities = _namedBuildingQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                string id = EntityId(e);
+                string name = _nameSystem.GetRenderedLabelName(e);
+                string type = BuildingTypeFromMarkers(e) ?? "other";
+                string districtName = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(e))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(e).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
+                }
+                result[id] = new NamedBuilding
+                {
+                    Id = id,
+                    Name = name,
+                    Type = type,
+                    DistrictName = districtName,
+                };
+            }
+            return result;
+        }
+
+        // Helper for CollectNamedBuildings — builds the entity→name map once
+        // per export instead of re-resolving names while walking buildings.
+        Dictionary<Entity, string> CollectDistrictNamesByEntity()
+        {
+            var result = new Dictionary<Entity, string>();
+            using var districts = _districtQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < districts.Length; i++)
+            {
+                string name = _nameSystem.GetRenderedLabelName(districts[i]);
+                if (!string.IsNullOrWhiteSpace(name)) result[districts[i]] = name;
+            }
+            return result;
         }
 
         int? ReadFirstInt<T>(Entity e) where T : unmanaged, IComponentData
@@ -1172,11 +1200,5 @@ namespace CityStoryMod.Systems
         }
 
         static string EntityId(Entity e) => $"{e.Index}-{e.Version}";
-
-        string DistrictIdOf(Entity building)
-        {
-            var d = DistrictEntityOf(building);
-            return d != Entity.Null ? EntityId(d) : null;
-        }
     }
 }

@@ -1,6 +1,8 @@
-# CityStoryMod
+# Ghostwriter
 
-A Cities: Skylines 2 mod that turns a playthrough into a living narrative. The mod has three halves running together: a C# **sensor** that exports rich ECS state to JSON snapshots, a per-city **storytelling workspace** the agent reasons against, and an **in-game React panel** for talking to the storyteller without alt-tabbing.
+A Cities: Skylines 2 mod that turns a playthrough into a living narrative. As you build, an LLM-driven agent quietly writes the story of your city in the background — named characters who plausibly drive its decisions, civic events as they happen, ongoing narrative threads. You stay the city's builder; the ghostwriter writes in your voice.
+
+The mod has three halves running together: a C# **sensor** that exports rich ECS state to JSON snapshots, a per-city **storytelling workspace** the agent reasons against, and an **in-game React panel** for talking to the ghostwriter without alt-tabbing.
 
 ```
 [CS2 playthrough]
@@ -58,12 +60,12 @@ No hot-reload while CS2 is running. The C# dev loop is **edit → quit CS2 → `
 
 In CS2, with the mod enabled:
 
-- **Toolbar icon (top-left)** — opens the in-game storyteller panel: chat with the model, pick a slash command from a dropdown, browse the city's canon in a sidebar, click any canon entry to open it in a draggable modal with rendered markdown. This is the primary surface.
+- **Toolbar icon (top-left)** — opens the in-game ghostwriter panel: chat with the model, pick a slash command from a dropdown, browse the city's canon in a sidebar, click any canon entry to open it in a draggable modal with rendered markdown. This is the primary surface.
 - **Ctrl+Shift+E** — trigger a snapshot export immediately.
 - **Auto-export** — fires every N minutes (configurable; default 5, set to 0 to disable).
 - **Auto session-start on save load** — opt-in; when enabled, writes an open `sessions/` stub the moment a save loads so the agent picks up where the player left off.
 
-> **Heads-up on the prompt box.** There's a soft guardrail in `template/CLAUDE.md` that tells the storyteller to refuse off-scope prompts in-character (so a stray "write me a python script" doesn't burn your Max subscription or corrupt the canon). It's prompt-level only; a determined prompt-injector can talk the model around it, and someone who actually wanted to torch your canon could just delete files directly. Don't leave the game unlocked in a coffee shop.
+> **Heads-up on the prompt box.** There's a soft guardrail in `template/CLAUDE.md` that tells the ghostwriter to refuse off-scope prompts in-character (so a stray "write me a python script" doesn't burn your Max subscription or corrupt the canon). It's prompt-level only; a determined prompt-injector can talk the model around it, and someone who actually wanted to torch your canon could just delete files directly. Don't leave the game unlocked in a coffee shop.
 
 Snapshots and per-city content land at:
 

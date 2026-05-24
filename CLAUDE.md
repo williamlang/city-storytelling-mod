@@ -1,6 +1,8 @@
-# CityStoryMod (Cities: Skylines 2 — Data Export + Storytelling)
+# Ghostwriter (Cities: Skylines 2 — narrative mod, codename CityStoryMod)
 
 A CS2 mod that turns a playthrough into a living narrative. It exports rich ECS state from the game and ships a per-city Claude-driven storytelling system inside the same repo. Both halves run together: the mod is the sensor *and* the workspace.
+
+**On naming:** the user-facing display name is **Ghostwriter**. The technical identity (namespace, DLL, `ModsData/CityStoryMod/`) stays `CityStoryMod` — renaming those would break existing player data. So in code you'll see `CityStoryMod.*` everywhere; in the in-game UI, manifest, and any string a player reads, it's "Ghostwriter."
 
 ## How this fits together
 
@@ -79,7 +81,7 @@ Logs land at:
 6. **Service coverage** — gaps in police, fire, healthcare, education (where political pressure originates)
 7. **Recent construction** — new buildings since last snapshot, especially services/landmarks
 
-The storytelling agent (running inside each city folder via `StorytellerDispatcher`) consumes these and synthesizes characters, companies, events, and stories into the same folder.
+The ghostwriter agent (running inside each city folder via `StorytellerDispatcher`) consumes these and synthesizes characters, companies, events, and stories into the same folder.
 
 ## How to read game state (high-level)
 

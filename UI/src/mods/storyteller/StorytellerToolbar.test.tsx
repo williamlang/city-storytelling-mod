@@ -38,22 +38,22 @@ describe("StorytellerToolbar", () => {
   it("toolbar icon is rendered and panel is closed by default", () => {
     seedEmpty();
     render(<StorytellerToolbar />);
-    expect(screen.getByLabelText("Storyteller")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ghostwriter")).toBeInTheDocument();
     expect(screen.queryByText("Canon")).not.toBeInTheDocument();
   });
 
   it("clicking the icon opens the panel", () => {
     seedEmpty();
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
-    expect(screen.getByText("Storyteller")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
+    expect(screen.getByText("Ghostwriter")).toBeInTheDocument();
     expect(screen.getByText("Canon")).toBeInTheDocument();
   });
 
   it("canon groups are collapsed by default; clicking the header expands them", () => {
     seedWithCanon();
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
 
     // Group header for characters is visible; entries are not.
     const charactersHeader = screen.getByRole("button", { name: /characters/i });
@@ -69,7 +69,7 @@ describe("StorytellerToolbar", () => {
   it("clicking a canon file opens it in a modal with markdown rendered", () => {
     seedWithCanon();
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
     fireEvent.click(screen.getByRole("button", { name: /characters/i }));
     fireEvent.click(screen.getByRole("button", { name: "annika" }));
 
@@ -83,7 +83,7 @@ describe("StorytellerToolbar", () => {
   it("opening a second file leaves the first modal open", () => {
     seedWithCanon();
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
     fireEvent.click(screen.getByRole("button", { name: /characters/i }));
     fireEvent.click(screen.getByRole("button", { name: "annika" }));
     fireEvent.click(screen.getByRole("button", { name: "marcus" }));
@@ -95,7 +95,7 @@ describe("StorytellerToolbar", () => {
   it("empty canon tree shows the bootstrap nudge", () => {
     seedEmpty();
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
     expect(screen.getByText(/No canon yet/i)).toBeInTheDocument();
   });
 
@@ -108,7 +108,7 @@ describe("StorytellerToolbar", () => {
       secrets: [{ name: "leak", path: "secrets/leak.md", content: "hidden truth" }],
     }));
     render(<StorytellerToolbar />);
-    fireEvent.click(screen.getByLabelText("Storyteller"));
+    fireEvent.click(screen.getByLabelText("Ghostwriter"));
     expect(screen.getByRole("button", { name: /secrets/i })).toBeInTheDocument();
   });
 });

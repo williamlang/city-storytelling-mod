@@ -23,11 +23,15 @@ This document defines the contract. The mod is the producer; the agent is the co
 4. **`schema_version` gates breaking changes.** Additive changes (new fields, new nested objects) don't bump the version. Renames, removals, or semantic shifts do.
 5. **JSON keys are `snake_case`.** Matches typical Python/agent tooling. The mod is the C# side, so this is a translation at serialization time.
 
+## v0.2 split — snapshot vs Carto chunks
+
+Spatial geometry and per-district building lists are NOT in the snapshot. Those live in `carto/processed/index.md` and `carto/processed/districts/<slug>.md`, produced by `CartoProcessor` from Carto's raw GeoJSON exports. The snapshot owns city stats, demographics, trade, diffs, and the small entity classes Carto doesn't cover (outside connections, water sources). The agent reads both surfaces for different purposes.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
@@ -55,72 +59,22 @@ This document defines the contract. The mod is the producer; the agent is the co
     }
   },
 
-  "districts": [
-    // {
-    //   "id": "...", "name": "...",
-    //   "population": N,                 // residents whose home is in this district
-    //   "jobs": N,                       // workers whose workplace is in this district
-    //   "zones": { residential, commercial, industrial, office, extractor,
-    //              service, transformer, water_pumping, other },
-    //   "named_buildings": [ "<id>", ... ]   // ids of buildings[] entries in this district
-    // }
-  ],
-
-  "buildings": [
-    // {
-    //   "id": "...",
-    //   "name": "...",                  // CS2-rendered name (custom or auto-named)
-    //   "custom_named": true,
-    //   "prefab_name": "WaterTower01",  // asset name from PrefabSystem
-    //   "type": "transformer|water_pumping|extractor|industrial|commercial|office|residential|service",
-    //   "efficiency": null,             // not yet wired (buffer-typed component)
-    //   "condition": N,                 // raw m_Condition (level/XP scale, not 0-100)
-    //   "citizens_present": N,          // current occupants
-    //   "renter_count": N,
-    //   "company": {                    // null for civic services
-    //     "id": "...", "name": "...", "custom_named": false,
-    //     "sector": "commercial|industrial|office",
-    //     "subtype": "FurnitureStore|SawMill|...",
-    //     "headcount": N
-    //   },
-    //   "district_id": "..."
-    // }
-    // Filtered to entities with the CustomName component. This covers both:
-    //   - Player-renamed buildings (intentional canon link, e.g. "Conklin Ranch")
-    //   - CS2's auto-named service / civic buildings (e.g. "Halverson Tower" for a
-    //     water tower, "Selkirk Power Transformer" for a transformer station)
-    // Both are useful candidates for canon `places/*.md`. The storytelling agent
-    // can heuristically distinguish them if it cares, but for most purposes
-    // "this building has a unique name" is the signal.
-  ],
-  // Note: there is no top-level companies[] in v0.1. Company info is folded into
-  // each building.company. CS2 has many anonymous template companies in stock
-  // commercial zones; surfacing only the company occupying a named building keeps
-  // the snapshot focused on narratively-relevant businesses.
-
-  "roads": [
-    // Player-named or CS2-auto-named road aggregates: { "id": "...", "name": "..." }
-    // Detected via Game.Net.Aggregate. A single named road is one aggregate, regardless
-    // of how many edges/segments compose it.
-  ],
+  // districts[], buildings[], roads[], other_named[]: REMOVED in v0.2.
+  // See carto/processed/index.md + carto/processed/districts/<slug>.md.
 
   "outside_connections": [
     // Edge-of-map destinations (cities the player connects to via highway / rail / air).
     // { "id": "...", "name": "Canmore" }
     // CS2 typically pairs these (one inbound, one outbound) so the same name appears
     // twice with different ids. Detected via Game.Objects.OutsideConnection.
+    // Stays in the snapshot — Carto doesn't expose these.
   ],
 
   "water_sources": [
     // Lakes, river segments, springs. { "id": "...", "name": "Lake Minnewanka" }
     // Detected via Game.Simulation.WaterSourceData. Includes both narratively-named
     // landmarks (Lake Minnewanka) and auto-named flow segments (Bow12).
-  ],
-
-  "other_named": [
-    // Catch-all for CustomName-tagged entities not covered above. Empty in a typical
-    // city; populated entries get a [diag] component dump so the classifier can be
-    // extended next batch.
+    // Stays in the snapshot — Carto's water output is raster-only by default.
   ],
 
   "citizens_sample": [
@@ -128,6 +82,14 @@ This document defines the contract. The mod is the producer; the agent is the co
     // { "id": "...", "name": "...", "age": N, "education": "...", "wealth_tier": "...",
     //   "home_district_id": "...", "workplace_company_id": "..." }
   ],
+
+  "district_zones": {
+    // Per-district building-type counts. Same shape as city.zones but keyed by
+    // district name (matching Carto chunks). Backs the diff.district_zone_deltas
+    // signal so the agent can spot subdivision growth localized to a neighborhood.
+    // "Pine Quarter":    { "residential": 245, "commercial": 12, "industrial": 0, ... },
+    // "The North Yards": { "residential": 0,   "commercial": 4,  "industrial": 38, ... }
+  },
 
   "demographics": {
     "by_age_band": null,
@@ -150,29 +112,45 @@ This document defines the contract. The mod is the producer; the agent is the co
 
   "diff": {
     // null on the first snapshot of a session (no prior to compare against);
-    // populated thereafter. Carries change relative to the previous snapshot.
+    // populated thereafter. Carries temporal change relative to the previous
+    // snapshot — this is the "what just happened" feed for the storyteller.
     "since_snapshot_id": "snapshot-1779235454",
     "since_captured_at_ingame": "2026-01-10",
     "ingame_days_elapsed": 0,
-    "buildings": {
-      // named-building churn (only entities currently in buildings[])
-      "added":   [ { "id": "...", "name": "...", "type": "..." } ],
-      "removed": [ { "id": "...", "name": "...", "type": "..." } ],
-      "changed": [
-        { "id": "...", "name": "...", "changes": {
-          "name":            { "from": "Old Name", "to": "New Name" },
-          "type":            { "from": "industrial", "to": "extractor" },
-          "district_id":     { "from": null, "to": "..." },
-          "company_subtype": { "from": "Bar", "to": "Restaurant" },
-          "has_company":     { "from": true, "to": false }
-        } }
-      ]
-    },
+
+    // City-wide zone count changes. Bulk growth/decline signal.
     "zones_delta": {
-      // bulk zone-count changes (catches residential/commercial growth and
-      // demolitions that don't surface in buildings[] because most lots are
-      // not custom-named). Only keys where the count actually changed appear.
       "residential": { "from": 415, "to": 423, "delta": 8 }
+    },
+
+    // Per-district zone count changes. Subdivision-opening signal — when
+    // residential count jumps inside one district, a new neighborhood is
+    // filling in. Only districts with at least one zone-type change appear.
+    "district_zone_deltas": {
+      "Pine Quarter": {
+        "residential": { "from": 200, "to": 245, "delta": 45 }
+      }
+    },
+
+    // Named-building churn. Catches both player-renamed buildings
+    // (intentional canon link, e.g. "Conklin Ranch") and CS2's auto-named
+    // civic / service buildings (e.g. "Inger Brevik Elementary"). The agent
+    // treats these as candidate events/*.md entries.
+    "named_buildings": {
+      "added":   [ { "id": "...", "name": "Inger Brevik Elementary", "type": "service", "district": "Pine Quarter" } ],
+      "removed": [],
+      "renamed": [ { "id": "...", "from": "Old Name", "to": "New Name", "type": "...", "district": "..." } ]
+    },
+
+    "outside_connections": {
+      "added":   [ { "id": "...", "name": "..." } ],
+      "removed": [],
+      "changed": []
+    },
+    "water_sources": {
+      "added":   [],
+      "removed": [],
+      "changed": []
     }
   }
 }
@@ -180,14 +158,14 @@ This document defines the contract. The mod is the producer; the agent is the co
 
 ### Mapping to storytelling entities
 
-| Snapshot field | Storytelling project entity | Notes |
+| Source | Storytelling project entity | Notes |
 |---|---|---|
-| `districts[]` | `places/*.md` (type: neighborhood) | One markdown file per district. |
-| `buildings[]` | `places/*.md` (type: landmark, civic, industrial) | Only notable ones — not residential houses. |
-| `companies[]` | `companies/*.md` | One per company. |
-| `citizens_sample[]` | `characters/*.md` candidates | Most sampled citizens stay anonymous; some become named characters when the story needs them. |
-| `services.coverage_gaps` | `events/*.md` candidates | Pressure points the story can hang scandals or political campaigns on. |
-| Trade partner changes (diff) | `events/*.md` | New trade route opening = potential event. |
+| `carto/processed/districts/<slug>.md` | `places/*.md` (type: neighborhood) | One markdown file per district, with adjacency + assigned buildings. |
+| Per-district named buildings in those chunks | `places/*.md` (type: landmark, civic, industrial) | Civic buildings come through individually; generic zoned buildings are deduped + aggregated. |
+| `citizens_sample[]` (snapshot) | `characters/*.md` candidates | Most sampled citizens stay anonymous; some become named characters when the story needs them. |
+| `services.coverage_gaps` (snapshot) | `events/*.md` candidates | Pressure points the story can hang scandals or political campaigns on. |
+| `diff.zones_delta` (snapshot) | `events/*.md` | Bulk residential/commercial growth signals when an in-world period saw real expansion. |
+| Trade partner changes (snapshot diff) | `events/*.md` | New trade route opening = potential event. |
 
 ## Identity conventions
 
@@ -196,33 +174,30 @@ This document defines the contract. The mod is the producer; the agent is the co
 - **`session_id`** = `"session-<unix-ts>"`. Set once when the mod loads (CS2 launch). Every snapshot in the same play session carries the same `session_id`. Changes only when the user fully restarts CS2.
 - **Cross-references** (e.g. `building.district_id`) always use the referenced entity's `id`. Never embed copies.
 
-## What's emitted today
+## What's emitted today (v0.2)
 
-As of v0.1.0 of the mod:
+- Metadata header: `schema_version`, `snapshot_id`, `session_id`, timestamps — populated.
+- `city.*` — most fields populated (name, money, happiness, health, tourists, attractiveness, danger, milestone, xp, zones).
+- `outside_connections[]`, `water_sources[]` — populated from `CustomName` entities.
+- `diff.zones_delta`, `diff.outside_connections`, `diff.water_sources`, `diff.ingame_days_elapsed` — populated from second snapshot onward.
+- `citizens_sample[]`, `demographics`, `trade`, `services` — still null / empty.
 
-- `schema_version`, `snapshot_id`, `captured_at_utc` — populated.
-- `city.citizens_total` — populated from a raw `Game.Citizens.Citizen` entity count. **Broader than the HUD population** (includes tourists, commuters, transient entities); see CLAUDE.md status section.
-- Everything else — `null` or empty array.
+Spatial data (districts, buildings, adjacency) lives in `carto/processed/` chunks — see [the Carto integration issue (#17)](https://github.com/williamlang/city-storytelling-mod/issues/17).
 
 ## Implementation order (next fields to ship)
 
 Roughly easiest → hardest:
 
-1. **`city.name`, `city.money`, `city.happiness`** — single calls into `CityConfigurationSystem` / city stats.
-2. **`captured_at_ingame`** — hook `TimeSystem` for the in-game date.
-3. **`districts[]` (id + name + population)** — query `Game.Areas.District`, count citizens whose `HouseholdMember → Household → PropertyRenter → Building → CurrentDistrict` chain lands in each.
-4. **`buildings[]` notable list** — query buildings with `BuildingData` filtered by landmark / service prefab flags. Skip residential.
-5. **`companies[]`** — query `Game.Companies.*` for active commercial / industrial companies, pull name + headcount.
-6. **`citizens_sample[]`** — sample N citizens (e.g. 50), pull name (via `Lifepath`), age, education, wealth, home, work.
-7. **Demographics aggregations** — once we have filter components, these are cheap to compute from the same query results.
-8. **Trade flows** — multi-component join; defer until building / company exports are solid.
-9. **Service coverage gaps** — depends on building service area data; advanced.
+1. **`citizens_sample[]`** — sample N citizens, pull name (via `Lifepath`), age, education, wealth, home, work.
+2. **Demographics aggregations** — once we have citizen filters, cheap to compute alongside.
+3. **Trade flows** — multi-component join via `Game.Economy`.
+4. **Service coverage gaps** — depends on building service-area data; advanced.
 
 Each lands as its own commit; bump `schema_version` only if the shape of an existing field changes meaningfully.
 
 ## Versioning
 
-- `0.1.x` — current. Skeleton schema; most fields null. Additive changes allowed without version bump.
-- `0.2` — once `districts`, `companies`, and a basic `citizens_sample` are populated. The agent should be useful at this point.
+- `0.1` — initial skeleton. Embedded spatial data (`districts[]`, `buildings[]`, etc.) and per-building churn diff.
+- `0.2` — current. Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

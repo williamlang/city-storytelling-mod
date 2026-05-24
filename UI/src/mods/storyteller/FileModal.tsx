@@ -15,11 +15,17 @@ export function FileModal({
   path,
   cascadeIndex,
   onClose,
+  onOpenFile,
 }: {
   entry: CanonEntry | undefined;
   path: string;
   cascadeIndex: number;
   onClose: () => void;
+  // Called when a markdown link inside this canon file is clicked.
+  // Receives the href as written (cityDir-relative). Threading this
+  // through lets one canon file link to another and have the click
+  // open a new modal rather than dead-end.
+  onOpenFile?: (path: string) => void;
 }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
   const { pos, beginDrag } = useDrag();
@@ -49,7 +55,7 @@ export function FileModal({
       </div>
       <div className={styles.fileModalBody}>
         {entry ? (
-          <FileContent content={entry.content} />
+          <FileContent content={entry.content} onOpenFile={onOpenFile} />
         ) : (
           <div className={styles.fileModalMissing}>
             File no longer in canon tree — it may have been deleted or renamed.
@@ -67,7 +73,13 @@ export function FileModal({
 // surfaces the metadata as scannable structure. Internal to FileModal;
 // not exported because no other component needs canon-file rendering
 // (today).
-function FileContent({ content }: { content: string }) {
+function FileContent({
+  content,
+  onOpenFile,
+}: {
+  content: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const { fields, body } = useMemo(() => parseFrontmatter(content), [content]);
   const fieldNames = Object.keys(fields);
   return (
@@ -82,7 +94,7 @@ function FileContent({ content }: { content: string }) {
           ))}
         </dl>
       )}
-      {body && <MarkdownLite>{body}</MarkdownLite>}
+      {body && <MarkdownLite onLinkClick={onOpenFile}>{body}</MarkdownLite>}
     </>
   );
 }
