@@ -363,8 +363,9 @@ It lives in `canon/playthrough-premise.md` as plain prose. **I infer it; the pla
 **Inference inputs, in priority order:**
 
 1. The chosen founding-history paragraph in `canon/city.md` — era, original economic engine, 20th-century trajectory (boom / decline / reinvention), region. This is the dominant signal.
-2. The map observations from `/new-city`'s map read — coastline vs. inland, mountain pass vs. open plain, sheltered bay vs. exposed coast. Drives which story shapes the geography supports.
-3. The chosen city name — sometimes carries tone (a founders' surname implies entrenched-money; a geographic-feature name implies a place-rooted story).
+2. **The spatial data the mod collected on first export** — read from `snapshots/snapshot-*.json` (the `map.*` block: name, theme, latitude, longitude, temperature range, cloudiness, precipitation) and `carto/processed/{index, elevation, water, roads}.md`. Latitude + temperature alone pin the climate (boreal vs. Mediterranean vs. temperate); the terrain reading and water reading carry the dominant landform; the named decorations (cairns, ruins, monuments) and bridge / highway names carry implicit history.
+3. The visual map read from `/new-city`'s screenshot step — coastline shape, vegetation density, anything the rasters and vectors don't capture. Augments (2); doesn't override it.
+4. The chosen city name — sometimes carries tone (a founders' surname implies entrenched-money; a geographic-feature name implies a place-rooted story).
 
 **Inference heuristics** (writerly judgments, not a lookup table):
 

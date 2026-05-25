@@ -615,13 +615,22 @@ namespace CityStoryMod.Tests
 
         [Theory]
         // Glenville (the real city) — stdev 28 on a 191 m range, mean 96.
-        // Relief / stdev = 6.8x → triggers the "localized high point" tag.
+        // Relief / stdev = 6.8× → triggers the "localized high point" tag
+        // because the base label is flatish.
         [InlineData(28, 191, 96, "Mostly flat, with a localized high point.")]
-        // Uniform flat plain — small stdev, small relief, no high point.
+        // Same ratio but a "gently rolling" base — still flatish, still triggers.
+        [InlineData(50, 300, 100, "Gently rolling, with a localized high point.")]
+        // Uniform flat plain — small relief, no outlier.
         [InlineData(15, 60, 30, "Mostly flat.")]
-        // Gently rolling farmland.
+        // Gently rolling farmland with proportional relief.
         [InlineData(50, 200, 100, "Gently rolling.")]
+        // Hilly: even with a 6× relief/stdev ratio, suppress the suffix —
+        // "Hilly with a localized high point" reads as redundant because
+        // hills imply high points.
+        [InlineData(100, 600, 200, "Hilly.")]
         [InlineData(100, 350, 200, "Hilly.")]
+        // Rugged / mountainous: same suppression rule.
+        [InlineData(200, 1500, 500, "Rugged / mountainous.")]
         [InlineData(200, 900, 500, "Rugged / mountainous.")]
         public void ClassifyTerrain_returns_human_reading(double stdev, double relief, double mean, string expected)
         {
@@ -631,27 +640,65 @@ namespace CityStoryMod.Tests
         [Fact]
         public void ClassifyWater_landlocked_when_essentially_no_water()
         {
-            CartoProcessor.ClassifyWater(0.5, new[] { 0d, 0d, 0d, 0d }).Should().Be("Essentially landlocked.");
+            CartoProcessor.ClassifyWater(0.5, new[] { 0d, 0d, 0d, 0d }, 0).Should().Be("Essentially landlocked.");
         }
 
         [Fact]
-        public void ClassifyWater_flags_lake_district_when_spread_across_quadrants()
+        public void ClassifyWater_archipelago_requires_dominant_water_and_fragmentation()
         {
-            // 36% water, spread across NW + NE + SW quadrants (Glenville-ish).
-            string r = CartoProcessor.ClassifyWater(36, new[] { 25d, 30d, 22d, 5d });
-            r.Should().Contain("Heavy water");
-            r.Should().Contain("spread across most of the map");
-            r.Should().Contain("complex lake district");
+            // Comptche (Archipelago map): 60% water, complexity 11.4, quadrants
+            // 55-69%. All three signals say "archipelago." Uniform distribution
+            // (max-min = 14) reads as evenly across the map.
+            string r = CartoProcessor.ClassifyWater(60, new[] { 61d, 55d, 69d, 56d }, 11.4);
+            r.Should().Contain("Water-dominated");
+            r.Should().Contain("archipelago");
+            r.Should().Contain("evenly across the map");
         }
 
         [Fact]
-        public void ClassifyWater_flags_coastline_when_water_is_concentrated()
+        public void ClassifyWater_river_system_when_heavy_water_fragmented_but_uneven()
         {
-            // 30% water all in the SE quadrant (a corner coast).
-            string r = CartoProcessor.ClassifyWater(30, new[] { 0d, 0d, 0d, 60d });
+            // Mayworth (Verdant Vale map): 31% water, complexity 11.2, quadrants
+            // 24/21/35/46. Fragmented shoreline but only mid-coverage water —
+            // a river network with a southern coast, NOT an archipelago. SE
+            // is the dominant quadrant (46%); spread 25 > 15 triggers weighting.
+            string r = CartoProcessor.ClassifyWater(31, new[] { 24d, 21d, 35d, 46d }, 11.2);
             r.Should().Contain("Heavy water");
-            r.Should().Contain("concentrated on one side");
-            r.Should().Contain("coastline or large concentrated lake");
+            r.Should().Contain("river system threaded with lakes");
+            r.Should().NotContain("archipelago");
+            r.Should().Contain("weighted to the SE");
+        }
+
+        [Fact]
+        public void ClassifyWater_major_lake_when_heavy_water_low_complexity()
+        {
+            // Heavy water (30%) but a smooth-edge shoreline (complexity 1.5)
+            // is a single large body, not a river network. Distributed across
+            // 4 quadrants and uniform → "evenly across the map."
+            string r = CartoProcessor.ClassifyWater(30, new[] { 28d, 30d, 32d, 30d }, 1.5);
+            r.Should().Contain("Heavy water");
+            r.Should().Contain("major lake or coastline");
+            r.Should().NotContain("river system");
+        }
+
+        [Fact]
+        public void ClassifyWater_concentrated_coast_when_water_in_one_quadrant()
+        {
+            // 30% water all in the SE quadrant (a corner coast), low complexity.
+            string r = CartoProcessor.ClassifyWater(30, new[] { 0d, 0d, 0d, 60d }, 2.0);
+            r.Should().Contain("Heavy water");
+            r.Should().Contain("major lake or coastline");
+            r.Should().Contain("concentrated in the SE");
+        }
+
+        [Fact]
+        public void ClassifyWater_open_sea_when_water_dominant_but_smooth()
+        {
+            // 70% water, low complexity — a sea / ocean rather than islands.
+            string r = CartoProcessor.ClassifyWater(70, new[] { 68d, 72d, 70d, 70d }, 1.5);
+            r.Should().Contain("Water-dominated");
+            r.Should().Contain("open sea or vast single body");
+            r.Should().NotContain("archipelago");
         }
 
         [Theory]
@@ -670,6 +717,150 @@ namespace CityStoryMod.Tests
         public void QuadrantOf_returns_null_for_invalid_index()
         {
             CartoProcessor.QuadrantOf(-1, 4, 4).Should().BeNull();
+        }
+
+        // -- Cycle 3c: coastline extraction --
+        //
+        // We exercise TryProcessWater end-to-end by writing a synthetic
+        // Depth.tif into a temp dir, then asserting the returned
+        // RasterSummary carries the right coastline counts. The TIFF format
+        // is the same one GeoTiffReaderTests builds; we re-use that shape
+        // here via a small helper.
+
+        static byte[] BuildDepthTiff(int width, int height, short[] pixels, double scaleM)
+        {
+            int bps = width * 2;
+            int stripsStart = 8;
+            int offsetsTableStart = stripsStart + bps * height;
+            int byteCountsTableStart = offsetsTableStart + 4 * height;
+            int scaleStart = byteCountsTableStart + 4 * height;
+            int ifdStart = scaleStart + 8 * 3;
+
+            using var ms = new System.IO.MemoryStream();
+            using var bw = new System.IO.BinaryWriter(ms);
+
+            bw.Write((byte)'I'); bw.Write((byte)'I');
+            bw.Write((short)42);
+            bw.Write(ifdStart);
+
+            for (int i = 0; i < pixels.Length; i++) bw.Write(pixels[i]);
+            for (int i = 0; i < height; i++) bw.Write(stripsStart + i * bps);
+            for (int i = 0; i < height; i++) bw.Write(bps);
+            bw.Write(scaleM); bw.Write(scaleM); bw.Write(0d);
+
+            void Entry(ushort tag, ushort type, uint count, uint v) { bw.Write(tag); bw.Write(type); bw.Write(count); bw.Write(v); }
+            bw.Write((ushort)8);
+            Entry(256, 3, 1, (uint)width);
+            Entry(257, 3, 1, (uint)height);
+            Entry(258, 3, 1, 16);
+            Entry(259, 3, 1, 1);
+            Entry(273, 4, (uint)height, (uint)offsetsTableStart);
+            Entry(277, 3, 1, 1);
+            Entry(339, 3, 1, 2);
+            Entry(33550, 12, 3, (uint)scaleStart);
+            bw.Write(0u);
+            return ms.ToArray();
+        }
+
+        // Scratch directory mirroring Carto's layout: tempRoot/GeoTIFF/Depth.tif.
+        // Caller deletes tempRoot after the test.
+        static string WriteSyntheticDepthRaster(int w, int h, short[] pixels, double scaleM)
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "citystorymod-test-" + System.Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "GeoTIFF"));
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(root, "GeoTIFF", "Depth.tif"), BuildDepthTiff(w, h, pixels, scaleM));
+            return root;
+        }
+
+        [Fact]
+        public void TryProcessWater_counts_coastline_cells_around_an_inland_lake()
+        {
+            // 6×6 grid. 2×2 inner block of water surrounded by land. Land = -32768.
+            // Water cells (4 of them) all sit on the boundary, so all 4 are coastline.
+            const short L = -32768;
+            short[] pixels = {
+                L, L, L, L, L, L,
+                L, L, L, L, L, L,
+                L, L, 5, 5, L, L,
+                L, L, 5, 5, L, L,
+                L, L, L, L, L, L,
+                L, L, L, L, L, L,
+            };
+            string root = WriteSyntheticDepthRaster(6, 6, pixels, 10.0 /* m/pixel */);
+            try
+            {
+                string processed = System.IO.Path.Combine(root, "processed");
+                System.IO.Directory.CreateDirectory(processed);
+                var summary = CartoProcessor.TryProcessWater(root, processed);
+
+                summary.Should().NotBeNull();
+                summary.WaterCells.Should().Be(4);
+                summary.CoastlineCells.Should().Be(4);
+                // 4 cells × 10 m = 40 m approximate shoreline.
+                summary.CoastlineLengthM.Should().BeApproximately(40, 0.001);
+            }
+            finally
+            {
+                System.IO.Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void TryProcessWater_treats_map_edge_water_as_coastline()
+        {
+            // 4×4 grid, all water. Every cell is on the map edge or one step
+            // inside it; all map-edge water cells count as coastline because
+            // the map edge functions as "out of bounds" (treated like land).
+            short[] pixels = new short[16];
+            for (int i = 0; i < 16; i++) pixels[i] = 3;
+            string root = WriteSyntheticDepthRaster(4, 4, pixels, 5.0);
+            try
+            {
+                string processed = System.IO.Path.Combine(root, "processed");
+                System.IO.Directory.CreateDirectory(processed);
+                var summary = CartoProcessor.TryProcessWater(root, processed);
+
+                summary.WaterCells.Should().Be(16);
+                // Map edge = 12 cells (perimeter of 4×4); inner 2×2 has no
+                // out-of-bounds neighbors so it's not coastline.
+                summary.CoastlineCells.Should().Be(12);
+            }
+            finally
+            {
+                System.IO.Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void TryProcessWater_shoreline_ratio_near_1_for_compact_basin()
+        {
+            // 10×10 grid with a 6×6 block of water in the middle, no land
+            // touching the map edge — a near-round basin. Shoreline ratio
+            // should be in the "compact basin" range (~ 1.3 for a square,
+            // higher than 1.0 because square is less efficient than circle).
+            const short L = -32768;
+            short[] pixels = new short[100];
+            for (int r = 0; r < 10; r++)
+                for (int c = 0; c < 10; c++)
+                    pixels[r * 10 + c] = (r >= 2 && r < 8 && c >= 2 && c < 8) ? (short)2 : L;
+
+            string root = WriteSyntheticDepthRaster(10, 10, pixels, 1.0);
+            try
+            {
+                string processed = System.IO.Path.Combine(root, "processed");
+                System.IO.Directory.CreateDirectory(processed);
+                var summary = CartoProcessor.TryProcessWater(root, processed);
+
+                summary.WaterCells.Should().Be(36);
+                // Perimeter of a 6×6 inner block = 20 cells (4 corners + 16 edges).
+                summary.CoastlineCells.Should().Be(20);
+                // Ratio ≈ 20 / sqrt(36π) ≈ 20 / 10.63 ≈ 1.88. Round basin band.
+                summary.ShorelineRatio.Should().BeInRange(1.5, 2.5);
+            }
+            finally
+            {
+                System.IO.Directory.Delete(root, recursive: true);
+            }
         }
 
         [Fact]

@@ -28,6 +28,12 @@ namespace CityStoryMod.Storyteller
             // Pixel value used to indicate "no data" — for Carto's Int16
             // output this is -32768. Stats code should skip these.
             public int NoData;
+            // Meters per pixel along x and y from the ModelPixelScale tag
+            // (33550, 3 doubles). 0 when the tag is absent or malformed —
+            // callers should treat 0 as "unknown" and fall back to deriving
+            // scale from a known footprint.
+            public double ScaleX;
+            public double ScaleY;
         }
 
         // Reads dimensions + raw pixels from a Carto-shaped GeoTIFF. Returns
@@ -63,6 +69,7 @@ namespace CityStoryMod.Storyteller
 
             int width = 0, height = 0, bitsPerSample = 0, samplesPerPixel = 1, sampleFormat = 0, compression = 1;
             uint stripOffset = 0; // For single-strip Carto output, this is the start of pixel data.
+            double scaleX = 0, scaleY = 0;
 
             for (int i = 0; i < entryCount; i++)
             {
@@ -81,6 +88,17 @@ namespace CityStoryMod.Storyteller
                     case 273: stripOffset = ResolveStripOffset(bytes, type, count, valueOrOffset, littleEndian); break;
                     case 277: samplesPerPixel = (int)ReadInlineShort(type, valueOrOffset, littleEndian); break;
                     case 339: sampleFormat = (int)ReadInlineShort(type, valueOrOffset, littleEndian); break;
+                    // ModelPixelScale (33550): 3 doubles [scaleX, scaleY, scaleZ]
+                    // out-of-line at the indicated offset. Carto writes this
+                    // unconditionally for raster output. We only need the
+                    // horizontal scales; scaleZ is for 3D models and we ignore it.
+                    case 33550:
+                        if (count >= 2 && valueOrOffset + 16 <= bytes.Length)
+                        {
+                            scaleX = ReadDouble(bytes, (int)valueOrOffset, littleEndian);
+                            scaleY = ReadDouble(bytes, (int)valueOrOffset + 8, littleEndian);
+                        }
+                        break;
                 }
             }
 
@@ -144,7 +162,18 @@ namespace CityStoryMod.Storyteller
                 // would collide with valid 0-depth water; for Norm16 the
                 // caller should treat all values as data.
                 NoData = signedSamples ? -32768 : int.MinValue,
+                ScaleX = scaleX,
+                ScaleY = scaleY,
             };
+        }
+
+        static double ReadDouble(byte[] bytes, int offset, bool littleEndian)
+        {
+            if (littleEndian == BitConverter.IsLittleEndian)
+                return BitConverter.ToDouble(bytes, offset);
+            byte[] swap = new byte[8];
+            for (int i = 0; i < 8; i++) swap[i] = bytes[offset + 7 - i];
+            return BitConverter.ToDouble(swap, 0);
         }
 
         // Field types 3 (SHORT, ushort) and 4 (LONG, uint) both fit in the

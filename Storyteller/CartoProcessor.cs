@@ -81,6 +81,17 @@ namespace CityStoryMod.Storyteller
             // Quadrant water shares for the depth raster (% of map per quadrant
             // that is water). null for elevation.
             public double[] WaterQuadrantPercent;   // [NW, NE, SW, SE]
+            // Coastline stats from the depth raster. CoastlineCells counts
+            // water pixels with at least one 4-neighbor that is land. Length
+            // is meters using the TIFF's ModelPixelScale; 0 when scale was
+            // unavailable. CoastlineQuadrantPercent slices the coast-cell
+            // count by quadrant. ShorelineRatio = coastline cells /
+            // sqrt(water cells × π) — a roughness index where 1.0 ≈ a circle
+            // and higher values indicate islands / inlets / convoluted shore.
+            public long CoastlineCells;
+            public double CoastlineLengthM;
+            public double[] CoastlineQuadrantPercent;
+            public double ShorelineRatio;
         }
 
         public static Result Process(string cartoDir)
@@ -794,7 +805,10 @@ namespace CityStoryMod.Storyteller
             {
                 sb.AppendLine("## Water");
                 sb.AppendLine();
-                sb.AppendLine($"{water.WaterCells:N0} water cell(s) — {water.PercentWater.ToString("F1", ci)}% of the map. Maximum depth {water.Max} m. See `processed/water.md` for detail.");
+                sb.Append($"{water.WaterCells:N0} water cell(s) — {water.PercentWater.ToString("F1", ci)}% of the map. Maximum depth {water.Max} m.");
+                if (water.CoastlineLengthM > 0)
+                    sb.Append($" Shoreline ≈ {(water.CoastlineLengthM / 1000.0).ToString("F1", ci)} km (complexity {water.ShorelineRatio.ToString("F1", ci)}).");
+                sb.AppendLine(" See `processed/water.md` for detail.");
                 sb.AppendLine();
             }
 
@@ -1140,16 +1154,21 @@ namespace CityStoryMod.Storyteller
         internal static string ClassifyTerrain(double stdev, double relief, double mean)
         {
             string baseLabel;
-            if (stdev < 30) baseLabel = "Mostly flat";
-            else if (stdev < 70) baseLabel = "Gently rolling";
-            else if (stdev < 150) baseLabel = "Hilly";
-            else baseLabel = "Rugged / mountainous";
+            bool flatish;
+            if (stdev < 30) { baseLabel = "Mostly flat"; flatish = true; }
+            else if (stdev < 70) { baseLabel = "Gently rolling"; flatish = true; }
+            else if (stdev < 150) { baseLabel = "Hilly"; flatish = false; }
+            else { baseLabel = "Rugged / mountainous"; flatish = false; }
 
-            // Tag a localized high point when relief is large but stdev is
-            // small — i.e. there's an outlier peak rising above an
-            // otherwise-flat map. Threshold: max-min > 5× stdev means the
+            // The "localized high point" suffix only earns its keep when the
+            // base label is flatish — it tells the reader "the bulk of the
+            // map is flat, but one corner spikes." When the base label is
+            // already Hilly / Rugged, an outlier peak is implied by the
+            // category and adding the suffix reads as redundant ("Hilly,
+            // with a localized high point" → of course there are high
+            // points, it's hilly). Threshold: max-min > 5× stdev means the
             // extreme pixel is well outside the bulk distribution.
-            if (stdev > 0 && relief > 5 * stdev) baseLabel += ", with a localized high point";
+            if (flatish && stdev > 0 && relief > 5 * stdev) baseLabel += ", with a localized high point";
             return baseLabel + ".";
         }
 
@@ -1174,9 +1193,11 @@ namespace CityStoryMod.Storyteller
             long argMaxIdx = -1;
             double sum = 0;
             long waterCells = 0;
-            // [NW, NE, SW, SE] water cell counts.
+            long coastlineCells = 0;
+            // [NW, NE, SW, SE] water and coastline cell counts.
             long[] qCounts = new long[4];
             long[] qTotals = new long[4];
+            long[] qCoast = new long[4];
             int[] pixels = grid.Pixels;
             int nodata = grid.NoData;
             int w = grid.Width, h = grid.Height;
@@ -1196,14 +1217,54 @@ namespace CityStoryMod.Storyteller
                 sum += v;
                 waterCells++;
                 qCounts[qIdx]++;
+
+                // Coastline: this is a water cell; if any of its 4-neighbors
+                // is out-of-bounds or land (NoData or <= 0), it's on the
+                // shore. Map-edge water cells are treated as coastline too —
+                // the lake / sea ends at the map boundary from the player's
+                // perspective.
+                bool onCoast = IsLandOrOutOfBounds(pixels, nodata, w, h, row - 1, col)
+                            || IsLandOrOutOfBounds(pixels, nodata, w, h, row + 1, col)
+                            || IsLandOrOutOfBounds(pixels, nodata, w, h, row, col - 1)
+                            || IsLandOrOutOfBounds(pixels, nodata, w, h, row, col + 1);
+                if (onCoast)
+                {
+                    coastlineCells++;
+                    qCoast[qIdx]++;
+                }
             }
             long totalCells = (long)w * h;
             double percent = totalCells == 0 ? 0 : (100.0 * waterCells / totalCells);
             double meanDepth = waterCells == 0 ? 0 : sum / waterCells;
 
             double[] qPercent = new double[4];
+            double[] qCoastPercent = new double[4];
             for (int i = 0; i < 4; i++)
+            {
                 qPercent[i] = qTotals[i] == 0 ? 0 : 100.0 * qCounts[i] / qTotals[i];
+                qCoastPercent[i] = coastlineCells == 0 ? 0 : 100.0 * qCoast[i] / coastlineCells;
+            }
+
+            // Length: each coastline cell contributes one "edge" of its
+            // pixel-side to the shore. Approximating each cell as one
+            // pixel-side underestimates slightly (a cell with two land
+            // neighbors really has two shore edges) but is honest enough
+            // for an order-of-magnitude figure. Use the mean of scaleX and
+            // scaleY when both are known; fall back to 0 (rendered as
+            // "unknown") when the TIFF didn't carry pixel scale.
+            double pixelM = 0;
+            if (grid.ScaleX > 0 && grid.ScaleY > 0) pixelM = (grid.ScaleX + grid.ScaleY) / 2.0;
+            else if (grid.ScaleX > 0) pixelM = grid.ScaleX;
+            else if (grid.ScaleY > 0) pixelM = grid.ScaleY;
+            double coastlineLengthM = coastlineCells * pixelM;
+
+            // Shoreline complexity. A circular lake has coast-cell-count
+            // proportional to its circumference; this ratio normalizes by
+            // the circumference of a circle with the same area. Values near
+            // 1 = round, smooth basin. Values >> 1 = convoluted / fragmented.
+            double shorelineRatio = waterCells > 0
+                ? coastlineCells / Math.Sqrt(waterCells * Math.PI)
+                : 0;
 
             var summary = new RasterSummary
             {
@@ -1216,53 +1277,88 @@ namespace CityStoryMod.Storyteller
                 WaterCells = waterCells,
                 PercentWater = percent,
                 WaterQuadrantPercent = qPercent,
+                CoastlineCells = coastlineCells,
+                CoastlineLengthM = coastlineLengthM,
+                CoastlineQuadrantPercent = qCoastPercent,
+                ShorelineRatio = shorelineRatio,
                 HighQuadrant = QuadrantOf(argMaxIdx, w, h),  // deepest cell's quadrant
-                Reading = ClassifyWater(percent, qPercent),
+                Reading = ClassifyWater(percent, qPercent, shorelineRatio),
             };
 
             File.WriteAllText(Path.Combine(processedDir, "water.md"), RenderWaterMarkdown(summary));
             return summary;
         }
 
-        // English label for water setting. Considers both total coverage AND
-        // distribution across quadrants — Glenville at 36% would be "heavy
-        // water" by the old single-number test, but the image shows it's
-        // really a complex lake district, not a coastal city. The
-        // distribution check distinguishes "single concentrated body" from
-        // "spread across multiple basins".
-        internal static string ClassifyWater(double percent, double[] qPercent)
+        // True when (row, col) is outside the grid or is a land cell. Used
+        // by the coastline pass to determine whether a water cell sits on
+        // the shore.
+        static bool IsLandOrOutOfBounds(int[] pixels, int nodata, int w, int h, int row, int col)
+        {
+            if (row < 0 || row >= h || col < 0 || col >= w) return true;
+            int v = pixels[row * w + col];
+            return v == nodata || v <= 0;
+        }
+
+        // English label for water setting. Combines three signals:
+        //   percent     — total water coverage. Drives the magnitude band.
+        //   qPercent[]  — per-quadrant water %. Tells us WHERE the water sits.
+        //   complexity  — shoreline ratio from Cycle 3c. ~1 = round basin;
+        //                 > 4 = fragmented coastline (rivers / islands / inlets).
+        //
+        // The previous version called any fragmented mid-water map an
+        // "archipelago," which overstated for valley + coastal maps like
+        // Mayworth (31% water + river system + southern coast). The reformed
+        // classifier gates "archipelago" on water >= 50% AND fragmented AND
+        // uniform distribution; everything else gets a more honest label
+        // (river system / lake / coast / scattered ponds).
+        internal static string ClassifyWater(double percent, double[] qPercent, double complexity)
         {
             if (percent < 1) return "Essentially landlocked.";
 
-            // Quadrants with at least 10% water count as "having significant
-            // water". If all four do, water is everywhere; if only one, it's
-            // concentrated.
-            int significantQuadrants = 0;
-            for (int i = 0; i < qPercent.Length; i++)
-                if (qPercent[i] >= 10) significantQuadrants++;
-
-            string distribution;
-            if (significantQuadrants <= 1) distribution = "concentrated on one side of the map";
-            else if (significantQuadrants == 2) distribution = "split between two sides";
-            else if (significantQuadrants == 3) distribution = "spread across most of the map";
-            else distribution = "covering most of the map";
-
+            // Magnitude band — total coverage.
             string magnitude;
+            bool dominant = false;
             if (percent < 10) magnitude = "Modest water";
             else if (percent < 25) magnitude = "Significant water";
             else if (percent < 50) magnitude = "Heavy water";
-            else magnitude = "Water-dominated map";
+            else { magnitude = "Water-dominated map"; dominant = true; }
 
-            // Specific shape hints: 25-50% spread across 3+ quadrants reads
-            // as a lake district / archipelago; concentrated water reads as
-            // coast or single lake.
+            // Shape — what KIND of water arrangement, driven by total coverage
+            // and shoreline complexity. "Archipelago" requires the map to be
+            // mostly water; below that threshold a fragmented shoreline
+            // reads as "river system" or "scattered lakes."
+            bool fragmented = complexity > 4;
             string shape;
-            if (percent >= 25 && significantQuadrants >= 3) shape = " — complex lake district or archipelago";
-            else if (percent >= 25 && significantQuadrants <= 2) shape = " — coastline or large concentrated lake";
-            else if (percent >= 10 && significantQuadrants >= 3) shape = " — distributed across multiple bodies";
-            else shape = "";
+            if (dominant && fragmented) shape = "archipelago or island chain";
+            else if (dominant) shape = "open sea or vast single body";
+            else if (percent >= 25 && fragmented) shape = "river system threaded with lakes";
+            else if (percent >= 25) shape = "major lake or coastline";
+            else if (percent >= 10 && fragmented) shape = "rivers and scattered ponds";
+            else if (percent >= 10) shape = "river or modest lake";
+            else if (fragmented) shape = "small scattered water features";
+            else shape = "minor water feature";
 
-            return $"{magnitude}, {distribution}{shape}.";
+            // Location — where the water sits. Uses quadrant share spread
+            // (max - min) rather than a hard threshold count: a 14-pt spread
+            // is "evenly distributed"; > 15 means there's a dominant quadrant
+            // worth naming.
+            string[] qLabels = { "NW", "NE", "SW", "SE" };
+            double maxQ = qPercent[0], minQ = qPercent[0];
+            int maxIdx = 0;
+            for (int i = 1; i < qPercent.Length; i++)
+            {
+                if (qPercent[i] > maxQ) { maxQ = qPercent[i]; maxIdx = i; }
+                if (qPercent[i] < minQ) minQ = qPercent[i];
+            }
+            int significantQuadrants = qPercent.Count(p => p >= 10);
+
+            string location;
+            if (significantQuadrants <= 1) location = $"concentrated in the {qLabels[maxIdx]}";
+            else if (significantQuadrants == 2) location = "split between two sides";
+            else if (maxQ - minQ < 15) location = "evenly across the map";
+            else location = $"weighted to the {qLabels[maxIdx]}";
+
+            return $"{magnitude} — {shape}, {location}.";
         }
 
         internal static string RenderElevationMarkdown(RasterSummary s)
@@ -1304,6 +1400,8 @@ namespace CityStoryMod.Storyteller
             sb.Append($" {s.PercentWater.ToString("F0", ci)}% of the map is water.");
             if (s.WaterCells > 0 && s.HighQuadrant != null)
                 sb.Append($" Deepest water in the {s.HighQuadrant} ({s.Max} m).");
+            if (s.CoastlineLengthM > 0)
+                sb.Append($" Approximate shoreline {(s.CoastlineLengthM / 1000.0).ToString("F1", ci)} km.");
             sb.AppendLine();
             sb.AppendLine();
 
@@ -1315,6 +1413,27 @@ namespace CityStoryMod.Storyteller
                 sb.AppendLine("Per-quadrant water coverage:");
                 for (int i = 0; i < 4; i++)
                     sb.AppendLine($"- {labels[i]}: {s.WaterQuadrantPercent[i].ToString("F0", ci)}%");
+                sb.AppendLine();
+            }
+
+            // Coastline: show where the shore lives and how convoluted it is.
+            // Shoreline ratio interpretation: ~1 = a single round basin; 2-4
+            // = irregular coast with bays / peninsulas; > 4 = archipelago or
+            // heavily fragmented water.
+            if (s.CoastlineCells > 0)
+            {
+                sb.AppendLine("Coastline:");
+                sb.AppendLine($"- Cells on the water-land boundary: {s.CoastlineCells:N0}");
+                if (s.CoastlineLengthM > 0)
+                    sb.AppendLine($"- Approximate length: {(s.CoastlineLengthM / 1000.0).ToString("F1", ci)} km");
+                sb.AppendLine($"- Shoreline complexity index: {s.ShorelineRatio.ToString("F1", ci)} (~1 = round basin, > 4 = fragmented / archipelago)");
+                if (s.CoastlineQuadrantPercent != null && s.CoastlineQuadrantPercent.Length == 4)
+                {
+                    string[] labels = { "NW", "NE", "SW", "SE" };
+                    string distribution = string.Join(", ", System.Linq.Enumerable.Range(0, 4)
+                        .Select(i => $"{labels[i]} {s.CoastlineQuadrantPercent[i].ToString("F0", ci)}%"));
+                    sb.AppendLine($"- Distribution: {distribution}");
+                }
                 sb.AppendLine();
             }
 

@@ -11,24 +11,35 @@ The city folder itself already exists — the CityStoryMod scaffolded it (with t
 
 Read `canon/city.md`. If it's still the unmodified template stub (no chosen name, no chosen founding history), proceed. If it already has a real name and history filled in, stop and ask the player whether they want to overwrite — `/new-city` is meant to run once per city, before any session.
 
-**2. Ask for the map screenshot.**
+**2. Read the spatial data the mod already collected.**
 
-Ask the player for the absolute path to a Cities: Skylines 2 map screenshot of the starting tile (typically under `E:\Steam\userdata\...\screenshots\`). The save may still have a placeholder name in-game at this point — that's fine, the rename happens at the end. Confirm the file exists before continuing. If they don't have one yet, stop and tell them to capture one and re-run — do not proceed without the map.
+The CityStoryMod has already exported a first snapshot and (if Carto is installed) the Carto chunks by the time the player invokes `/new-city`. Pull all of it before asking anything:
 
-**3. Read the map.**
+- Latest `snapshots/snapshot-*.json` — extract the `map.*` block: `name`, `theme`, `latitude`, `longitude`, `temperature_min_c`, `temperature_max_c`, `cloudiness`, `precipitation`. These are *world-identity* signals — latitude+temperature alone tell you whether this is boreal, temperate, or Mediterranean.
+- `carto/processed/index.md` — footprint dimensions (km × km), road-network summary, and the named-decoration list (cairns, ruins, monuments). The decoration repeats often carry implicit history.
+- `carto/processed/elevation.md` — the one-line terrain reading ("Mostly flat", "Hilly, with a localized high point", "Rugged / mountainous"), relief, and which quadrant holds the high ground.
+- `carto/processed/water.md` — the one-line water reading ("Heavy water — complex lake district", "Essentially landlocked", etc.) and per-quadrant water share.
+- `carto/processed/roads.md` — the named highways/bridges. These carry the regional flavor (a "Cypress Highway" + "Mulberry Lane" + four named bridges over water suggests an established settler-era road system).
 
-Use the `Read` tool on the screenshot path to view the image. Note the dominant geographic features in 2–4 lines (internal — don't dump to the player yet):
-- Coastline, lake, river, mountain range, plains, peninsula, island, valley.
-- Approximate orientation of major water and terrain.
-- Anything distinctive (a sharp bend in a river, a sheltered bay, a ridge cutting the map in two).
+Synthesize these into 4–6 lines internally — don't dump to the player yet. This is the **primary** geographic anchor. If any chunk is missing (older save, Carto not installed), proceed with whatever is available; the snapshot at minimum always exists.
 
-These features anchor every subsequent suggestion. **No magic, no fantasy geography** — describe what's actually visible.
+**3. Ask for the map screenshot — secondary visual signal.**
+
+First, check `maps/` in the city folder. If a file matching `*-overview.*` already exists (the mod may have captured it automatically), use it without prompting the player. Otherwise, ask the player for the absolute path to a Cities: Skylines 2 map screenshot of the starting tile (typically under `E:\Steam\userdata\...\screenshots\`). The save may still have a placeholder name in-game at this point — that's fine, the rename happens at the end. Confirm the file exists before continuing. If they don't have one, skip this step and proceed using only the spatial data from step 2.
+
+Use the `Read` tool on the screenshot to add what the rasters and vectors don't capture:
+- Biome look (forest density, vegetation type, urban vs. wild texture).
+- Specific landform shapes (cliff faces, peninsula curves, river bends, bay outlines).
+- Anything that contradicts the spatial data — if it does, **trust your eyes over the classifier** and note the disagreement.
+
+These visual signals augment but don't replace step 2. **No magic, no fantasy geography** — describe what's actually present in the data and image.
 
 **4. Suggest a name.**
 
-Generate **4 plausible North American city names** grounded in the visible geography and consistent with the style guide:
-- Real-sounding: founders' surnames, geographic features, Indigenous place names (used respectfully and grounded in the actual region the geography suggests), industrial-heritage names. No joke names.
+Generate **4 plausible North American city names** grounded in the spatial data (step 2) and the screenshot (step 3), consistent with the style guide:
+- Real-sounding: founders' surnames, geographic features, Indigenous place names (used respectfully and grounded in the actual region the geography + climate suggests — a 62°N boreal lake district reads Minnesota / Manitoba / interior BC; a 37°N Mediterranean archipelago reads coastal California / Pacific Mexico), industrial-heritage names. No joke names.
 - Each name implies a slightly different founding story — give the player meaningful range (e.g. an old port name vs. a mill-town name vs. a railroad-junction name vs. an agricultural-county-seat name).
+- Lean on signals only the data carries — the CS2 map name itself (e.g. "Archipelago", "Lakeland") is *not* canon and the player won't see it in-world, but it's a hint for the kind of story the map was designed to support.
 
 Present via `AskUserQuestion` (single-select). For each option:
 - `label`: the proposed name.
@@ -36,10 +47,10 @@ Present via `AskUserQuestion` (single-select). For each option:
 
 **5. Suggest a founding history.**
 
-After the player picks a name, generate **3–4 founding-history options** grounded in *both* the chosen name and the map. Each option is a one-paragraph capsule covering:
-- Founding era and original economic engine (rail, mill, port, mine, military base, agricultural hub, etc.).
+After the player picks a name, generate **3–4 founding-history options** grounded in the chosen name, the spatial data, and the screenshot. Each option is a one-paragraph capsule covering:
+- Founding era and original economic engine (rail, mill, port, mine, military base, agricultural hub, etc.). The data narrows this: a 62°N boreal lake district + many named bridges suggests Great Lakes / Canadian Shield logging or iron range; a 37°N Mediterranean archipelago suggests California coastal trade or Pacific shipping; a 191 m relief mostly-flat plain near a river suggests Midwestern rail-junction agriculture.
 - What the 20th century did to it (boom, decline, suburban sprawl, deindustrialization, reinvention).
-- The region of North America the geography places it in (Great Lakes, Pacific Northwest, Sunbelt, Atlantic Coast, Prairies, Appalachia, etc.).
+- The region of North America the climate + terrain place it in (Great Lakes, Pacific Northwest, Sunbelt, Atlantic Coast, Prairies, Appalachia, California, etc.) — pin this to the latitude / temperature signals from step 2.
 
 Vary the options meaningfully — don't propose four flavors of the same rust-belt story. At least one option should suggest a non-industrial origin if the geography allows it.
 

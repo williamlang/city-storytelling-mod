@@ -141,6 +141,92 @@ namespace CityStoryMod.Tests
             }
         }
 
+        // Like BuildCartoTiff but also writes the ModelPixelScale tag (33550)
+        // — 3 doubles, stored out-of-line because they don't fit in the
+        // 4-byte inline value slot. Carto always emits this tag for raster
+        // outputs; the reader uses it to convert pixel counts to meters.
+        static byte[] BuildCartoTiffWithScale(int width, int height, short[] pixels, double scaleX, double scaleY)
+        {
+            int bps = width * 2;
+            int stripsStart = 8;
+            int offsetsTableStart = stripsStart + bps * height;
+            int byteCountsTableStart = offsetsTableStart + 4 * height;
+            // Pixel scale doubles live just before the IFD.
+            int scaleStart = byteCountsTableStart + 4 * height;
+            int ifdStart = scaleStart + 8 * 3;
+
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
+
+            bw.Write((byte)'I'); bw.Write((byte)'I');
+            bw.Write((short)42);
+            bw.Write(ifdStart);
+
+            for (int i = 0; i < pixels.Length; i++) bw.Write(pixels[i]);
+            for (int i = 0; i < height; i++) bw.Write(stripsStart + i * bps);
+            for (int i = 0; i < height; i++) bw.Write(bps);
+
+            // ModelPixelScale: [scaleX, scaleY, scaleZ=0].
+            bw.Write(scaleX);
+            bw.Write(scaleY);
+            bw.Write(0d);
+
+            void WriteEntry(ushort tag, ushort type, uint count, uint valueOrOffset)
+            {
+                bw.Write(tag); bw.Write(type); bw.Write(count); bw.Write(valueOrOffset);
+            }
+            // 8 entries — same as before plus ModelPixelScale.
+            ushort entryCount = 8;
+            bw.Write(entryCount);
+            WriteEntry(256, 3, 1, (uint)width);
+            WriteEntry(257, 3, 1, (uint)height);
+            WriteEntry(258, 3, 1, 16);
+            WriteEntry(259, 3, 1, 1);
+            WriteEntry(273, 4, (uint)height, (uint)offsetsTableStart);
+            WriteEntry(277, 3, 1, 1);
+            WriteEntry(339, 3, 1, 2);
+            WriteEntry(33550, 12, 3, (uint)scaleStart);  // DOUBLE × 3
+            bw.Write(0u);
+
+            return ms.ToArray();
+        }
+
+        [Fact]
+        public void Read_parses_ModelPixelScale_into_grid_scales()
+        {
+            byte[] tif = BuildCartoTiffWithScale(4, 4, new short[16], 7.5, 7.5);
+            string tmp = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllBytes(tmp, tif);
+                var grid = GeoTiffReader.Read(tmp);
+                grid.ScaleX.Should().BeApproximately(7.5, 0.0001);
+                grid.ScaleY.Should().BeApproximately(7.5, 0.0001);
+            }
+            finally
+            {
+                File.Delete(tmp);
+            }
+        }
+
+        [Fact]
+        public void Read_leaves_scales_zero_when_ModelPixelScale_absent()
+        {
+            byte[] tif = BuildCartoTiff(3, 2, new short[] { 0, 0, 0, 0, 0, 0 });
+            string tmp = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllBytes(tmp, tif);
+                var grid = GeoTiffReader.Read(tmp);
+                grid.ScaleX.Should().Be(0);
+                grid.ScaleY.Should().Be(0);
+            }
+            finally
+            {
+                File.Delete(tmp);
+            }
+        }
+
         [Fact]
         public void Read_throws_on_unsupported_bit_depth()
         {
