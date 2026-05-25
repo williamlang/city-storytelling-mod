@@ -15,11 +15,22 @@ Data flow:
 
 ```
 [CS2 playthrough]
-      │  (ExportSystem queries ECS)
+      │  (ExportSystem queries ECS;
+      │   CartoBridge calls peer mod for spatial data)
       ▼
 [ModsData/CityStoryMod/<city-slug>/]
-   ├── snapshots/      ← snapshot-<ts>.json files
-   ├── canon/          ← founding facts, premise
+   ├── snapshots/      ← snapshot-<ts>.json — city stats, demographics, diff,
+   │                     and a `map.*` block (name, theme, latitude, climate)
+   ├── carto/          ← spatial geography, refreshed on demand
+   │   ├── GeoJSON/    ← raw Carto output (districts, buildings, roads, map tiles)
+   │   ├── GeoTIFF/    ← raw rasters (Elevation.tif, Depth.tif)
+   │   └── processed/  ← storyteller-facing markdown chunks (what the agent reads)
+   │       ├── index.md
+   │       ├── elevation.md  ← terrain reading + stdev/relief/quadrants
+   │       ├── water.md      ← water reading + coastline length + complexity
+   │       ├── roads.md
+   │       └── districts/<slug>.md
+   ├── canon/          ← founding facts, premise (agent infers from spatial data)
    ├── characters/     ← people the agent has invented or the player named
    ├── companies/      ← businesses, employers
    ├── places/         ← neighborhoods, landmarks
@@ -106,21 +117,34 @@ Key game namespaces:
 
 ## Output format
 
-JSON, one snapshot per export. Each city gets its own folder, scaffolded from `template/` on first export:
+Two surfaces, both file-based. The agent's working directory is the city folder; the mod and the agent communicate purely through files there.
 
-```
-%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<city-slug>\
-  ├── snapshots\
-  │   └── snapshot-<unix-ts>.json
-  ├── canon\, characters\, companies\, places\, factions\, events\, sessions\, stories\, secrets\
-  ├── CLAUDE.md           (copied from template/)
-  ├── .claude\commands\   (copied from template/.claude/commands/)
-  └── settings.json
-```
+### Surface 1 — JSON snapshots
 
-The agent's working directory is the city folder itself. The mod and the agent communicate purely through files in that folder — there is no separate ingestion step.
+`snapshots/snapshot-<unix-ts>.json`, one per export. Full state (not deltas — the agent diffs successive files). Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md); currently **v0.3**. Carries:
 
-Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md). The shape is finalized; fields fill in iteratively. The agent diffs successive snapshots to detect changes between sessions.
+- **`map.*`** — world identity: `name`, `theme`, `latitude`, `longitude`, `temperature_min_c`/`max_c`, `cloudiness`, `precipitation`, `ground_water_availability`, `surface_water_availability`. Pulled reflectively from `Game.UI.MapMetadataSystem`. Drives the storyteller's founding-prompt sense of climate and region.
+- **`city.*`** — population, money, happiness, health, tourists, attractiveness, danger, milestone, XP, zone counts by type.
+- **`outside_connections[]`, `water_sources[]`** — named entities Carto doesn't surface.
+- **`district_zones`** — per-district building-type counts (subdivision-growth signal).
+- **`demographics`** — citizen flag counts, average wellbeing/health, employed count.
+- **`diff`** — change-since-last-snapshot block: zone deltas, district zone deltas, named-building churn (added/removed/renamed), outside-connection and water-source diffs, in-game days elapsed.
+
+### Surface 2 — Carto spatial chunks
+
+`carto/processed/` markdown produced by `CartoProcessor` from Carto's raw GeoJSON + GeoTIFF output. The agent reads these chunks, not the raw files:
+
+- **`index.md`** — city spatial index. Map footprint (size in km), districts table, adjacency graph, road network summary, terrain + water teaser lines, named-buildings + decoration list (deduped with `× N` counts).
+- **`elevation.md`** — terrain reading driven by stdev/relief: *Mostly flat / Gently rolling / Hilly / Rugged*, with a "localized high point" suffix when an outlier peak sits on an otherwise flat map. Includes range, mean, stdev, highest/lowest quadrant.
+- **`water.md`** — water reading driven by coverage + complexity + distribution: archipelago vs. river system vs. major lake vs. open sea, with a named dominant quadrant when one stands out. Includes coastline cells, approximate shoreline length (km), shoreline complexity index (~1 = round basin, > 4 = fragmented), and per-quadrant coastline distribution.
+- **`roads.md`** — named roads/bridges with combined length and per-segment breakdown.
+- **`districts/<slug>.md`** — per-district detail: centroid, bounding box, area, neighbors with compass directions, Carto's resident/employee counts, named buildings inside.
+
+The raw `GeoJSON/` and `GeoTIFF/` files stay on disk as the source of truth, but the agent ignores them — the processed chunks are the contract.
+
+### First-Carto-on-new-city auto-trigger
+
+When `ExportSystem` detects a new city (no `<cityDir>/carto/` directory yet) on a save-load edge, it auto-fires `RequestCartoExport` so the storyteller has spatial context the first time the player opens Claude Code against the dir. Without this the agent's first run would see only the snapshot's empty city stats. See `ExportSystem.Export` for the latch.
 
 ## Testing
 
@@ -138,29 +162,32 @@ If a useful helper sits inside a `GameSystemBase` subclass, extract it to its ow
 
 ## Status
 
-Working scaffold with a minimum-viable population export.
+Working end-to-end. Schema **v0.3**. Mod and agent together produce a city's founding context on the first export of a fresh save.
 
 What's wired up:
 - Project structure: `CityStoryMod.csproj`, `Mod.cs` (IMod), `Settings.cs`, `Properties/PublishConfiguration.xml`, `Systems/ExportSystem.cs`. Builds via the Paradox toolchain; auto-deploys to the local Mods folder.
-- Mod registers a Settings sidebar entry in CS2 Options with localized labels (en-US). Settings: `ExportEnabled` toggle, `IntervalMinutes` slider (0–60, where 0 disables the interval trigger).
-- `ExportSystem : GameSystemBase` is registered into `SystemUpdatePhase.UIUpdate` (ticks regardless of game pause, so wall-clock + hotkey both work even when the player has paused the sim).
-- Two triggers fire `Export()`: **Ctrl+Shift+E** hotkey, plus a wall-clock interval (default 5 min, configurable).
-- Export writes a **v0.1 schema** snapshot to `ModsData\CityStoryMod\<city-slug>\snapshots\snapshot-<unix-ts>.json`. The per-city folder is scaffolded from `template/` on first export. Schema contract lives in [`docs/snapshot-schema.md`](docs/snapshot-schema.md).
+- Mod registers a Settings sidebar entry in CS2 Options with localized labels (en-US). Settings: `ExportEnabled` toggle, `IntervalMinutes` slider, `AutoSessionStartOnSaveLoad`.
+- `ExportSystem : GameSystemBase` registered into `SystemUpdatePhase.UIUpdate` (ticks under pause). Three export triggers: **Ctrl+Shift+E** hotkey, wall-clock interval, and save-load edge.
+- **Snapshot v0.3** — emits `map.*`, `city.*`, `demographics`, `district_zones`, `outside_connections`, `water_sources`, and a full `diff` block. See [`docs/snapshot-schema.md`](docs/snapshot-schema.md).
+- **Carto peer-mod integration** via `Storyteller/CartoBridge.cs` (reflective, no compile-time dependency on Carto.dll). Requests `Area + Building + Network + Raster` systems → `District + Building + MapTile + Road` features, plus `Elevation + Depth` GeoTIFFs.
+- **`CartoProcessor`** turns the raw GeoJSON + GeoTIFF output into storyteller-facing markdown chunks (see "Output format" above). Includes a minimal Int16 TIFF reader (`Storyteller/GeoTiffReader.cs`), stdev-based terrain classifier, coastline extractor with complexity ratio, and per-quadrant water/coast distribution analysis.
+- **First-Carto-on-new-city auto-trigger.** New city detected via `!Directory.Exists("<dir>/carto")` on the save-load edge → `RequestCartoExport()` queued before the agent ever opens the folder.
+- **Founding flow on the agent side** — `template/.claude/commands/new-city.md` reads spatial data first (snapshot.map.* + carto/processed/*) as the primary anchor, with the screenshot as a secondary visual signal. Premise inference in `template/CLAUDE.md` lists spatial signals as priority-2 inputs.
+- **Storyteller window UI** with map/canon/refresh-map buttons (`Systems/PromptUISystem.cs` + `UI/src/mods/storyteller/`).
 
 Known caveats / open questions:
 - **Raw `Citizen` count ≠ HUD population.** The `Citizen` ECS component is broader: includes tourists, commuters, and transient/spawning entities. For a sensor mod this is more useful than the HUD number, but it surprises people who compare. Will refine to break down resident vs. tourist vs. commuter when expanding the schema.
 - **Localization is en-US only** and lives in code (`Locale.cs`) rather than embedded JSON. Fine for one language; if we add more, switch to embedded `Locale/*.json` like Carto.
+- **Carto's elevation TIFF doesn't render visibly in basic image viewers** (data sits in a narrow band of Int16 with no NoData mask, so naive viewers see all-black). Use QGIS/GIMP/IrfanView for visual inspection. Data is correct; only display is affected.
+- **Carto exports map-generated default roads** alongside player-laid ones in `Network_Centerline.json`. Even t=0 cities show ~270+ road segments. The storyteller shouldn't treat every named road as player intent — highways especially are almost always map-generated.
 
 ## Next-up tasks
 
-The schema is sketched. Filling it in field-by-field, easiest first (full order in [`docs/snapshot-schema.md`](docs/snapshot-schema.md)):
-
-1. **`city.name` / `city.money` / `city.happiness`** — cheap city-stat queries.
-2. **`captured_at_ingame`** — hook `TimeSystem` for the in-game date.
-3. **`districts[]`** (id, name, population) — biggest jump toward per-place storytelling.
-4. **Richer demographics + `citizens_sample[]`** — needs additional citizen-state components (`HouseholdMember`, `Resident`, etc.); find via SceneExplorer or ILSpy on `Game.dll`.
-5. **`companies[]`** — name, sector, headcount.
-6. **Companies expansion.** Currently surfaced only inline on renamed buildings. Stand-alone `companies[]` array would let the agent track businesses without a custom-named storefront as the anchor.
+1. **`citizens_sample[]`** — sample N citizens, pull name (via `Lifepath`), age, education, wealth, home, work. Highest-leverage remaining snapshot field.
+2. **Service coverage gaps** — depends on building service-area data; advanced. Drives the "where political pressure originates" storytelling.
+3. **`companies[]` standalone array** — name, sector, headcount. Today only surfaced via renamed buildings.
+4. **Auto-screenshot capture** — mod calls into the CS2 / Unity rendering API to grab the in-game map view on the new-city auto-trigger, drops it into `maps/<slug>-overview.png`. Removes `/new-city`'s "give me a screenshot path" step. `/new-city` already auto-detects `maps/*-overview.*` if present.
+5. **Classifier tuning as more maps surface** — the terrain and water classifiers are calibrated against Lakeland (boreal lake district), Archipelago (heavy archipelago), and Verdant Vale (mid-water valley). Edge cases (Sunbelt desert, alpine, dense coastal) will need threshold tweaks.
 
 ## Gotchas
 
