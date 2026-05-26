@@ -117,16 +117,17 @@ namespace CityStoryMod.Systems
 
         void OnAssistantTurn(AssistantTurn turn)
         {
-            // Token totals always accumulate. We now surface tool-use turns
-            // too — when the model emits no prose but called tools, show a
-            // condensed `[tool calls: Read(canon/city.md), ...]` line so the
-            // player can see what the agent is doing. Previously these turns
-            // were dropped entirely, which hid agent activity the player
-            // wanted to see (especially during multi-step commands like
-            // /new-city). Visibility is "for now" — a future pane could
-            // separate tool chatter from prose without the prefix hack.
+            // Token totals always accumulate. Prose turns always go to chat.
+            // Tool-use-only turns (no TextContent, just tool calls) only
+            // surface when the ShowToolCalls debug setting is on — they're
+            // valuable for debugging an agent that isn't behaving, but
+            // noise during normal play.
             string text = turn.TextContent;
-            if (string.IsNullOrWhiteSpace(text) && turn.ToolCalls != null && turn.ToolCalls.Count > 0)
+            bool showToolCalls = Mod.Settings != null && Mod.Settings.ShowToolCalls;
+            if (string.IsNullOrWhiteSpace(text)
+                && showToolCalls
+                && turn.ToolCalls != null
+                && turn.ToolCalls.Count > 0)
             {
                 text = FormatToolCallsLine(turn.ToolCalls);
             }
@@ -142,14 +143,16 @@ namespace CityStoryMod.Systems
             _pendingUsageUpdate = true;
         }
 
-        // Tool results now surface into the chat (used to be dropped). Each
-        // result becomes its own assistant-role message, prefixed with
-        // `[tool result]` or `[tool error]` and truncated past a generous
-        // cap so multi-KB file reads don't blow up the conversation view.
-        // The full content is still in the mod log.
+        // Tool results route to the chat only when ShowToolCalls is on.
+        // Off by default — file-read output and grep dumps are debugging
+        // noise for the normal player. When on, each result becomes its own
+        // chat row prefixed with `[tool result]` (or `[tool error]`) and
+        // truncated past a generous cap. Full content is in the mod log
+        // either way.
         void OnToolResults(IReadOnlyList<ToolResult> results)
         {
             if (results == null) return;
+            if (Mod.Settings == null || !Mod.Settings.ShowToolCalls) return;
             foreach (ToolResult r in results)
             {
                 string content = r.Content ?? "";
@@ -373,6 +376,10 @@ namespace CityStoryMod.Systems
         public void ClearChatHistory(string reason)
         {
             try { Mod.Storyteller?.Cancel(); } catch { /* cancel best-effort */ }
+            // Reset CLI session continuity too — clearing the chat means the
+            // visible history is wiped, and we don't want the next CLI run
+            // to `--continue` into context the player no longer sees.
+            try { Mod.Storyteller?.ResetCliSession(); } catch { /* best-effort */ }
             OnClearMessages();
             _log.Info($"Cleared Ghostwriter chat history ({reason}).");
         }

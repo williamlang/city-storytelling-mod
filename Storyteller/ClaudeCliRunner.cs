@@ -67,11 +67,22 @@ namespace CityStoryMod.Storyteller
             string resultSubtype = null;
             string resultErrors = null;
 
+            // `--continue` resumes the most recent session in the cwd so a
+            // follow-up message picks up context from prior turns. Only pass
+            // it after at least one successful run in this session — Claude
+            // Code errors when --continue can't find a session to resume.
+            // The flag lives on StorytellerDispatcher and gets reset on
+            // chat-clear / save-load / rename.
+            bool shouldContinue = dispatcher != null && dispatcher.ShouldContinueCliSession;
+            string args = shouldContinue
+                ? "-p --continue --output-format stream-json --verbose"
+                : "-p --output-format stream-json --verbose";
+
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
                 // --verbose is required to use stream-json with -p.
-                Arguments = "-p --output-format stream-json --verbose",
+                Arguments = args,
                 WorkingDirectory = cityDir,
                 UseShellExecute = false,
                 RedirectStandardInput = true,
@@ -83,7 +94,7 @@ namespace CityStoryMod.Storyteller
                 // set the stream's encoding after Start() instead.
             };
 
-            log.Info($"ClaudeCliRunner: spawning `{exe} -p --output-format stream-json --verbose` (cwd={cityDir}) prompt='{prompt}'");
+            log.Info($"ClaudeCliRunner: spawning `{exe} {args}` (cwd={cityDir}) prompt='{prompt}'");
 
             using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
             {
@@ -194,6 +205,14 @@ namespace CityStoryMod.Storyteller
                 }
 
                 log.Info($"ClaudeCliRunner: exit=0, files touched={filesWritten}, tokens in={finalUsage.InputTokens} out={finalUsage.OutputTokens}.");
+
+                // Mark the CLI session active so the next run resumes via
+                // `--continue`. Set only after a clean exit + success
+                // subtype, so a botched first run doesn't poison the next
+                // attempt (--continue would try to resume a session that
+                // doesn't exist and Claude Code would error).
+                dispatcher?.MarkCliSessionStarted();
+
                 return RunResult.Ok(filesWritten).WithUsage(finalUsage);
             }
         }

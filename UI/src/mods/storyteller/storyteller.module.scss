@@ -74,20 +74,45 @@
 }
 
 // Body is a two-column split: chat/prompt/actions on the left, info pane
-// on the right. Sidebar is intentionally empty for now — meant to grow
-// into a live snapshot / canon info surface.
+// on the right.
+//
+// All flex-grow values below are written long-form (flex-grow / flex-shrink
+// / flex-basis) instead of the `flex: 1` shorthand because CS2's Coherent
+// UI parses the shorthand inconsistently — it sometimes leaves flex-basis
+// at `auto` when the spec calls for `0`. With basis `auto` the element
+// starts at its content's natural height in a flex column and the chat
+// never reaches the panel's full height when resized. Setting all three
+// properties explicitly sidesteps the shorthand parser entirely.
+//
+// `align-items: stretch` on .body and `align-self: stretch` on .main are
+// also explicit; Coherent's per-element global flex defaults don't reliably
+// include stretch.
 .body {
   display: flex;
-  flex: 1;
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  flex-direction: row;
+  align-items: stretch;
   min-height: 0;
 }
 
 .main {
-  flex: 1;
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  align-self: stretch;
+  // Flex column for chat / prompt / footer.
+  //
+  // Coherent doesn't support `display: grid` — it falls back to `display:
+  // block` silently, collapsing the layout entirely. So we have to make
+  // flex work. The trick is pinning the prompt and footer with explicit
+  // `flex: 0 0 auto` so their hypothetical basis doesn't claim space that
+  // chat would otherwise grow into. See UI/coherent.md.
   display: flex;
   flex-direction: column;
-  gap: 8rem;
   min-width: 0;
+  min-height: 0;
 }
 
 .side {
@@ -519,12 +544,20 @@
 }
 
 .chat {
-  // flex: 1 fills whatever vertical space the panel offers after the header,
-  // banner (if any), textarea, and footer. No max-height — when the player
-  // resizes the panel taller, the chat grows to match instead of leaving a
-  // gap. min-height keeps it usable when the panel is shrunk down.
-  flex: 1;
-  min-height: 80rem;
+  // Fill the leftover vertical space in .main. Explicit flex longhand
+  // because Coherent misparses the `flex: 1` shorthand (leaves flex-basis
+  // at auto).
+  //
+  // min-height: 0 (NOT 80rem) — Coherent's flex layout double-counts
+  // min-height on flex-grow items: chat receives its grown share AND
+  // Coherent reserves a min-height-worth of space elsewhere in the
+  // column, leaving an empty gap below the footer exactly equal to
+  // min-height. The usability floor for "chat shouldn't collapse to
+  // nothing" is enforced upstream via the panel's min-height instead.
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-height: 0;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -702,6 +735,10 @@
   resize: vertical;
   min-height: 56rem;
   box-sizing: border-box;
+  // Coherent ignores `gap` on flex containers (see UI/coherent.md), so the
+  // 8rem column gap on .main does nothing — pin spacing here as a margin.
+  // Matches the same workaround used on .footer below.
+  margin-top: 8rem;
 
   &:disabled {
     opacity: 0.6;

@@ -5,6 +5,8 @@ Library/
 Temp/
 # Claude Code session state (root only — template/.claude/ ships with the mod)
 /.claude/
+# Local dev scratch (CDP bridge for Coherent UI debugging, etc.) — not part of the mod
+/.dev/
 .vs/
 .vscode/*
 !.vscode/settings.json

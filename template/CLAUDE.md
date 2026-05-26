@@ -71,6 +71,18 @@ The same rule extends to the rest of the ghostwriter's machinery — slash comma
 
 **Internal vs external is a hard line.** I freely reason about file paths in my own working — tool calls, sequence planning, where to read next. None of that reaches the chat. The mod's tool layer is invisible to the player by design (see issue [1be8e1e](../1be8e1e)); the rule here is keeping prose clean to match.
 
+## Asking the player questions
+
+**Hard rule: never call `AskUserQuestion`.** The storyteller window runs me through `claude -p` in print mode, where the interactive question tool is unavailable — calling it produces a visible `[tool error]` row in the chat and forces a clumsy recovery. Always phrase choices as plain prose instead and let the player reply in their next message; the CLI runs with `--continue` so the follow-up resumes this session's context naturally.
+
+Format guidance:
+- Lead with the question in one sentence so the player knows what they're answering.
+- Number multi-choice options (1, 2, 3, …) so the player can reply with just a number — fast on a phone-keyboard-equivalent like the in-game textarea.
+- For each option, one short line: a name or label, then a phrase of context. Don't dump a paragraph per option unless the choice really needs it.
+- End with a short cue like "Reply with the number, or describe your own."
+
+Multi-question flows (e.g. `/new-city` asks for a name, a founding history, then a couple of toggles) are fine — just ask them sequentially across submissions. Don't try to batch unrelated questions into one turn.
+
 ## On opening a conversation
 
 The player's canonical session opener is **`/session-start`** — see `.claude/commands/session-start.md`. They should normally invoke it at the top of a play session.

@@ -49,12 +49,12 @@ The lack of an `ended_real_date:` field is what marks this session as open. `/se
 
 **3. Report** in 3–5 lines: where the city was left off, and any scaffold gaps you found.
 
-**4. Ask** what the player wants to do this session, using `AskUserQuestion`. Offer these options:
+**4. Ask** what the player wants to do this session, in plain prose. One sentence lead, then numbered options. If step 1 detected a scaffold gap, mark the backfill option recommended and put it first:
 
-- **Check for new scaffold features** — run the **Scaffold arrival** backfill defined in CLAUDE.md (infer premise if missing, generate arcs and secrets silently). *Lead with this option and mark it Recommended if step 1 detected any gap.*
-- **Pre-session planning** — propose 1–3 narratively-motivated gameplay objectives based on active agendas, recent events, and any live secrets.
-- **Post-session recording** — the player is about to describe what happened in-game; record it into `sessions/` and propagate consequences.
-- **Continuity question / lookup** — answer a question about who runs what, prior deals, etc.
-- **Generate a new entity** — invent a character, company, faction, or place hooked into existing canon.
+1. **Check for new scaffold features** — run the Scaffold arrival backfill (infer premise if missing, generate arcs and secrets silently).
+2. **Pre-session planning** — propose 1–3 narratively-motivated gameplay objectives based on active agendas, recent events, and live secrets.
+3. **Post-session recording** — the player is about to describe what happened in-game; record it into the session log and propagate consequences.
+4. **Continuity question / lookup** — answer a question about who runs what, prior deals, etc.
+5. **Generate a new entity** — invent a character, company, faction, or place hooked into existing canon.
 
-Only after the player picks do you start the corresponding workflow.
+End with "Reply with the number, or describe what you want." Wait for the player's reply, then start the corresponding workflow.

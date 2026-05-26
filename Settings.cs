@@ -74,6 +74,12 @@ namespace CityStoryMod
         [SettingsUIHidden]
         public bool IsCliProvider => Provider == LlmProvider.AnthropicCLI;
 
+        // When on, the storyteller chat surfaces each tool call the model
+        // makes and each tool result that comes back — read/write/grep/etc.
+        // — as their own chat rows. Useful for debugging an agent that
+        // isn't behaving, noisy for normal play. Default off.
+        public bool ShowToolCalls { get; set; }
+
         [SettingsUIButton]
         public bool OpenStoryFolder
         {
@@ -88,6 +94,7 @@ namespace CityStoryMod
             ApiKey = "";
             Model = "claude-opus-4-7";
             OllamaBaseUrl = "http://localhost:11434";
+            ShowToolCalls = false;
         }
 
         static void RevealStoryFolder()

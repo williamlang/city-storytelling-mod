@@ -54,6 +54,10 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OllamaBaseUrl]"] =
                 "Base URL of your Ollama server. Defaults to http://localhost:11434. Change if you run Ollama on a different host or port (e.g. a beefier home server). Only used when Provider is Ollama.",
 
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ShowToolCalls]"] = "Show tool calls in Ghostwriter output",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ShowToolCalls]"] =
+                "When on, every file the Ghostwriter reads or writes, every grep, and every tool result appear as their own rows in the chat. Useful for debugging an agent that isn't behaving. Off by default — leaves the chat clean for normal play.",
+
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] = "Open story folder",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.OpenStoryFolder]"] =
                 "Opens the current city's story folder in your file explorer (or the parent folder if no city has been exported yet). Read snapshots, canon, and session files there.",

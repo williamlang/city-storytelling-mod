@@ -29,6 +29,27 @@ namespace CityStoryMod.Storyteller
         DateTime _runStartedAtUtc;
         Conversation _activeConversation;
 
+        // CLI session continuity. ClaudeCliRunner reads this before each run:
+        // when true, it appends `--continue` so Claude Code resumes the most
+        // recent session in the city dir (preserving conversation context
+        // across submissions). Set true after the first successful CLI run;
+        // reset on save-load edge / city rename / explicit chat-clear so the
+        // next run starts fresh and we don't `--continue` into a session that
+        // referenced a different city or a wiped chat.
+        //
+        // Only meaningful for the CLI provider — API providers (Anthropic,
+        // OpenAI, Gemini, Ollama) maintain their own conversation history
+        // inside the Conversation object.
+        bool _cliSessionActive;
+        public bool ShouldContinueCliSession => _cliSessionActive;
+        public void MarkCliSessionStarted() => _cliSessionActive = true;
+        public void ResetCliSession()
+        {
+            if (!_cliSessionActive) return;
+            _cliSessionActive = false;
+            _log.Info("Storyteller CLI session continuity reset.");
+        }
+
         public StorytellerDispatcher(ILog log) { _log = log; }
 
         public bool IsRunning => _running != null && !_running.IsCompleted;

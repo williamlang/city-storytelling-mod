@@ -41,9 +41,7 @@ Generate **4 plausible North American city names** grounded in the spatial data 
 - Each name implies a slightly different founding story — give the player meaningful range (e.g. an old port name vs. a mill-town name vs. a railroad-junction name vs. an agricultural-county-seat name).
 - Lean on signals only the data carries — the CS2 map name itself (e.g. "Archipelago", "Lakeland") is *not* canon and the player won't see it in-world, but it's a hint for the kind of story the map was designed to support.
 
-Present via `AskUserQuestion` (single-select). For each option:
-- `label`: the proposed name.
-- `description`: one short phrase on what kind of place this name suggests (e.g. "Old Great Lakes shipping port — Scottish-immigrant founders").
+Present in plain prose (see "Asking the player questions" in CLAUDE.md). One sentence lead, four numbered options. Each option: the proposed name, then a phrase of context (e.g. "Old Great Lakes shipping port — Scottish-immigrant founders"). End with "Reply with the number, or propose your own." Wait for the player's reply in their next message before continuing.
 
 **5. Suggest a founding history.**
 
@@ -54,9 +52,7 @@ After the player picks a name, generate **3–4 founding-history options** groun
 
 Vary the options meaningfully — don't propose four flavors of the same rust-belt story. At least one option should suggest a non-industrial origin if the geography allows it.
 
-Present via `AskUserQuestion` (single-select). For each option:
-- `label`: short tag (e.g. "Old timber port, postwar decline", "Railroad junction, agricultural seat").
-- `description`: the founding-history paragraph itself (kept tight — 2–3 sentences).
+Present in plain prose. One sentence lead, 3–4 numbered options. Each option: a short tag (e.g. "Old timber port, postwar decline", "Railroad junction, agricultural seat"), then the founding-history paragraph itself on the next line (kept tight — 2–3 sentences). End with "Reply with the number, or describe your own founding story." Wait for the player's reply before continuing.
 
 **6. Save the map.**
 
@@ -79,19 +75,23 @@ Do **not** invent characters, companies, places, factions, or events here. This 
 
 **8. Ask about feature toggles.**
 
-Batch both toggles into a single `AskUserQuestion` call (one tool call, two questions):
+Ask the two toggle questions in one plain-prose message — short intros, numbered choices, with the recommended option clearly marked. Format roughly:
 
-**Question 1** (header: "Secrets", single-select):
-- Question: "Should hidden secrets be visible to you, or kept blind until they break in-story?"
-- Option 1 (Recommended) — label: `Hidden (Recommended)`, description: "Secrets are generated and shape the story, but you never see their contents in chat until they're revealed in-world. Closer to playing blind."
-- Option 2 — label: `Shown`, description: "Same secrets get generated, but I freely show their contents to you. Author / editor mode — you see the engine driving the city."
+```
+Two quick toggles before I close this out.
 
-**Question 2** (header: "Level-up stories", single-select):
-- Question: "When the city levels up in-game (milestone advance + funds influx), should I generate a storyline about how the new money gets spent and fought over?"
-- Option 1 (Recommended) — label: `Enabled (Recommended)`, description: "On every milestone advance detected in the snapshot diff, I write an event + short narrative piece (council transcript, news clipping, developer memo) about who pushed for what spending, who lost out, the political fallout. Surfaces the story behind a moment the game otherwise treats silently."
-- Option 2 — label: `Disabled`, description: "Milestone advances are still recorded in the session log, but I don't generate dedicated stories. Use this if the storyline noise feels like too much."
+**Secrets.** Should hidden secrets be visible to you, or kept blind until they break in-story?
+  1. **Hidden** (recommended) — secrets are generated and shape the story, but you never see their contents in chat until they're revealed in-world. Closer to playing blind.
+  2. **Shown** — same secrets get generated, but I freely show their contents to you. Author / editor mode.
 
-Map the answers to settings:
+**Level-up stories.** When the city levels up in-game (milestone advance + funds influx), should I write a storyline about how the new money gets spent and fought over?
+  1. **Enabled** (recommended) — on every milestone advance I write an event + short narrative piece (council transcript, news clipping, developer memo) about who pushed for what, who lost out, the political fallout.
+  2. **Disabled** — milestone advances are still logged in the session, but no dedicated stories.
+
+Reply with two numbers (e.g. "1, 1") or pick each by name.
+```
+
+Wait for the player's reply, then map the answers to settings:
 - `secrets_visibility`: `"hidden"` or `"shown"`
 - `levelup_storylines`: `true` (Enabled) or `false` (Disabled)
 

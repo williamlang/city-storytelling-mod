@@ -29,9 +29,7 @@ If a focus is supplied on the line above (a topic, character, faction, place, or
 
 Vary the mix. Don't make all five real-estate plays. Cover at least three of: a new company opening, a farm or extractive operation, a real-estate development, a civic project (school, hospital, library, transit), a service expansion, a faction power move, a scandal-driven decision. At least one option must have meaningful opposition. *(If a focus argument was supplied, this variety rule relaxes — the focus replaces the mix as the unifying constraint, but the "meaningful opposition" requirement still holds.)*
 
-**3. Present** via `AskUserQuestion` (single-select). For each option:
-- `label`: the title (short).
-- `description`: in-game action + a "Pushed by X · opposed by Y" line.
+**3. Present** in plain prose. One sentence lead, numbered options (3–5). For each option: the short title, then the in-game action, then a "Pushed by X · opposed by Y" line. End with "Reply with the number, or describe a different direction." Wait for the player's reply before continuing.
 
 **4. After the player picks**, write the setup canon for the chosen option only:
 - Create new entities (character, company, faction, place) using the templates in CLAUDE.md if any are required. Ask about an `arc:` for any new major entity.
