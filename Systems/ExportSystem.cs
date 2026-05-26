@@ -591,8 +591,17 @@ namespace CityStoryMod.Systems
             // City-rename detection. If the last exported folder for this
             // session is a different slug than the current one — and the
             // current cityName isn't an empty placeholder — the player just
-            // renamed their save. Migrate the previous folder forward so all
-            // their canon, snapshots, and Carto state follow the rename.
+            // renamed their save in-game. Migrate the previous folder
+            // forward so all their canon, snapshots, and Carto state follow
+            // the rename.
+            //
+            // Gate on `triggeredBy != "save-load"`: a save-load edge with a
+            // different city name means the player loaded a DIFFERENT save
+            // (started a new city, switched playthroughs, etc.), not that
+            // they renamed the current one. Migrating in that case would
+            // wrongly move the previous city's folder to the new save's slug.
+            // In-game renames only happen mid-session, where no save-load
+            // edge fires between exports.
             //
             // Conflict policy: only Directory.Move when the target doesn't
             // exist. If it does, surface an alert and leave both folders
@@ -601,7 +610,9 @@ namespace CityStoryMod.Systems
             string previousDir = Mod.LastExportedCityDir;
             bool sameDir = !string.IsNullOrEmpty(previousDir)
                            && string.Equals(previousDir, dir, StringComparison.OrdinalIgnoreCase);
-            if (!sameDir
+            bool isSaveLoadEdge = triggeredBy == "save-load";
+            if (!isSaveLoadEdge
+                && !sameDir
                 && !string.IsNullOrEmpty(previousDir)
                 && Directory.Exists(previousDir)
                 && !string.IsNullOrWhiteSpace(cityName))
