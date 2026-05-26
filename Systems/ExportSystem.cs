@@ -124,6 +124,13 @@ namespace CityStoryMod.Systems
         // EntityManager) are main-thread-only, so true async isn't possible.
         string _pendingCartoDir;
 
+        // Pending screenshot capture, queued by the first-Carto-on-new-city
+        // auto-trigger. We defer by a few ticks so the storyteller window's
+        // map-button click handler (if it was the trigger) has time to close
+        // its UI flash, and so the snapshot+Carto pipeline runs first.
+        string _pendingScreenshotPath;
+        int _pendingScreenshotTicksRemaining;
+
         PromptUISystem _promptUI;
 
         protected override void OnCreate()
@@ -258,6 +265,24 @@ namespace CityStoryMod.Systems
             // null check) and decoupled from the export gates below.
             Mod.Storyteller?.Tick();
 
+            // Drain a pending screenshot capture. Counts down a few ticks so
+            // any UI flash from a button-click trigger has time to settle
+            // before we grab the framebuffer. Failure is non-fatal — we just
+            // log and move on; the spatial data is the primary anchor.
+            if (_pendingScreenshotPath != null)
+            {
+                if (_pendingScreenshotTicksRemaining > 0)
+                {
+                    _pendingScreenshotTicksRemaining--;
+                }
+                else
+                {
+                    string path = _pendingScreenshotPath;
+                    _pendingScreenshotPath = null;
+                    ScreenshotCapture.TryCaptureToFile(path, _log);
+                }
+            }
+
             // Drain any Carto export deferred from the previous tick. The deferral
             // gives Coherent UI one frame to paint the cartoExporting indicator
             // before this synchronous call blocks the main thread.
@@ -336,9 +361,27 @@ namespace CityStoryMod.Systems
             bool saveLoadTransition = !_inGameLastTick;
             _inGameLastTick = true;
 
+            // Clear the Ghostwriter chat history on the save-load edge. A
+            // fresh save (or a new city) is a different city's context — the
+            // previous conversation would reference state that no longer
+            // applies. Wipe once per edge.
+            if (saveLoadTransition)
+            {
+                _promptUI?.ClearChatHistory("save-load edge");
+            }
+
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             bool hotkey = Input.GetKeyDown(KeyCode.E) && ctrl && shift;
+
+            // Ctrl+Shift+M — manual map screenshot. Captures whatever's on
+            // screen right now (so the player should set up the map view
+            // first, hide UI, then press). Independent of the export
+            // pipeline so it doesn't force a snapshot.
+            if (Input.GetKeyDown(KeyCode.M) && ctrl && shift)
+            {
+                RequestScreenshotCaptureForCurrentCity(ticksToDelay: 1);
+            }
             bool intervalElapsed = settings.IntervalMinutes > 0
                 && (DateTime.UtcNow - _lastExportUtc).TotalMinutes >= settings.IntervalMinutes;
 
@@ -545,13 +588,63 @@ namespace CityStoryMod.Systems
             string citySlug = TextUtils.Slugify(cityName) ?? "_unnamed";
             string dir = Path.Combine(EnvPath.kUserDataPath, "ModsData", nameof(CityStoryMod), citySlug);
 
+            // City-rename detection. If the last exported folder for this
+            // session is a different slug than the current one — and the
+            // current cityName isn't an empty placeholder — the player just
+            // renamed their save. Migrate the previous folder forward so all
+            // their canon, snapshots, and Carto state follow the rename.
+            //
+            // Conflict policy: only Directory.Move when the target doesn't
+            // exist. If it does, surface an alert and leave both folders
+            // alone — better to surprise the player with a warning than
+            // silently destroy a folder's worth of canon.
+            string previousDir = Mod.LastExportedCityDir;
+            bool sameDir = !string.IsNullOrEmpty(previousDir)
+                           && string.Equals(previousDir, dir, StringComparison.OrdinalIgnoreCase);
+            if (!sameDir
+                && !string.IsNullOrEmpty(previousDir)
+                && Directory.Exists(previousDir)
+                && !string.IsNullOrWhiteSpace(cityName))
+            {
+                if (!Directory.Exists(dir))
+                {
+                    try
+                    {
+                        Directory.Move(previousDir, dir);
+                        _log.Info($"City renamed: migrated {previousDir} → {dir}");
+                        _promptUI?.ClearChatHistory($"city renamed to '{cityName}'");
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Error(ex, $"City rename migration {previousDir} → {dir} failed.");
+                        _promptUI?.ShowAlert(
+                            $"Could not migrate '{Path.GetFileName(previousDir)}' to '{citySlug}' after rename: {ex.Message}. "
+                            + "Previous content remains in the old folder; new exports will land in the new one.");
+                    }
+                }
+                else
+                {
+                    string previousName = Path.GetFileName(previousDir);
+                    _log.Warn(
+                        $"City renamed to '{cityName}' but target folder '{dir}' already exists. "
+                        + "Skipping migration to avoid clobbering existing content. "
+                        + $"Previous folder: {previousDir}");
+                    _promptUI?.ShowAlert(
+                        $"City renamed to '{cityName}', but a folder for that name already exists. "
+                        + $"Previous content stays at '{previousName}/'; new exports will land in '{citySlug}/'. "
+                        + "Merge or delete one of the folders manually to consolidate.");
+                }
+            }
+
             // New-city detection: latched BEFORE we create the city dir. The
             // first Carto export will create <dir>/carto/ as a side-effect, so
             // checking the carto subdir's absence here gives "first export
             // for this city" semantics that survive across CS2 launches.
             // Latch is consumed below to gate the auto-Carto trigger so a
             // mid-session interval export of an already-scaffolded city
-            // doesn't re-trigger Carto.
+            // doesn't re-trigger Carto. Evaluated AFTER the rename migration
+            // so a migrated city (which has a populated carto/ from before)
+            // doesn't trigger the new-city flow.
             bool isNewCity = !Directory.Exists(Path.Combine(dir, "carto"));
 
             Directory.CreateDirectory(dir);
@@ -591,6 +684,15 @@ namespace CityStoryMod.Systems
             {
                 _log.Info("New city detected (no carto/ dir yet); auto-triggering first Carto export for storytelling context.");
                 RequestCartoExport();
+
+                // Note: screenshot capture is NOT auto-triggered on the
+                // save-load edge — the framebuffer isn't reliably rendered
+                // yet during CS2's loading-screen-to-game transition
+                // (EncodeToPNG throws "texture is invalid"). The screenshot
+                // is instead captured when the player submits /new-city in
+                // the storyteller window (see PromptUISystem.OnSubmitPrompt),
+                // by which point the game is fully rendered and the player
+                // has deliberately framed the moment.
             }
 
             // Otherwise: Carto exports are NOT on the snapshot cadence —
@@ -598,6 +700,41 @@ namespace CityStoryMod.Systems
             // linearly with city size. The player triggers refreshes manually
             // via the Refresh map button in the storyteller window. See
             // RequestCartoExport.
+        }
+
+        // Queue a screenshot capture for a near-future tick. Used both by
+        // the new-city auto-trigger and the manual "Capture map" UI button /
+        // hotkey. Overwrites any pending capture; only one queued at a time.
+        // ticksToDelay: how many OnUpdate ticks to wait before grabbing the
+        // framebuffer — gives any UI flash from the trigger source time to
+        // settle. 0 = capture next tick; 4 = capture five ticks from now.
+        public void RequestScreenshotCapture(string cityDir, string citySlug, int ticksToDelay)
+        {
+            string path = ScreenshotCapture.GetOverviewPath(cityDir, citySlug);
+            if (path == null)
+            {
+                _log.Warn("RequestScreenshotCapture: missing cityDir or citySlug; skipping.");
+                return;
+            }
+            _pendingScreenshotPath = path;
+            _pendingScreenshotTicksRemaining = Math.Max(0, ticksToDelay);
+            _log.Info($"RequestScreenshotCapture: queued for {_pendingScreenshotTicksRemaining + 1} tick(s) → {path}");
+        }
+
+        // Convenience overload for triggers that don't have the city slug
+        // handy — derives both from the last-exported directory. Returns
+        // false if no city has been exported yet this session.
+        public bool RequestScreenshotCaptureForCurrentCity(int ticksToDelay = 4)
+        {
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir))
+            {
+                _log.Info("RequestScreenshotCaptureForCurrentCity: no city dir known yet; skipping.");
+                return false;
+            }
+            string slug = Path.GetFileName(cityDir);
+            RequestScreenshotCapture(cityDir, slug, ticksToDelay);
+            return true;
         }
 
         // User-triggered Carto export. Called from PromptUISystem when the

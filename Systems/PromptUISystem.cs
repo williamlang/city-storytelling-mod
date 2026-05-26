@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using CityStoryMod.Storyteller;
 using Colossal.Logging;
 using Colossal.UI.Binding;
@@ -116,30 +117,99 @@ namespace CityStoryMod.Systems
 
         void OnAssistantTurn(AssistantTurn turn)
         {
-            // Token totals always accumulate; only enqueue a chat row when the
-            // model actually said something. Pure tool-use turns (no prose)
-            // would otherwise show as empty bubbles and the file-system tool
-            // chatter is noise the player doesn't care about.
-            if (!string.IsNullOrWhiteSpace(turn.TextContent))
+            // Token totals always accumulate. We now surface tool-use turns
+            // too — when the model emits no prose but called tools, show a
+            // condensed `[tool calls: Read(canon/city.md), ...]` line so the
+            // player can see what the agent is doing. Previously these turns
+            // were dropped entirely, which hid agent activity the player
+            // wanted to see (especially during multi-step commands like
+            // /new-city). Visibility is "for now" — a future pane could
+            // separate tool chatter from prose without the prefix hack.
+            string text = turn.TextContent;
+            if (string.IsNullOrWhiteSpace(text) && turn.ToolCalls != null && turn.ToolCalls.Count > 0)
+            {
+                text = FormatToolCallsLine(turn.ToolCalls);
+            }
+            if (!string.IsNullOrWhiteSpace(text))
             {
                 _pendingMessages.Enqueue(new ChatMessage
                 {
                     role = "assistant",
-                    text = turn.TextContent,
+                    text = text,
                 });
             }
             _liveUsage = _liveUsage + turn.Usage;
             _pendingUsageUpdate = true;
         }
 
-        // Tool results are intentionally not surfaced into the chat — they
-        // contain glob output, file contents, and other internal tool chatter
-        // that clutters the conversation view. The event handler is kept (and
-        // wired) so future features (e.g. a separate "activity" pane) can
-        // observe them without a Conversation refactor.
+        // Tool results now surface into the chat (used to be dropped). Each
+        // result becomes its own assistant-role message, prefixed with
+        // `[tool result]` or `[tool error]` and truncated past a generous
+        // cap so multi-KB file reads don't blow up the conversation view.
+        // The full content is still in the mod log.
         void OnToolResults(IReadOnlyList<ToolResult> results)
         {
+            if (results == null) return;
+            foreach (ToolResult r in results)
+            {
+                string content = r.Content ?? "";
+                const int MAX = 1500;
+                if (content.Length > MAX)
+                {
+                    content = content.Substring(0, MAX) + $"\n… [+{content.Length - MAX:N0} chars truncated]";
+                }
+                string prefix = r.IsError ? "[tool error]" : "[tool result]";
+                _pendingMessages.Enqueue(new ChatMessage
+                {
+                    role = "assistant",
+                    text = $"{prefix} {content}",
+                });
+            }
         }
+
+        // Builds a one-line summary of a tool-use-only assistant turn —
+        // e.g. "[tool calls: Read(canon/city.md), Read(snapshots/snapshot-…)]".
+        // Picks the most identifying input field per tool (file_path, path,
+        // command, pattern, url) and truncates anything long.
+        static string FormatToolCallsLine(IReadOnlyList<ToolCall> calls)
+        {
+            var sb = new StringBuilder();
+            sb.Append("[tool calls: ");
+            for (int i = 0; i < calls.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                ToolCall c = calls[i];
+                sb.Append(c.Name ?? "?");
+                string summary = SummarizeToolInput(c.Input);
+                if (!string.IsNullOrEmpty(summary))
+                {
+                    sb.Append('(');
+                    sb.Append(summary);
+                    sb.Append(')');
+                }
+            }
+            sb.Append(']');
+            return sb.ToString();
+        }
+
+        static string SummarizeToolInput(JObject input)
+        {
+            if (input == null) return "";
+            foreach (string key in _toolInputIdentifyingKeys)
+            {
+                JToken v = input[key];
+                if (v == null || v.Type == JTokenType.Null) continue;
+                string s = v.ToString();
+                if (s.Length > 80) s = s.Substring(0, 77) + "…";
+                return s;
+            }
+            return "";
+        }
+
+        static readonly string[] _toolInputIdentifyingKeys =
+        {
+            "file_path", "path", "command", "pattern", "url",
+        };
 
         void OnRunFinished(RunResult result)
         {
@@ -251,6 +321,17 @@ namespace CityStoryMod.Systems
                 _log.Info($"OnSubmitPrompt: /{command} triggers a Carto refresh.");
                 World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
             }
+            // /new-city also captures a map screenshot. Better trigger than
+            // the save-load edge — at /new-city time the framebuffer is
+            // fully rendered (the player has been looking at the city) and
+            // the player chose this moment deliberately. Queued with a tiny
+            // delay so the storyteller window's submit-handler UI flash
+            // doesn't dominate the shot.
+            if (command == "new-city")
+            {
+                _log.Info("OnSubmitPrompt: /new-city triggers a map screenshot capture.");
+                World.GetExistingSystemManaged<ExportSystem>()?.RequestScreenshotCaptureForCurrentCity(ticksToDelay: 2);
+            }
 
             StorytellerDispatcher.RunFunc runFunc = StorytellerRun.BuildFreeForm(prompt, _log);
             dispatcher.Start("ui-prompt", runFunc);
@@ -282,6 +363,29 @@ namespace CityStoryMod.Systems
             _liveUsage = default;
             _tokenSummaryBinding.Update("");
             _lastErrorBinding.Update("");
+        }
+
+        // Public entry point for outside-the-UI callers. Cancels any
+        // in-flight run before wiping history so we don't leave a pending
+        // response that would land into the cleared transcript. Used by
+        // ExportSystem on the save-load edge: a fresh save = a different
+        // city's worth of context, so the chat history should reset.
+        public void ClearChatHistory(string reason)
+        {
+            try { Mod.Storyteller?.Cancel(); } catch { /* cancel best-effort */ }
+            OnClearMessages();
+            _log.Info($"Cleared Ghostwriter chat history ({reason}).");
+        }
+
+        // Surface a non-fatal warning in the storyteller window's error slot.
+        // Used by ExportSystem to flag conflicts (e.g. city rename collision)
+        // that the player should know about but that don't stop the mod from
+        // continuing. Cleared by the player's next "clear chat" action.
+        public void ShowAlert(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+            _lastErrorBinding.Update(message);
+            _log.Warn($"UI alert: {message}");
         }
 
         void OnRefreshGeography()

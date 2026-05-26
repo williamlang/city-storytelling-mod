@@ -58,6 +58,12 @@
     <Reference Include="UnityEngine.InputLegacyModule">
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.ScreenCaptureModule">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Unity.Entities">
       <Private>False</Private>
     </Reference>
