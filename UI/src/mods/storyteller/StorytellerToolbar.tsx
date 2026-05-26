@@ -4,6 +4,7 @@ import { useValue } from "cs2/api";
 import storytellerIcon from "../../assets/storyteller_icon.svg";
 import styles from "./storyteller.module.scss";
 import { useDrag } from "./useDrag";
+import { useResize } from "./useResize";
 import {
   messagesBinding,
   isRunningBinding,
@@ -138,11 +139,23 @@ export function StorytellerToolbar() {
 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { pos: panelPos, beginDrag } = useDrag();
+  // Panel resize. Minimum is enough to leave the canon sidebar (240rem) and
+  // a usable chat column (~280rem) breathing room; maximum is the viewport
+  // so the player can't lose the panel off-screen. The hook clamps on every
+  // move so values stay in range even on fast drags.
+  const { size: panelSize, beginResize } = useResize({
+    minW: 560, minH: 320,
+    maxW: typeof window !== "undefined" ? window.innerWidth - 40 : 1920,
+    maxH: typeof window !== "undefined" ? window.innerHeight - 40 : 1080,
+  });
   const onHeaderMouseDown = (e: React.MouseEvent) => {
     // Skip when the click is on the close button so its handler fires
     // without starting a drag.
     if ((e.target as HTMLElement).closest(`.${styles.close}`)) return;
     beginDrag(e, panelRef.current);
+  };
+  const onResizeHandleMouseDown = (e: React.MouseEvent) => {
+    beginResize(e, panelRef.current);
   };
 
   const canSubmit = draft.trim().length > 0 && !isRunning;
@@ -174,9 +187,21 @@ export function StorytellerToolbar() {
     return out;
   }, [canonTree]);
 
-  const panelStyle = panelPos
-    ? { top: `${panelPos.y}px`, left: `${panelPos.x}px` }
-    : undefined;
+  // Merge drag position and resize size into a single inline style. Either
+  // can be set independently; if both are null we let the CSS defaults apply.
+  const panelStyle: React.CSSProperties | undefined =
+    (panelPos || panelSize)
+      ? {
+          ...(panelPos ? { top: `${panelPos.y}px`, left: `${panelPos.x}px` } : {}),
+          ...(panelSize
+            ? {
+                width: `${panelSize.w}px`,
+                height: `${panelSize.h}px`,
+                maxHeight: `${panelSize.h}px`,
+              }
+            : {}),
+        }
+      : undefined;
 
   return (
     <>
@@ -304,6 +329,14 @@ export function StorytellerToolbar() {
               onCloseAll={closeAllFiles}
             />
           </div>
+
+          {/* SE-corner resize grip. Sized large enough to grab without
+              squinting; styled as a quiet diagonal hatch in the corner. */}
+          <div
+            className={styles.resizeHandle}
+            onMouseDown={onResizeHandleMouseDown}
+            title="Drag to resize"
+          />
         </div>
       )}
 

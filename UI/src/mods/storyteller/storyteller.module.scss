@@ -8,11 +8,16 @@
 .panel {
   // Drops below the toolbar icon row. Fixed position so it floats above the
   // game world; the exact top offset matches the toolbar row height plus a gap.
+  //
+  // Width / max-height are defaults — the resize handle overrides via inline
+  // style. min-width matches the useResize hook's clamp so the panel can't
+  // shrink narrower than the canon sidebar plus a usable chat column.
   position: fixed;
   top: 60rem;
   left: 8rem;
   z-index: 9000;
   width: 640rem;
+  min-width: 560rem;
   max-height: 560rem;
   background: rgba(15, 22, 30, 0.96);
   color: #e6eef7;
@@ -23,6 +28,49 @@
   flex-direction: column;
   padding: 10rem 12rem;
   gap: 8rem;
+}
+
+// Triangular grip in the panel's SE corner. Sized for easy mouse targeting;
+// styled as a subtle diagonal stripe so it reads as a handle without being
+// loud. Positioned absolutely inside the panel — the panel is already
+// `position: fixed`, so absolute children anchor to it.
+.resizeHandle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18rem;
+  height: 18rem;
+  cursor: nwse-resize;
+  // Two diagonal stripes painted via background-image so we don't need
+  // to ship an SVG for a corner grip.
+  background-image: linear-gradient(
+    135deg,
+    transparent 0,
+    transparent 33%,
+    rgba(255, 255, 255, 0.25) 33%,
+    rgba(255, 255, 255, 0.25) 45%,
+    transparent 45%,
+    transparent 60%,
+    rgba(255, 255, 255, 0.25) 60%,
+    rgba(255, 255, 255, 0.25) 72%,
+    transparent 72%
+  );
+  border-bottom-right-radius: 8rem;
+
+  &:hover {
+    background-image: linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 33%,
+      rgba(91, 179, 230, 0.7) 33%,
+      rgba(91, 179, 230, 0.7) 45%,
+      transparent 45%,
+      transparent 60%,
+      rgba(91, 179, 230, 0.7) 60%,
+      rgba(91, 179, 230, 0.7) 72%,
+      transparent 72%
+    );
+  }
 }
 
 // Body is a two-column split: chat/prompt/actions on the left, info pane
@@ -471,9 +519,12 @@
 }
 
 .chat {
+  // flex: 1 fills whatever vertical space the panel offers after the header,
+  // banner (if any), textarea, and footer. No max-height — when the player
+  // resizes the panel taller, the chat grows to match instead of leaving a
+  // gap. min-height keeps it usable when the panel is shrunk down.
   flex: 1;
   min-height: 80rem;
-  max-height: 360rem;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
