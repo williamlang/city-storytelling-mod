@@ -47,11 +47,27 @@ namespace CityStoryMod.Systems
         ValueBinding<bool> _cartoAvailableBinding;
 
         // Caches the city dir we last scanned for slash commands / canon
-        // tree. OnUpdate rescans (cheap directory listing) when
-        // LastExportedCityDir changes, so the lists refresh as soon as the
-        // first export happens for a city — no file watcher needed.
+        // tree. OnUpdate rescans when LastExportedCityDir changes, when a
+        // run finishes, or when the canon-dir FileSystemWatcher reports a
+        // change (out-of-band edits via file system / editor / another tool).
         string _commandsScannedCityDir;
         string _canonScannedCityDir;
+
+        // FileSystemWatcher for live canon-tree refresh (issue #23). Watches
+        // the city dir's canon-managed subtrees and flips a UTC-tick stamp
+        // whenever something changes. OnUpdate debounces — a single re-scan
+        // fires once the burst has been quiet for at least DebounceMs, so
+        // the agent writing 10 files in one tool call produces one refresh,
+        // not ten. The watcher is recreated when LastExportedCityDir
+        // changes (city rename, save switch); disposed on system destroy.
+        //
+        // The watcher event runs on a thread-pool thread; only the
+        // Interlocked-protected stamp is touched there. All ECS / binding
+        // work stays on the main thread inside OnUpdate.
+        FileSystemWatcher _canonWatcher;
+        string _canonWatcherCityDir;
+        long _canonChangeTicksUtc;
+        const int CanonRescanDebounceMs = 250;
 
         readonly List<ChatMessage> _messages = new List<ChatMessage>();
         readonly ConcurrentQueue<ChatMessage> _pendingMessages = new ConcurrentQueue<ChatMessage>();
@@ -214,6 +230,112 @@ namespace CityStoryMod.Systems
             "file_path", "path", "command", "pattern", "url",
         };
 
+        // Subdirs of the city dir whose contents drive the canon browser.
+        // Used by the FileSystemWatcher filter and by ScanCanonTree.
+        static readonly string[] _canonManagedSubdirs =
+        {
+            "canon", "characters", "companies", "places",
+            "factions", "events", "sessions", "stories", "secrets",
+        };
+
+        // Spins up a fresh FileSystemWatcher pointed at the city dir's
+        // canon-managed subtrees, replacing any prior watcher. Called when
+        // LastExportedCityDir changes — including on dispose-with-null to
+        // tear down cleanly. Safe to call from main thread only.
+        void RebuildCanonWatcher(string cityDir)
+        {
+            // Tear down the old watcher first; its events fire on a thread
+            // pool worker so disposal cleanly cancels pending dispatches.
+            if (_canonWatcher != null)
+            {
+                try
+                {
+                    _canonWatcher.EnableRaisingEvents = false;
+                    _canonWatcher.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"Disposing previous canon watcher failed: {ex.Message}");
+                }
+                _canonWatcher = null;
+            }
+
+            if (string.IsNullOrEmpty(cityDir) || !Directory.Exists(cityDir)) return;
+
+            try
+            {
+                var w = new FileSystemWatcher(cityDir)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.DirectoryName,
+                    // 64 KB internal buffer (max allowed); default 8 KB
+                    // overflows during legit bursts (e.g. an agent tool call
+                    // writing a dozen files in a few ms, or a backup tool
+                    // syncing the city dir). On overflow, Windows drops
+                    // intermediate events and we'd miss the refresh.
+                    InternalBufferSize = 65536,
+                    EnableRaisingEvents = false,
+                };
+                w.Changed += OnCanonFsChange;
+                w.Created += OnCanonFsChange;
+                w.Deleted += OnCanonFsChange;
+                w.Renamed += (s, e) => OnCanonFsChange(s, e);
+                w.Error += (s, e) => _log.Warn($"Canon watcher error: {e.GetException().Message}");
+                w.EnableRaisingEvents = true;
+                _canonWatcher = w;
+                _log.Info($"Canon watcher armed on {cityDir}");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Failed to arm canon watcher on {cityDir}: {ex.Message}. Canon tree will only refresh on run-finish.");
+            }
+        }
+
+        // Watcher event — fires on a thread pool worker. Filter to the
+        // canon-managed subdirs (the watcher itself is rooted at the city
+        // dir with IncludeSubdirectories, so we get noise from snapshots/
+        // and carto/ too) and stamp the change-time. OnUpdate handles the
+        // debounce + rescan on the main thread.
+        void OnCanonFsChange(object sender, FileSystemEventArgs e)
+        {
+            string rel = TryGetRelative(e.FullPath, _canonWatcherCityDir);
+            if (rel == null) return;
+            // First path segment tells us which subdir the change is in.
+            int slash = rel.IndexOfAny(new[] { '/', '\\' });
+            string top = slash >= 0 ? rel.Substring(0, slash) : rel;
+            for (int i = 0; i < _canonManagedSubdirs.Length; i++)
+            {
+                if (string.Equals(top, _canonManagedSubdirs[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Threading.Interlocked.Exchange(ref _canonChangeTicksUtc, DateTime.UtcNow.Ticks);
+                    return;
+                }
+            }
+        }
+
+        static string TryGetRelative(string fullPath, string baseDir)
+        {
+            if (string.IsNullOrEmpty(fullPath) || string.IsNullOrEmpty(baseDir)) return null;
+            try
+            {
+                string full = Path.GetFullPath(fullPath);
+                string baseFull = Path.GetFullPath(baseDir).TrimEnd('/', '\\') + Path.DirectorySeparatorChar;
+                if (full.StartsWith(baseFull, StringComparison.OrdinalIgnoreCase))
+                    return full.Substring(baseFull.Length);
+            }
+            catch { /* path errors are non-fatal */ }
+            return null;
+        }
+
+        protected override void OnDestroy()
+        {
+            // Dispose the watcher cleanly — its background event thread
+            // would otherwise outlive the system and try to mutate state
+            // that's been torn down.
+            RebuildCanonWatcher(null);
+            base.OnDestroy();
+        }
+
         void OnRunFinished(RunResult result)
         {
             _pendingRunFinish = true;
@@ -243,14 +365,39 @@ namespace CityStoryMod.Systems
 
             // Refresh available commands + canon tree once per city, and
             // again whenever a run finishes (the cache is invalidated in
-            // OnRunFinished). Cheap when the city hasn't changed (one string
-            // compare).
+            // OnRunFinished) or the FileSystemWatcher reports a debounced
+            // settle. Cheap when nothing has changed (one string compare).
             string cityDir = Mod.LastExportedCityDir;
             if (cityDir != _commandsScannedCityDir)
             {
                 _commandsScannedCityDir = cityDir;
                 _availableCommandsBinding.Update(ScanAvailableCommands(cityDir));
             }
+
+            // Manage the canon watcher's lifecycle — rebuild whenever the
+            // city dir changes (rename migration, save switch, first export).
+            if (cityDir != _canonWatcherCityDir)
+            {
+                _canonWatcherCityDir = cityDir;
+                RebuildCanonWatcher(cityDir);
+            }
+
+            // If the watcher reported a change, hold off rescanning until
+            // the burst has been quiet for DebounceMs — the agent often
+            // writes several files per tool call within a few ms, and a
+            // single rescan after the burst is enough.
+            long changeTicks = System.Threading.Interlocked.Read(ref _canonChangeTicksUtc);
+            if (changeTicks != 0)
+            {
+                long now = DateTime.UtcNow.Ticks;
+                double sinceMs = TimeSpan.FromTicks(now - changeTicks).TotalMilliseconds;
+                if (sinceMs >= CanonRescanDebounceMs)
+                {
+                    System.Threading.Interlocked.Exchange(ref _canonChangeTicksUtc, 0);
+                    _canonScannedCityDir = null;
+                }
+            }
+
             if (cityDir != _canonScannedCityDir)
             {
                 _canonScannedCityDir = cityDir;
@@ -508,10 +655,21 @@ namespace CityStoryMod.Systems
         // get a truncated tail marker. Total JSON for a typical city is
         // <300KB — well within what a ValueBinding handles per update.
         //
+        // Lite-mode fallback for pathological canon trees: if the total
+        // file count across all canon subdirs exceeds CanonLiteModeThreshold,
+        // we skip the per-file content read and ship names + paths only.
+        // The FileModal will render empty content (close + reopen the panel
+        // re-scans), but the game doesn't hitch trying to read megabytes of
+        // markdown into a single ValueBinding update. Protects against
+        // sync-bombs, runaway agent writes, and accidental file dumps into
+        // the canon dirs.
+        //
         // Skips secrets/ entirely when settings.json's secrets_visibility
         // is anything other than "shown" (default "hidden" — see
         // template/CLAUDE.md → Secrets). Empty subdirs are dropped so the
         // sidebar doesn't show headers with no entries.
+        const int CanonLiteModeThreshold = 500;
+
         static string ScanCanonTree(string cityDir)
         {
             if (string.IsNullOrEmpty(cityDir)) return "{}";
@@ -519,20 +677,41 @@ namespace CityStoryMod.Systems
             bool showSecrets = string.Equals(
                 (string)settings?["secrets_visibility"], "shown", StringComparison.Ordinal);
 
-            var tree = new System.Collections.Specialized.OrderedDictionary();
+            // First pass: collect file lists per subdir and count globally.
+            // Cheap — directory enumeration only, no reads. Lets us decide
+            // lite mode before paying any read cost.
+            var perSubdir = new List<KeyValuePair<string, string[]>>();
+            int totalFiles = 0;
             foreach (string sub in s_CanonSubdirs)
             {
                 if (sub == "secrets" && !showSecrets) continue;
                 string dir = Path.Combine(cityDir, sub);
                 if (!Directory.Exists(dir)) continue;
-                var entries = new List<object>();
-                string[] files = Directory.GetFiles(dir, "*.md");
+                string[] files;
+                try { files = Directory.GetFiles(dir, "*.md"); }
+                catch (Exception ex) { _log.Warn($"Canon scan: listing {dir} failed: {ex.Message}"); continue; }
                 Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                perSubdir.Add(new KeyValuePair<string, string[]>(sub, files));
+                totalFiles += files.Length;
+            }
+
+            bool liteMode = totalFiles > CanonLiteModeThreshold;
+            if (liteMode)
+            {
+                _log.Warn($"Canon scan: {totalFiles} files exceeds lite-mode threshold ({CanonLiteModeThreshold}). Tree will list names without content; close + reopen the panel after pruning to restore full content.");
+            }
+
+            var tree = new System.Collections.Specialized.OrderedDictionary();
+            foreach (var kv in perSubdir)
+            {
+                string sub = kv.Key;
+                string[] files = kv.Value;
+                var entries = new List<object>();
                 foreach (string path in files)
                 {
                     string name = Path.GetFileNameWithoutExtension(path);
                     string rel = sub + "/" + Path.GetFileName(path);
-                    string content = SafeReadFile(path);
+                    string content = liteMode ? "" : SafeReadFile(path);
                     entries.Add(new { name, path = rel, content });
                 }
                 if (entries.Count > 0) tree[sub] = entries;
