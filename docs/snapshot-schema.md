@@ -1,4 +1,4 @@
-# Snapshot schema (v0.3)
+# Snapshot schema (v0.4)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -35,11 +35,21 @@ Adds:
 - **First-Carto-on-new-city auto-trigger** — when a new city dir is scaffolded, ExportSystem fires Carto immediately so the storyteller has spatial context the first time it runs against the dir.
 - (Future) `carto/processed/elevation.md` and `carto/processed/water.md` from Carto's Elevation and Depth GeoTIFFs.
 
+## v0.4 — friction signals
+
+The top-3 from the [snapshot fields wishlist](https://github.com/williamlang/city-storytelling-mod/issues/18). Each one hands the storyteller a different kind of friction that the agent otherwise had to invent.
+
+- **`pollution`** (top-level) — air, ground, noise. Sampled at every building position via the corresponding `Game.Simulation.*PollutionSystem`, binned by `CurrentDistrict`. Provides per-district averages and a city-wide average. Drives class stories, NIMBY fights, lawsuits, health scandals: "Birchwood's complaints are 70% noise" becomes writeable.
+- **`city.churn`** — births / deaths / move-ins / move-aways per day. Read via `ICityStatisticsSystem.GetStatisticValue` against the `BirthRate`, `DeathRate`, `CitizensMovedIn`, `CitizensMovedAway` statistic types. Each is a Daily collection — diff across snapshots for period totals.
+- **`diff.building_churn`** — per-district demolition + construction counts (per zone-type), separate from the existing net `district_zone_deltas`. Stories about displacement and gentrification need to know that 6 residential lots were torn down AND 4 built, not just that the net was -2.
+
+Per-district churn (immigration/deaths by district) is deferred — CS2's stats API exposes only city-wide rolls. Surfacing per-district would require sampling citizens by home district between snapshots.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
@@ -77,6 +87,21 @@ Adds:
       "residential": N, "commercial": N, "industrial": N, "office": N,
       "extractor": N, "service": N, "transformer": N, "water_pumping": N,
       "other": N                     // anything that didn't match a marker
+    },
+    "churn": {                       // v0.4 — most-recent daily values from CityStatisticsSystem
+      "births_daily": 12,            // BirthRate
+      "deaths_daily": 4,             // DeathRate
+      "moved_in_daily": 18,          // CitizensMovedIn
+      "moved_away_daily": 7          // CitizensMovedAway
+    }
+  },
+
+  "pollution": {                     // v0.4 — sampled at every building position, binned by district
+    "city": { "air": 12.3, "ground": 4.1, "noise": 21.7 },
+    "samples": 247,                  // total buildings sampled across the city
+    "by_district": {
+      "Pine Quarter": { "air": 8.2, "ground": 2.4, "noise": 18.1, "samples": 89 },
+      "The North Yards": { "air": 31.4, "ground": 18.6, "noise": 42.0, "samples": 56 }
     }
   },
 
@@ -153,6 +178,22 @@ Adds:
       }
     },
 
+    // v0.4 — per-district demolition + construction counts, separated by
+    // zone-type. Stories about displacement and gentrification need both
+    // sides of the churn, not just the net change in `district_zone_deltas`.
+    // null on the first snapshot of a session; populated thereafter.
+    "building_churn": {
+      "total_demolished": 14,
+      "total_constructed": 22,
+      "demolitions_by_district": {
+        "Pine Quarter":    { "residential": 6, "industrial": 2 },
+        "The North Yards": { "industrial": 4 }
+      },
+      "constructions_by_district": {
+        "Pine Quarter": { "residential": 12 }
+      }
+    },
+
     // Named-building churn. Catches both player-renamed buildings
     // (intentional canon link, e.g. "Conklin Ranch") and CS2's auto-named
     // civic / service buildings (e.g. "Inger Brevik Elementary"). The agent
@@ -220,6 +261,7 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 
 - `0.1` — initial skeleton. Embedded spatial data (`districts[]`, `buildings[]`, etc.) and per-building churn diff.
 - `0.2` — Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
-- `0.3` — current. Added `map.*` block (world identity). Carto pipeline expanded to include Network (roads) + MapTile (footprint); new-city Carto auto-trigger on save-load edge.
+- `0.3` — Added `map.*` block (world identity). Carto pipeline expanded to include Network (roads) + MapTile (footprint); new-city Carto auto-trigger on save-load edge.
+- `0.4` — current. Added top-level `pollution` block (per-district + city-wide air/ground/noise), `city.churn` (births/deaths/move-ins/move-aways daily rates), and `diff.building_churn` (per-district demolition + construction counts separate from the net `district_zone_deltas`). Implements the top-3 from the [snapshot fields wishlist](https://github.com/williamlang/city-storytelling-mod/issues/18).
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

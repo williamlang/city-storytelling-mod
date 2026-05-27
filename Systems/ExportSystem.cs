@@ -47,8 +47,20 @@ namespace CityStoryMod.Systems
         Dictionary<string, NameRef> _prevWaterSources;
         Dictionary<string, Dictionary<string, int>> _prevDistrictZones;   // districtName → {zoneType → count}
         Dictionary<string, NamedBuilding> _prevNamedBuildings;            // entityId → fingerprint
+        Dictionary<string, BuildingFingerprint> _prevAllBuildings;        // entityId → slim fingerprint for churn diff
         DateTime? _prevIngameDate;
         string _prevSnapshotId;
+
+        // Slim fingerprint for every building, kept between snapshots so the
+        // diff can surface per-district demolitions and constructions
+        // separately from the existing net `district_zone_deltas`. The agent
+        // needs the *churn* (e.g. "6 down, 4 up") to write displacement
+        // stories, not just the net change.
+        struct BuildingFingerprint
+        {
+            public string Type;             // "residential" / "industrial" / ...
+            public string DistrictName;     // null if outside any district
+        }
 
         // Slim per-export record of a CustomName-tagged building. Backs the
         // churn diff that surfaces "Inger Brevik Elementary opened in March".
@@ -133,6 +145,22 @@ namespace CityStoryMod.Systems
 
         PromptUISystem _promptUI;
 
+        // Pollution systems. Each holds a NativeArray<T> cell-grid map of
+        // Int16 pollution values, plus a GetPollution(float3, map) lookup.
+        // Resolved in OnCreate so per-building sampling stays cheap. The
+        // m_Map field is non-public, so we grab it reflectively each export.
+        AirPollutionSystem _airPollutionSystem;
+        GroundPollutionSystem _groundPollutionSystem;
+        NoisePollutionSystem _noisePollutionSystem;
+        FieldInfo _f_airPollutionMap;
+        FieldInfo _f_groundPollutionMap;
+        FieldInfo _f_noisePollutionMap;
+
+        // Statistics system. Concrete class fails the GetTypes() load
+        // (depends on Burst-generated types), so we resolve it reflectively
+        // and cast to the loadable interface for population churn reads.
+        ICityStatisticsSystem _cityStatistics;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -192,6 +220,51 @@ namespace CityStoryMod.Systems
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             _promptUI = World.GetOrCreateSystemManaged<PromptUISystem>();
+
+            // Pollution systems — same World.GetOrCreate pattern as any other
+            // ECS system. Field-resolving m_Map at OnCreate time is cheap and
+            // keeps the per-export sampling loop free of reflection cost.
+            try
+            {
+                _airPollutionSystem    = World.GetOrCreateSystemManaged<AirPollutionSystem>();
+                _groundPollutionSystem = World.GetOrCreateSystemManaged<GroundPollutionSystem>();
+                _noisePollutionSystem  = World.GetOrCreateSystemManaged<NoisePollutionSystem>();
+                const BindingFlags pollutionFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+                _f_airPollutionMap    = typeof(AirPollutionSystem).GetField("m_Map", pollutionFlags);
+                _f_groundPollutionMap = typeof(GroundPollutionSystem).GetField("m_Map", pollutionFlags);
+                _f_noisePollutionMap  = typeof(NoisePollutionSystem).GetField("m_Map", pollutionFlags);
+                if (_f_airPollutionMap == null || _f_groundPollutionMap == null || _f_noisePollutionMap == null)
+                    _log.Warn("Pollution m_Map field not resolved; pollution block will stay null.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Pollution system resolution failed: {ex.Message}; pollution block will stay null.");
+            }
+
+            // CityStatisticsSystem (concrete type isn't loadable here — its
+            // Burst-generated dependencies fail GetTypes — but the interface
+            // is). Resolve reflectively via NameSystem's assembly, then cast
+            // to ICityStatisticsSystem for the readable API. Failure leaves
+            // city.churn null and is non-fatal.
+            try
+            {
+                Type statsType = typeof(NameSystem).Assembly.GetType("Game.Simulation.CityStatisticsSystem");
+                if (statsType != null)
+                {
+                    var getOrCreate = typeof(World).GetMethod("GetOrCreateSystemManaged", Type.EmptyTypes);
+                    if (getOrCreate != null)
+                    {
+                        object sys = getOrCreate.MakeGenericMethod(statsType).Invoke(World, null);
+                        _cityStatistics = sys as ICityStatisticsSystem;
+                    }
+                }
+                if (_cityStatistics == null)
+                    _log.Warn("CityStatisticsSystem not resolved; city.churn will stay null.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"CityStatisticsSystem resolution failed: {ex.Message}; city.churn will stay null.");
+            }
 
             // MapMetadataSystem lives in Game.UI; resolve reflectively from
             // NameSystem's assembly (also Game.UI, already referenced) to
@@ -400,10 +473,13 @@ namespace CityStoryMod.Systems
             }
         }
 
-        // 0.3 — Added `map.*` block (map name + future fields from
-        // MapMetadataSystem) so the storyteller has the world's identity at
-        // founding time, not just the city's. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.3";
+        // 0.4 — Added top-level `pollution` block (per-district + city-wide
+        // air/ground/noise averages), `city.churn` (births/deaths/move-ins/
+        // move-aways via CityStatisticsSystem), and `diff.building_churn`
+        // (per-district demolition/construction counts that separate gross
+        // churn from the existing net `district_zone_deltas`). See
+        // docs/snapshot-schema.md.
+        const string SchemaVersion = "0.4";
 
         void Export(string triggeredBy)
         {
@@ -484,6 +560,9 @@ namespace CityStoryMod.Systems
             Dictionary<string, Dictionary<string, int>> districtZones = CollectDistrictZones();
             Dictionary<Entity, string> districtNameByEntity = CollectDistrictNamesByEntity();
             Dictionary<string, NamedBuilding> namedBuildings = CollectNamedBuildings(districtNameByEntity);
+            Dictionary<string, BuildingFingerprint> allBuildings = CollectAllBuildings(districtNameByEntity);
+            object pollution = CollectPollution(districtNameByEntity);
+            object churn = ReadChurnStats();
             DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -495,7 +574,7 @@ namespace CityStoryMod.Systems
                 ? ComputeDiff(zoneCounts, currentIngameDate,
                     named.outsideConnectionsFingerprints,
                     named.waterSourcesFingerprints,
-                    districtZones, namedBuildings)
+                    districtZones, namedBuildings, allBuildings)
                 : null;
 
             // Advance the previous-snapshot pointers for the next export.
@@ -504,6 +583,7 @@ namespace CityStoryMod.Systems
             _prevWaterSources = named.waterSourcesFingerprints;
             _prevDistrictZones = districtZones;
             _prevNamedBuildings = namedBuildings;
+            _prevAllBuildings = allBuildings;
             _prevIngameDate = currentIngameDate;
             _prevSnapshotId = snapshotId;
 
@@ -552,7 +632,14 @@ namespace CityStoryMod.Systems
                     milestone_level = milestoneLevel,
                     xp = xp,
                     zones = zoneCounts,
+                    churn = churn,
                 },
+
+                // v0.4 — per-district + city-wide air/ground/noise averages,
+                // sampled at building positions and binned by CurrentDistrict.
+                // The direct cell-grid is in CS2's coordinate system; building
+                // positions are the simplest place-where-people-live proxy.
+                pollution = pollution,
 
                 // v0.2: districts[], buildings[], roads[], other_named[] are
                 // no longer emitted — they live in carto/processed/ as
@@ -1097,7 +1184,8 @@ namespace CityStoryMod.Systems
             Dictionary<string, NameRef> currentOutsideConnections,
             Dictionary<string, NameRef> currentWaterSources,
             Dictionary<string, Dictionary<string, int>> currentDistrictZones,
-            Dictionary<string, NamedBuilding> currentNamedBuildings)
+            Dictionary<string, NamedBuilding> currentNamedBuildings,
+            Dictionary<string, BuildingFingerprint> currentAllBuildings)
         {
             int? ingameDaysElapsed = _prevIngameDate.HasValue
                 ? (int)(currentIngameDate - _prevIngameDate.Value).TotalDays
@@ -1195,6 +1283,16 @@ namespace CityStoryMod.Systems
             var ocDiff = DiffNameRefs(_prevOutsideConnections, currentOutsideConnections);
             var wsDiff = DiffNameRefs(_prevWaterSources, currentWaterSources);
 
+            // v0.4 — per-district demolition/construction churn. Sits next to
+            // (not replacing) district_zone_deltas: the latter is net change,
+            // this is gross movement on both sides. Stories about
+            // displacement, gentrification, or industrial cleanup need to
+            // know both buildings appeared AND others disappeared, not just
+            // the net.
+            object buildingChurn = _prevAllBuildings != null
+                ? ComputeBuildingChurn(_prevAllBuildings, currentAllBuildings)
+                : null;
+
             return new
             {
                 since_snapshot_id = _prevSnapshotId,
@@ -1202,6 +1300,7 @@ namespace CityStoryMod.Systems
                 ingame_days_elapsed = ingameDaysElapsed,
                 zones_delta = zonesDelta,
                 district_zone_deltas = districtZoneDeltas,
+                building_churn = buildingChurn,
                 named_buildings = new { added = nbAdded, removed = nbRemoved, renamed = nbRenamed },
                 outside_connections = new { added = ocDiff.added, removed = ocDiff.removed, changed = ocDiff.changed },
                 water_sources = new { added = wsDiff.added, removed = wsDiff.removed, changed = wsDiff.changed },
@@ -1231,6 +1330,203 @@ namespace CityStoryMod.Systems
                     removed.Add(new { id = kv.Value.Id, name = kv.Value.Name });
             }
             return (added, removed, changed);
+        }
+
+        // Samples pollution at every building position and bins by district.
+        // Returns null if pollution systems weren't resolved or their grids
+        // haven't been allocated yet (fresh save before sim has run any
+        // pollution updates). City-wide averages are computed across every
+        // sampled building (including ones with no district). Per-district
+        // averages cover only buildings whose CurrentDistrict resolved.
+        //
+        // Why sample at buildings: pollution lives on an Nx N cell grid in
+        // CS2's coordinate system. Mapping cells to districts directly would
+        // need spatial polygon containment against district shapes — the
+        // building-position proxy is much cheaper and aligns sampling weight
+        // with where people actually live and work.
+        object CollectPollution(Dictionary<Entity, string> districtNameByEntity)
+        {
+            if (_airPollutionSystem == null || _groundPollutionSystem == null || _noisePollutionSystem == null
+                || _f_airPollutionMap == null || _f_groundPollutionMap == null || _f_noisePollutionMap == null)
+                return null;
+
+            NativeArray<AirPollution>    airMap;
+            NativeArray<GroundPollution> groundMap;
+            NativeArray<NoisePollution>  noiseMap;
+            try
+            {
+                airMap    = (NativeArray<AirPollution>)_f_airPollutionMap.GetValue(_airPollutionSystem);
+                groundMap = (NativeArray<GroundPollution>)_f_groundPollutionMap.GetValue(_groundPollutionSystem);
+                noiseMap  = (NativeArray<NoisePollution>)_f_noisePollutionMap.GetValue(_noisePollutionSystem);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Pollution map fetch failed: {ex.Message}");
+                return null;
+            }
+            if (!airMap.IsCreated || !groundMap.IsCreated || !noiseMap.IsCreated) return null;
+            if (airMap.Length == 0 || groundMap.Length == 0 || noiseMap.Length == 0) return null;
+
+            long airCitySum = 0, groundCitySum = 0, noiseCitySum = 0;
+            int  citySamples = 0;
+            var districtSums = new Dictionary<string, (long air, long ground, long noise, int samples)>();
+
+            using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var b = entities[i];
+                if (!EntityManager.HasComponent<Game.Objects.Transform>(b)) continue;
+                var pos = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
+
+                int air    = AirPollutionSystem.GetPollution(pos, airMap).m_Pollution;
+                int ground = GroundPollutionSystem.GetPollution(pos, groundMap).m_Pollution;
+                int noise  = NoisePollutionSystem.GetPollution(pos, noiseMap).m_Pollution;
+
+                airCitySum += air;
+                groundCitySum += ground;
+                noiseCitySum += noise;
+                citySamples++;
+
+                string districtName = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(b))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
+                }
+                if (districtName == null) continue;
+
+                districtSums.TryGetValue(districtName, out var s);
+                s.air += air; s.ground += ground; s.noise += noise; s.samples++;
+                districtSums[districtName] = s;
+            }
+
+            if (citySamples == 0) return null;
+
+            var byDistrict = new Dictionary<string, object>();
+            foreach (var kv in districtSums)
+            {
+                var s = kv.Value;
+                byDistrict[kv.Key] = new
+                {
+                    air = Math.Round((double)s.air / s.samples, 2),
+                    ground = Math.Round((double)s.ground / s.samples, 2),
+                    noise = Math.Round((double)s.noise / s.samples, 2),
+                    samples = s.samples,
+                };
+            }
+
+            return new
+            {
+                city = new
+                {
+                    air = Math.Round((double)airCitySum / citySamples, 2),
+                    ground = Math.Round((double)groundCitySum / citySamples, 2),
+                    noise = Math.Round((double)noiseCitySum / citySamples, 2),
+                },
+                samples = citySamples,
+                by_district = byDistrict,
+            };
+        }
+
+        // City-wide churn read via CityStatisticsSystem. The four statistic
+        // types are all CollectionType.Daily, so the returned int is the
+        // most-recent-day value. The agent treats these as "current rate"
+        // signals — diffing across snapshots gives the period total.
+        // Returns null if the statistics system didn't resolve.
+        object ReadChurnStats()
+        {
+            if (_cityStatistics == null) return null;
+            try
+            {
+                return new
+                {
+                    births_daily      = _cityStatistics.GetStatisticValue(StatisticType.BirthRate, 0),
+                    deaths_daily      = _cityStatistics.GetStatisticValue(StatisticType.DeathRate, 0),
+                    moved_in_daily    = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedIn, 0),
+                    moved_away_daily  = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedAway, 0),
+                };
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"ReadChurnStats failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Walks every building and returns a slim fingerprint (zone-type +
+        // district) per entity id. Used solely to compute the per-district
+        // demolition/construction churn diff — never serialized in full.
+        // Lighter than CollectNamedBuildings (no name resolution) so this
+        // can cover the whole city without doubling export cost.
+        Dictionary<string, BuildingFingerprint> CollectAllBuildings(Dictionary<Entity, string> districtNameByEntity)
+        {
+            var result = new Dictionary<string, BuildingFingerprint>();
+            using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var b = entities[i];
+                string districtName = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(b))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
+                }
+                result[EntityId(b)] = new BuildingFingerprint
+                {
+                    Type = BuildingTypeFromMarkers(b) ?? "other",
+                    DistrictName = districtName,
+                };
+            }
+            return result;
+        }
+
+        // Gross churn: ids present last time but gone now = demolition;
+        // present now but not last time = construction. Aggregated by
+        // (district, zone-type) so the agent gets a story-sized signal,
+        // not a per-id event stream. Buildings without a resolved district
+        // get binned under "_unassigned" so the totals stay honest.
+        object ComputeBuildingChurn(
+            Dictionary<string, BuildingFingerprint> prev,
+            Dictionary<string, BuildingFingerprint> current)
+        {
+            var demolitions  = new Dictionary<string, Dictionary<string, int>>();
+            var constructions = new Dictionary<string, Dictionary<string, int>>();
+            int totalDemo = 0, totalCons = 0;
+
+            foreach (var kv in prev)
+            {
+                if (current.ContainsKey(kv.Key)) continue;
+                string district = kv.Value.DistrictName ?? "_unassigned";
+                if (!demolitions.TryGetValue(district, out var byType))
+                {
+                    byType = new Dictionary<string, int>();
+                    demolitions[district] = byType;
+                }
+                byType.TryGetValue(kv.Value.Type, out int n);
+                byType[kv.Value.Type] = n + 1;
+                totalDemo++;
+            }
+            foreach (var kv in current)
+            {
+                if (prev.ContainsKey(kv.Key)) continue;
+                string district = kv.Value.DistrictName ?? "_unassigned";
+                if (!constructions.TryGetValue(district, out var byType))
+                {
+                    byType = new Dictionary<string, int>();
+                    constructions[district] = byType;
+                }
+                byType.TryGetValue(kv.Value.Type, out int n);
+                byType[kv.Value.Type] = n + 1;
+                totalCons++;
+            }
+
+            return new
+            {
+                total_demolished = totalDemo,
+                total_constructed = totalCons,
+                demolitions_by_district = demolitions,
+                constructions_by_district = constructions,
+            };
         }
 
         // Walks every Building entity (excluding prefabs/deleted/temp) and classifies
