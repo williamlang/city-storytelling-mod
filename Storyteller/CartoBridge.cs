@@ -59,8 +59,10 @@ namespace CityStoryMod.Storyteller
         static Type _errorEnumType;
         static MethodInfo _exportMethod;
 
-        // ExportResult property getters.
-        static PropertyInfo _resSuccess, _resFiles, _resError;
+        // ExportResult property getters. ErrorType is resolved best-effort —
+        // older Carto versions don't have it, in which case we just leave the
+        // typed value null and the caller falls back to the message string.
+        static PropertyInfo _resSuccess, _resFiles, _resError, _resErrorType;
 
         // Pre-computed enum values for our request shape. Looked up by name at
         // resolve time so we survive Carto reordering bit positions.
@@ -112,11 +114,17 @@ namespace CityStoryMod.Storyteller
             public bool Success;
             public string[] FilesWritten;
             public string ErrorMessage;
+            // Stringified enum name from Carto.IO.Error — "ShareViolation", "Path",
+            // "General", etc. Null when the running Carto build predates the
+            // typed-error addition, or when the call threw before we could read
+            // it. Lets callers log structured failure reasons without parsing
+            // ErrorMessage strings.
+            public string ErrorType;
         }
 
         // Returns null when Carto is unavailable. Otherwise returns the
         // (possibly failed) result from Carto's export pipeline — caller
-        // distinguishes Success vs ErrorMessage.
+        // distinguishes Success vs ErrorMessage / ErrorType.
         public static Result TryExport(string outputDirectory, ILog log)
         {
             EnsureResolved();
@@ -131,6 +139,7 @@ namespace CityStoryMod.Storyteller
                     Success = (bool)_resSuccess.GetValue(result),
                     FilesWritten = (string[])_resFiles.GetValue(result) ?? new string[0],
                     ErrorMessage = (string)_resError.GetValue(result),
+                    ErrorType = _resErrorType?.GetValue(result)?.ToString(),
                 };
             }
             catch (Exception ex)
@@ -347,6 +356,9 @@ namespace CityStoryMod.Storyteller
                 LogIncompatible(version, "ExportResult properties missing");
                 return;
             }
+            // ErrorType is best-effort — missing on older Cartos. No incompatibility
+            // log if absent; we just won't surface the typed value.
+            _resErrorType = exportResultType.GetProperty("ErrorType");
 
             // Enum-value lookups. Wrapped so a missing name surfaces as an
             // incompatibility message instead of a raw exception.

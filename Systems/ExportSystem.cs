@@ -402,7 +402,15 @@ namespace CityStoryMod.Systems
                     }
                     else
                     {
-                        _log.Warn($"Carto export failed: {carto.ErrorMessage}");
+                        // ErrorType (when populated by a recent Carto) gives
+                        // structured failure intent — ShareViolation means the
+                        // player has a file viewer open; Path means a malformed
+                        // output dir; General is anything else. Falls back to
+                        // just the message on older Cartos.
+                        string typeSuffix = string.IsNullOrEmpty(carto.ErrorType)
+                            ? ""
+                            : $" [{carto.ErrorType}]";
+                        _log.Warn($"Carto export failed{typeSuffix}: {carto.ErrorMessage}");
                     }
                 }
                 finally
