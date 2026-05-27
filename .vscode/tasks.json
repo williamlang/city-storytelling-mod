@@ -1,0 +1,94 @@
+{
+  // VSCode build / publish tasks for Ghostwriter.
+  //
+  // Trigger via Ctrl+Shift+P → "Tasks: Run Task" → pick one.
+  //
+  // The Paradox publish targets invoke the CS2 modding toolchain's MSBuild
+  // Publish target, which runs ModPublisher.exe with the assigned ModId from
+  // Properties/PublishConfiguration.xml. VS2022's "Publish" right-click menu
+  // does the same thing — these tasks are the VSCode equivalent.
+  //
+  // Prerequisites for any publish task:
+  //   1. CS2 must be closed (the build's deploy step writes the .dll, which
+  //      Mono memory-maps and locks while the game runs).
+  //   2. You must be signed into your Paradox account inside CS2 once before;
+  //      the publisher reads stored credentials.
+  //   3. For NewVersion: bump <ModVersion> + update <ChangeLog> in
+  //      Properties/PublishConfiguration.xml first.
+  //
+  // ModPublisherCommand values map to VS2022's wizard:
+  //   - Publish               ↔ "PublishNewMod"            (done — ModId=145605)
+  //   - NewVersion            ↔ "PublishNewVersion"
+  //   - Update                ↔ "UpdatePublishedConfiguration"
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build (Release)",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "CityStoryMod.csproj",
+        "-c",
+        "Release",
+        "-nologo"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      // Push a new version of the mod to Paradox Mods.
+      // Bump <ModVersion> + write <ChangeLog> in PublishConfiguration.xml first.
+      // Subscribers auto-update on next CS2 launch — there is no rollback.
+      "label": "Publish new version (Paradox Mods)",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "CityStoryMod.csproj",
+        "-c",
+        "Release",
+        "-t:Publish",
+        "-p:ModPublisherCommand=NewVersion",
+        "-nologo"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      // Update only the published metadata (DisplayName, descriptions, tags,
+      // thumbnail, screenshots, access level, etc.) without uploading a new
+      // build. Doesn't bump the version.
+      "label": "Update published metadata (Paradox Mods)",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "CityStoryMod.csproj",
+        "-c",
+        "Release",
+        "-t:Publish",
+        "-p:ModPublisherCommand=Update",
+        "-nologo"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}
