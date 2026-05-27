@@ -8,6 +8,21 @@
     <FileVersion>0.1.0</FileVersion>
     <Version>0.1.0</Version>
 
+    <!--
+      AssemblyName / RootNamespace stay "CityStoryMod" by default (matches the
+      DLL filename, the C# namespace, and ModsData/CityStoryMod/ — renaming
+      any of those would break existing player data).
+
+      Product + AssemblyTitle set the "friendly" assembly attributes that mod
+      managers like Skyve display. Without these, Skyve falls back to the
+      assembly name and shows "City Story Mod" (CamelCase-split) for unpublished
+      mods. Once we publish to Paradox Mods, Skyve gets DisplayName from the
+      catalog and these become belt-and-suspenders.
+    -->
+    <Product>Ghostwriter</Product>
+    <AssemblyTitle>Ghostwriter</AssemblyTitle>
+    <Description>An AI ghostwriter that turns your CS2 playthrough into a living narrative — named characters, civic events, and unfolding stories driven by what you build.</Description>
+
     <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
   </PropertyGroup>
 
