@@ -73,10 +73,20 @@ namespace CityStoryMod.Storyteller
             // Code errors when --continue can't find a session to resume.
             // The flag lives on StorytellerDispatcher and gets reset on
             // chat-clear / save-load / rename.
+            //
+            // `--permission-mode acceptEdits` auto-accepts Edit/Write/Create
+            // tool calls. Print mode has no interactive TTY to prompt
+            // against, so without this the agent silently fails to write
+            // canon files during /new-city, /session-end, etc. Scoped
+            // settings.json scaffolded into each city folder
+            // (template/.claude/settings.json) handles Bash(git *) and
+            // other narrower allows; this flag is the belt-and-suspenders
+            // for the common write path.
             bool shouldContinue = dispatcher != null && dispatcher.ShouldContinueCliSession;
+            string baseArgs = "-p --permission-mode acceptEdits --output-format stream-json --verbose";
             string args = shouldContinue
-                ? "-p --continue --output-format stream-json --verbose"
-                : "-p --output-format stream-json --verbose";
+                ? "-p --continue --permission-mode acceptEdits --output-format stream-json --verbose"
+                : baseArgs;
 
             var psi = new ProcessStartInfo
             {

@@ -23,6 +23,14 @@ The CityStoryMod has already exported a first snapshot and (if Carto is installe
 
 Synthesize these into 4–6 lines internally — don't dump to the player yet. This is the **primary** geographic anchor. If any chunk is missing (older save, Carto not installed), proceed with whatever is available; the snapshot at minimum always exists.
 
+**2b. Check for prior cities on the same map.**
+
+The mod's data folder holds one folder per playthrough. Walk the sibling directories (the city folders next to this one) and read each one's latest `snapshots/snapshot-*.json` to compare `map.name` with the current city's. For every sibling that used the same map, read its `canon/city.md` and `canon/playthrough-premise.md` and note the chosen city name, founding era, dominant economic engine, region of North America, and premise shape.
+
+**This list drives diversification in steps 4, 5, and 7.** If the player is running `/new-city` for the third time on Lakeland, the third run must propose names and founding histories that don't echo the first two — different surnames, different eras, different economic anchors, different premise shapes (boom/decline/reinvention/identity-loss). Repeating "Halverson" twice, or proposing two rust-belt postwar-decline angles for the same map, reads as lazy.
+
+Hold the list silently. Don't surface it to the player ("I see you've played this map before…") — just use it to constrain your choices. If no sibling shares the map, this step is a no-op.
+
 **3. Ask for the map screenshot — secondary visual signal.**
 
 First, check `maps/` in the city folder. If a file matching `*-overview.*` already exists (the mod may have captured it automatically), use it without prompting the player. Otherwise, ask the player for the absolute path to a Cities: Skylines 2 map screenshot of the starting tile (typically under `E:\Steam\userdata\...\screenshots\`). The save may still have a placeholder name in-game at this point — that's fine, the rename happens at the end. Confirm the file exists before continuing. If they don't have one, skip this step and proceed using only the spatial data from step 2.
@@ -40,6 +48,7 @@ Generate **4 plausible North American city names** grounded in the spatial data 
 - Real-sounding: founders' surnames, geographic features, Indigenous place names (used respectfully and grounded in the actual region the geography + climate suggests — a 62°N boreal lake district reads Minnesota / Manitoba / interior BC; a 37°N Mediterranean archipelago reads coastal California / Pacific Mexico), industrial-heritage names. No joke names.
 - Each name implies a slightly different founding story — give the player meaningful range (e.g. an old port name vs. a mill-town name vs. a railroad-junction name vs. an agricultural-county-seat name).
 - Lean on signals only the data carries — the CS2 map name itself (e.g. "Archipelago", "Lakeland") is *not* canon and the player won't see it in-world, but it's a hint for the kind of story the map was designed to support.
+- **Avoid the prior-city list from step 2b.** Different surnames, different naming traditions, different regional flavors. If a previous Lakeland playthrough was a Scottish-immigrant shipping port, this one should not be another Scottish-immigrant shipping port.
 
 Present in plain prose (see "Asking the player questions" in CLAUDE.md). One sentence lead, four numbered options. Each option: the proposed name, then a phrase of context (e.g. "Old Great Lakes shipping port — Scottish-immigrant founders"). End with "Reply with the number, or propose your own." Wait for the player's reply in their next message before continuing.
 
@@ -49,6 +58,7 @@ After the player picks a name, generate **3–4 founding-history options** groun
 - Founding era and original economic engine (rail, mill, port, mine, military base, agricultural hub, etc.). The data narrows this: a 62°N boreal lake district + many named bridges suggests Great Lakes / Canadian Shield logging or iron range; a 37°N Mediterranean archipelago suggests California coastal trade or Pacific shipping; a 191 m relief mostly-flat plain near a river suggests Midwestern rail-junction agriculture.
 - What the 20th century did to it (boom, decline, suburban sprawl, deindustrialization, reinvention).
 - The region of North America the climate + terrain place it in (Great Lakes, Pacific Northwest, Sunbelt, Atlantic Coast, Prairies, Appalachia, California, etc.) — pin this to the latitude / temperature signals from step 2.
+- **Avoid the prior-city histories from step 2b.** If a previous run of this map produced a postwar-decline mill town, this run should offer a different era / engine — colonial port, gold-rush boom-then-bust, Cold War defense town, mid-century planned suburb, recent climate-refugee growth. The geography constrains, the chosen angle should still vary.
 
 Vary the options meaningfully — don't propose four flavors of the same rust-belt story. At least one option should suggest a non-industrial origin if the geography allows it.
 
@@ -70,6 +80,8 @@ Overwrite the scaffold `canon/city.md` with:
 - `## The defining tension at session 1` — leave a stub: *"To be set at session 1 — see `/session-start`."*
 
 Then **infer the playthrough premise** silently from the chosen founding history, the map observations from step 3, and the chosen name. Write the resulting one-sentence (or short paragraph) premise to `canon/playthrough-premise.md` as plain prose. See the "Playthrough premise" section in CLAUDE.md for the inference inputs and heuristics. Do **not** ask the player to author it — surface the result in the hand-off (step 9), not before.
+
+The premise must also diversify from the prior-city premises noted in step 2b. A second Lakeland city shouldn't inherit the first's shape (reinvention story → try entrenched-money story, or vice versa). The geography stays the same; the *kind of friction* the story explores changes.
 
 Do **not** invent characters, companies, places, factions, or events here. This command only writes the foundational geography, history, and inferred premise. Everything else flows from `/session-start` and `/story-driven`.
 
