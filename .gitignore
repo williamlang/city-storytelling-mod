@@ -7,8 +7,6 @@ Temp/
 /.claude/
 # Local dev scratch (CDP bridge for Coherent UI debugging, etc.) — not part of the mod
 /.dev/
-# Built release zips — produced locally for GitHub Release attachments, not source of truth
-/dist/
 .vs/
 .vscode/*
 !.vscode/settings.json
