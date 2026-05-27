@@ -1,4 +1,4 @@
-# Snapshot schema (v0.4)
+# Snapshot schema (v0.5)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -45,11 +45,22 @@ The top-3 from the [snapshot fields wishlist](https://github.com/williamlang/cit
 
 Per-district churn (immigration/deaths by district) is deferred — CS2's stats API exposes only city-wide rolls. Surfacing per-district would require sampling citizens by home district between snapshots.
 
+## v0.5 — social conditions, budget, and "why people leave"
+
+The "easy wins" tier from #18 — every field here is a single `ICityStatisticsSystem.GetStatisticValue` call, all city-wide.
+
+- **`city.social`** — `homeless_count`, `unemployed_count`, `crime_count`, `crime_rate`. Classic neighborhood-pressure signals; pair with the existing per-district `pollution` and `district_zones` for spatial inference.
+- **`city.budget`** — `income_daily` and `tax_residential`, both verified against multi-day live data. `city.money` already carries the running balance, so the agent can compute net flow per period from those two fields plus the previous snapshot's money.
+  - **Known gap:** `expense_daily`, `tax_commercial`, `tax_industrial`, `tax_office` were dropped from the schema before shipping — they all returned `0` against `parameter=0` on cities with active commercial/industrial buildings and known-negative net cash flow. Those `StatisticType` slots almost certainly need a non-zero `parameter` to roll up correctly (sub-category sums, the same way `MovedAwayReason` is keyed by the reason enum). Tracked in [#28](https://github.com/williamlang/city-storytelling-mod/issues/28).
+- **`city.churn.moved_away_by_reason`** — citizens leaving, broken down by the eight `Game.Agents.MoveAwayReason` enum values: `not_happy`, `no_money`, `no_suitable_property`, `no_adults`, plus the three tourist variants and `trip_need_not_moved_in`. The sleeper hit — the agent can write "people are fleeing the Yards over the noise" with data backing it.
+
+Per-district crime and land value are deferred to v0.6 — both follow the pollution sampling pattern (sample at building positions, bin by district) and pair well as a single batch.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
@@ -92,7 +103,29 @@ Per-district churn (immigration/deaths by district) is deferred — CS2's stats 
       "births_daily": 12,            // BirthRate
       "deaths_daily": 4,             // DeathRate
       "moved_in_daily": 18,          // CitizensMovedIn
-      "moved_away_daily": 7          // CitizensMovedAway
+      "moved_away_daily": 7,         // CitizensMovedAway
+      "moved_away_by_reason": {      // v0.5 — Game.Agents.MoveAwayReason breakdown
+        "no_suitable_property": 0,
+        "not_happy": 5,
+        "no_adults": 0,
+        "no_money": 2,
+        "tourist_no_target": 0,
+        "tourist_no_hotel": 0,
+        "tourist_no_money": 0,
+        "trip_need_not_moved_in": 0
+      }
+    },
+    "social": {                      // v0.5 — city-wide social conditions
+      "homeless_count": 23,
+      "unemployed_count": 145,
+      "crime_count": 12,
+      "crime_rate": 4
+    },
+    "budget": {                      // v0.5 — income + residential tax (verified working)
+      "income_daily": 4500,
+      "tax_residential": 2200
+      // expense_daily + tax_commercial / industrial / office dropped before ship;
+      // returned 0 on cities with real activity. Need non-zero parameter to roll up.
     }
   },
 
@@ -262,6 +295,7 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 - `0.1` — initial skeleton. Embedded spatial data (`districts[]`, `buildings[]`, etc.) and per-building churn diff.
 - `0.2` — Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
 - `0.3` — Added `map.*` block (world identity). Carto pipeline expanded to include Network (roads) + MapTile (footprint); new-city Carto auto-trigger on save-load edge.
-- `0.4` — current. Added top-level `pollution` block (per-district + city-wide air/ground/noise), `city.churn` (births/deaths/move-ins/move-aways daily rates), and `diff.building_churn` (per-district demolition + construction counts separate from the net `district_zone_deltas`). Implements the top-3 from the [snapshot fields wishlist](https://github.com/williamlang/city-storytelling-mod/issues/18).
+- `0.4` — Added top-level `pollution` block (per-district + city-wide air/ground/noise), `city.churn` (births/deaths/move-ins/move-aways daily rates), and `diff.building_churn` (per-district demolition + construction counts separate from the net `district_zone_deltas`). Implements the top-3 from the [snapshot fields wishlist](https://github.com/williamlang/city-storytelling-mod/issues/18).
+- `0.5` — current. Added `city.social` (homeless / unemployed / crime), `city.budget` (income + residential tax — non-residential tax + expense dropped pending parameter-shape investigation), and `city.churn.moved_away_by_reason` (Game.Agents.MoveAwayReason breakdown). All city-wide rolls via CityStatisticsSystem.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

@@ -473,13 +473,12 @@ namespace CityStoryMod.Systems
             }
         }
 
-        // 0.4 — Added top-level `pollution` block (per-district + city-wide
-        // air/ground/noise averages), `city.churn` (births/deaths/move-ins/
-        // move-aways via CityStatisticsSystem), and `diff.building_churn`
-        // (per-district demolition/construction counts that separate gross
-        // churn from the existing net `district_zone_deltas`). See
-        // docs/snapshot-schema.md.
-        const string SchemaVersion = "0.4";
+        // 0.5 — Added `city.social` (homeless / unemployed / crime), `city.budget`
+        // (income + residential tax — non-residential tax + expense dropped pending
+        // parameter-shape investigation), and `city.churn.moved_away_by_reason`
+        // (the eight Game.Agents.MoveAwayReason values — not_happy / no_money / etc.) —
+        // all city-wide via CityStatisticsSystem. See docs/snapshot-schema.md.
+        const string SchemaVersion = "0.5";
 
         void Export(string triggeredBy)
         {
@@ -563,6 +562,8 @@ namespace CityStoryMod.Systems
             Dictionary<string, BuildingFingerprint> allBuildings = CollectAllBuildings(districtNameByEntity);
             object pollution = CollectPollution(districtNameByEntity);
             object churn = ReadChurnStats();
+            object social = ReadSocialStats();
+            object budget = ReadBudgetStats();
             DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -633,6 +634,8 @@ namespace CityStoryMod.Systems
                     xp = xp,
                     zones = zoneCounts,
                     churn = churn,
+                    social = social,
+                    budget = budget,
                 },
 
                 // v0.4 — per-district + city-wide air/ground/noise averages,
@@ -1428,9 +1431,26 @@ namespace CityStoryMod.Systems
             };
         }
 
-        // City-wide churn read via CityStatisticsSystem. The four statistic
-        // types are all CollectionType.Daily, so the returned int is the
-        // most-recent-day value. The agent treats these as "current rate"
+        // Mapping from Game.Agents.MoveAwayReason int values to snake_case
+        // JSON keys. CS2's enum splits resident reasons (1-4) from tourist
+        // reasons (5-7) and a "trip need" failure (8). The agent gets both
+        // surfaces and can filter by prefix. None (0) is a sentinel and
+        // omitted from output.
+        static readonly (int value, string key)[] s_moveAwayReasons = new[]
+        {
+            (1, "no_suitable_property"),
+            (2, "not_happy"),
+            (3, "no_adults"),
+            (4, "no_money"),
+            (5, "tourist_no_target"),
+            (6, "tourist_no_hotel"),
+            (7, "tourist_no_money"),
+            (8, "trip_need_not_moved_in"),
+        };
+
+        // City-wide churn read via CityStatisticsSystem. All five statistic
+        // types are CollectionType.Daily, so the returned ints are the
+        // most-recent-day values. The agent treats these as "current rate"
         // signals — diffing across snapshots gives the period total.
         // Returns null if the statistics system didn't resolve.
         object ReadChurnStats()
@@ -1438,17 +1458,79 @@ namespace CityStoryMod.Systems
             if (_cityStatistics == null) return null;
             try
             {
+                var byReason = new Dictionary<string, int>();
+                foreach (var (value, key) in s_moveAwayReasons)
+                    byReason[key] = _cityStatistics.GetStatisticValue(StatisticType.MovedAwayReason, value);
+
                 return new
                 {
-                    births_daily      = _cityStatistics.GetStatisticValue(StatisticType.BirthRate, 0),
-                    deaths_daily      = _cityStatistics.GetStatisticValue(StatisticType.DeathRate, 0),
-                    moved_in_daily    = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedIn, 0),
-                    moved_away_daily  = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedAway, 0),
+                    births_daily         = _cityStatistics.GetStatisticValue(StatisticType.BirthRate, 0),
+                    deaths_daily         = _cityStatistics.GetStatisticValue(StatisticType.DeathRate, 0),
+                    moved_in_daily       = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedIn, 0),
+                    moved_away_daily     = _cityStatistics.GetStatisticValue(StatisticType.CitizensMovedAway, 0),
+                    moved_away_by_reason = byReason,
                 };
             }
             catch (Exception ex)
             {
                 _log.Warn($"ReadChurnStats failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // City-wide social-condition stats. Crime and homelessness are the
+        // bread and butter of neighborhood-decline / political-pressure
+        // stories. Unemployment paired with the existing employed-via-Worker
+        // count gives the agent an unemployment rate.
+        object ReadSocialStats()
+        {
+            if (_cityStatistics == null) return null;
+            try
+            {
+                return new
+                {
+                    homeless_count   = _cityStatistics.GetStatisticValue(StatisticType.HomelessCount, 0),
+                    unemployed_count = _cityStatistics.GetStatisticValue(StatisticType.Unemployed, 0),
+                    crime_count      = _cityStatistics.GetStatisticValue(StatisticType.CrimeCount, 0),
+                    crime_rate       = _cityStatistics.GetStatisticValue(StatisticType.CrimeRate, 0),
+                };
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"ReadSocialStats failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // City-wide budget read. Income and ResidentialTaxableIncome are
+        // verified against multi-day live data — they move and the residential
+        // value drives the bulk of city revenue. city.money already carries
+        // the running balance, so the agent can compute net flow from those
+        // two plus the previous snapshot's money field.
+        //
+        // Expense, CommercialTaxableIncome, IndustrialTaxableIncome, and
+        // OfficeTaxableIncome all returned 0 against parameter=0 on a city
+        // with 60 commercial + 17 industrial buildings and a known-negative
+        // net cash flow. They almost certainly need a non-zero parameter to
+        // roll up correctly (sub-category sums like Expense-by-service or
+        // taxable-income-by-density), the same way MovedAwayReason is keyed
+        // by the reason enum. Dropped from the snapshot until we know the
+        // right parameter shape — wrong data is worse than missing data.
+        // Follow-up: https://github.com/williamlang/city-storytelling-mod/issues
+        object ReadBudgetStats()
+        {
+            if (_cityStatistics == null) return null;
+            try
+            {
+                return new
+                {
+                    income_daily    = _cityStatistics.GetStatisticValue(StatisticType.Income, 0),
+                    tax_residential = _cityStatistics.GetStatisticValue(StatisticType.ResidentialTaxableIncome, 0),
+                };
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"ReadBudgetStats failed: {ex.Message}");
                 return null;
             }
         }
