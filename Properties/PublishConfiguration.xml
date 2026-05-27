@@ -4,14 +4,42 @@
   <DisplayName Value="Ghostwriter" />
   <ShortDescription Value="An AI ghostwriter that turns your CS2 playthrough into a living narrative — named characters, civic events, and unfolding stories driven by what you build." />
   <LongDescription>
-**Ghostwriter** is a Cities: Skylines II mod that quietly writes the story of your city in the background while you play. As you build, an LLM-driven agent observes your city's state, names characters who plausibly drive its decisions, records civic events as they happen, and weaves them into ongoing narrative threads.
+**Ghostwriter** is a Cities: Skylines II mod that quietly writes the story of your city in the background while you play. As you build, an LLM-driven agent observes your city's state — population, districts, buildings, pollution, churn, climate, road network, named civic buildings, all of it — and writes the story that explains it. Named characters who plausibly drive its decisions. Civic events as they happen. Ongoing narrative threads that grow with your playthrough. You stay the city's builder; the ghostwriter writes in your voice.
 
-The mod has three halves running together: a C# sensor that exports rich ECS state to JSON snapshots, a per-city storytelling workspace the agent reasons against, and an in-game React panel for talking to the ghostwriter without alt-tabbing.
+The mod has three halves running together: a C# **sensor** that exports rich ECS state to JSON snapshots, a per-city **storytelling workspace** the agent reasons against, and an **in-game React panel** for talking to the ghostwriter without alt-tabbing CS2.
 
-You stay the city's builder; the ghostwriter writes in your voice.
+## What you'll need
+
+A way for the mod to talk to a language model. Several options — pick what fits your setup:
+
+* **Anthropic API** (default): pay-per-use, paste a key from console.anthropic.com. Roughly $0.05 – $0.50 per typical play session at Opus prices; less with Sonnet.
+* **Claude Code CLI**: uses your existing Claude Code subscription, flat-rate, no per-session bill. Install Claude Code, log in once, switch the provider in Options.
+* **OpenAI** or **Gemini**: pay-per-use, paste your key.
+* **Ollama** (local): free, runs entirely on your machine. Install Ollama, pull a model, point Options at localhost.
+
+## How to use it
+
+1. Subscribe to Ghostwriter (Carto auto-installs alongside as a spatial-data peer dependency).
+2. Restart CS2, then enable Ghostwriter in the mods list.
+3. Open **Options → Ghostwriter**, pick your provider, paste your key (or set up Claude Code), and confirm a model id.
+4. Start a new city. Play for a minute. The mod auto-exports a snapshot every 5 minutes (configurable).
+5. Click the **Ghostwriter toolbar icon** (top-left of the in-game UI). Run the **/new-city** slash command — the agent reads your fresh city's state and writes its founding canon: premise, era, founding characters.
+6. From there, chat freely. Ask the agent who lives where, what just happened in a district, or use **/session-start** and **/session-end** to keep a per-session playthrough log.
+
+## What you'll get
+
+Stories live as plain Markdown files at `LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\&lt;your-city&gt;\` — a folder of **canon**, **characters**, **companies**, **places**, **factions**, **events**, **sessions**, **stories**, and **secrets** that grows as your city does. There's an **Open story folder** button in Options if you want to read or back them up directly. The agent treats player-renamed buildings as canon links and weaves them into the world.
+
+## A note on what the model sees
+
+The ghostwriter reads your city's snapshot JSON and any canon files inside its own folder. It does NOT read other saves, other mods' data, or anything outside that folder. If you're using a hosted provider (Anthropic / OpenAI / Gemini), that data is sent to their servers per their terms of service. **Ollama runs entirely on your machine** — pick it if you want full local-only.
+
+## Open source
+
+Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github.com/williamlang/city-storytelling-mod.
   </LongDescription>
   <Tag Value="Code Mod" />
-  <ModVersion Value="0.0.1" />
+  <ModVersion Value="0.1.0" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -22,6 +50,14 @@ You stay the city's builder; the ghostwriter writes in your voice.
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-* Initial scaffold &#8212; hello-mod skeleton, no exports yet.
+**0.1.0** &#8212; first public beta.
+
+* In-game **Ghostwriter panel** (toolbar icon, top-left) with chat, slash commands, canon browser, and draggable file modals. Resizable.
+* **Five LLM providers** &#8212; Anthropic API direct, Claude Code CLI (uses your existing Max subscription), OpenAI, Gemini, and local Ollama. Switch in Options.
+* **Snapshot schema v0.4** &#8212; per-export JSON capturing city stats, map identity (climate, latitude, theme), per-district pollution (air / ground / noise), city-wide churn (births / deaths / move-ins / move-aways), zone counts per district, demographics, and a full change-since-last-snapshot diff (named-building churn, demolitions and constructions per district by zone type).
+* **Carto integration** &#8212; on first save load, the mod auto-triggers a Carto spatial export and turns its GeoJSON / GeoTIFF output into storyteller-facing Markdown chunks (terrain reading, water reading, road network, per-district detail). The storyteller reads these as primary spatial context.
+* **Save-load detection** &#8212; sessions start automatically on save load (opt-in), city folders migrate when a save is renamed, chat history clears on city change so cross-save context doesn't leak.
+* **Per-city storytelling workspace** &#8212; canon / characters / companies / places / factions / events / sessions / stories / secrets folders scaffolded from an embedded template on first export and kept in sync as the template evolves (player edits are never clobbered).
+* **Hotkeys** &#8212; Ctrl+Shift+E forces a snapshot export; Ctrl+Shift+M captures a manual map screenshot for the storyteller's spatial context.
   </ChangeLog>
 </Publish>

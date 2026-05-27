@@ -29,6 +29,52 @@ The mod has three halves running together: a C# **sensor** that exports rich ECS
 
 Each new city's folder is scaffolded from the embedded `template/` tree on first export. **Subsequent exports re-sync**: files the mod wrote that the player hasn't touched migrate forward automatically when the template evolves; files the player has edited are left alone (see `TemplateScaffolder` for the per-file decision tree).
 
+## Quick start (players)
+
+> If you're here to use Ghostwriter, not hack on it — this section is the whole orientation. The rest of this document is dev-facing.
+
+**What you'll need:** Cities: Skylines II, the modding tools enabled in CS2 (Options → Modding), and a way for the mod to talk to a language model. You have several options for that last part — pick whichever fits your wallet and setup:
+
+| Provider | What it costs | How it works |
+|---|---|---|
+| **Anthropic API** (default) | Pay-per-use, billed to your Anthropic key (~$0.05 – $0.50 per typical session at Opus prices; less with Sonnet) | Paste an API key from [console.anthropic.com](https://console.anthropic.com) into Options |
+| **Claude Code CLI** | Uses your existing Claude Code subscription — flat-rate, no per-session bill | Install [Claude Code](https://claude.com/claude-code), log in once with `claude /login`, select "AnthropicCLI" in Options |
+| **OpenAI** | Pay-per-use, OpenAI pricing | Paste an OpenAI key |
+| **Gemini** | Pay-per-use, Google pricing | Paste a Gemini key |
+| **Ollama** (local) | Free, runs on your machine | Install [Ollama](https://ollama.com), pull a model (e.g. `ollama pull llama3.3`), point Options at `http://localhost:11434` |
+
+Default in Options is **Anthropic API with Claude Opus** — the most expressive model, but also the priciest. If you want lower bills, switch the Model field to `claude-sonnet-4-6` (about 1/5 the cost, still excellent for narrative).
+
+**Install:**
+1. Subscribe to Ghostwriter in Paradox Mods. Carto (a peer dependency for spatial map data) auto-installs alongside.
+2. Launch CS2 and enable Ghostwriter in the mods list. **Restart CS2** so both mods load fresh.
+3. Open **Options → Ghostwriter**, pick your provider, paste your key or set up the CLI as above, and confirm a model id (the default `claude-opus-4-7` is fine for Anthropic; pick something installed locally for Ollama).
+
+**First run:** start a new city and play for a minute. The mod auto-exports a snapshot of the city's state every 5 minutes (configurable in Options) — and on first save load, it also captures the map's spatial geometry via Carto. When you're ready to meet your ghostwriter:
+
+1. Click the **Ghostwriter toolbar icon** (top-left of the in-game UI).
+2. Pick the **/new-city** slash command from the dropdown. The agent reads what's been exported so far, asks you a short question about the kind of story you want to tell, and writes the city's founding canon — premise, era, named characters who could plausibly drive its decisions.
+3. After that, just chat. Ask "who lives in The North Yards?" or "what just happened in Pine Quarter?" — the agent will read its own canon and answer. Use **/session-start** before a play session and **/session-end** after to keep a real-world playthrough log.
+
+**Where the stories live:**
+
+```
+%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\<your-city>\
+```
+
+(`LocalLow`, not `Local` — Windows is confusing here.)
+
+There's an **Open story folder** button in Options if you'd rather not paste paths. Stories are plain Markdown — you can read, edit, or back them up freely.
+
+**Cost-aware tips:**
+- **Disable auto-export** (Options → Interval (minutes) → 0) if you only want the ghostwriter running when you click a slash command. Snapshots themselves don't cost anything; LLM calls do.
+- Smaller / cheaper models work for everything except the most narrative-dense commands. Sonnet is a reasonable middle ground.
+- The Anthropic API console shows a usage breakdown per key, so you can watch costs in real time.
+
+**Troubleshooting:** if the chat panel shows a red error, read it — provider errors (bad key, network down, model missing, Claude CLI not on PATH) all surface there with actionable text. If the panel is blank when it shouldn't be, check the log at `%LOCALAPPDATA%\..\LocalLow\Colossal Order\Cities Skylines II\Logs\CityStoryMod.log` — every export, Carto trigger, and storyteller run leaves a line there.
+
+> **A note on what the model sees.** The ghostwriter reads your city's snapshot JSON (population, zones, building names, pollution, etc.) and any canon files inside your city's folder. It does NOT read other saves, other mods' data, or anything outside that folder. If you're using a hosted provider (Anthropic / OpenAI / Gemini), that data is sent to their servers per their terms of service. Ollama runs entirely on your machine — pick it if you want full local-only.
+
 ## Stack
 
 - **C#** for the mod itself — Unity 2022.3.7f1 with Mono, CS2 toolchain. ECS via Unity DOTS (Entities, Burst, Collections, Mathematics).
@@ -81,15 +127,19 @@ Logs at:
 
 ## Snapshot schema
 
-[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the v0.1 contract; shape finalized, fields filled in iteratively. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
+[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.4**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
 
 Currently populated:
-- Metadata header (timestamp, schema version)
-- `city.citizens_total` (raw `Citizen` ECS count — includes tourists/commuters, so will differ from the HUD population)
-- Per-district population, jobs, zones, named buildings
-- Citizen demographics aggregated from `Citizen` + `Worker`
-- Roads, outside connections, water sources captured from `CustomName` entities
-- Buildings churn + zone deltas + in-game days elapsed (diff section)
+- Metadata header — schema version, snapshot id, session id, wall-clock + in-game timestamps
+- `map.*` — name, theme, latitude / longitude, temperature range, cloudiness, precipitation, water availability (from `Game.UI.MapMetadataSystem`)
+- `city.*` — population (HUD + with-move-in), money, happiness, health, tourists, attractiveness, danger, milestone, XP, zone counts, and **`city.churn`** (births / deaths / move-ins / move-aways per day, from `ICityStatisticsSystem`)
+- **`pollution`** — air / ground / noise sampled at every building position, binned by `CurrentDistrict`; emits city-wide + per-district averages with sample counts
+- `outside_connections`, `water_sources` — `CustomName` entities Carto doesn't surface
+- `district_zones` — per-district building-type counts (backs the subdivision-growth signal)
+- `demographics` — citizen flag counts, average wellbeing / health, employed count
+- `diff.*` — full change-since-last-snapshot block: zone deltas, district zone deltas, **`building_churn`** (per-district demolition + construction counts), named-building churn, outside-connection / water-source diffs, in-game days elapsed
+
+Still null / empty (next-up targets): `citizens_sample[]`, `trade.imports/exports`, `services.coverage_gaps`. Spatial geometry (district polygons, building positions, roads, terrain, water bodies) lives in `carto/processed/*.md` chunks alongside the JSON.
 
 ## Project layout
 
