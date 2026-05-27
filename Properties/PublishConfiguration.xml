@@ -39,6 +39,16 @@ The ghostwriter reads your city's snapshot JSON and any canon files inside its o
 Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github.com/williamlang/city-storytelling-mod.
   </LongDescription>
   <Tag Value="Code Mod" />
+  <!--
+    Access control — supported as of CS2 1.4.2f1. Values: Public | Unlisted | Private.
+    Closed beta is Private: hidden from search, only Paradox-Mods-username-added
+    testers (max 5) can subscribe. CRITICAL: once a single subscriber exists,
+    Paradox Mods blocks the Public/Unlisted → Private transition — so this MUST
+    stay "Private" on the first publish. Flip to "Public" via the website (or by
+    bumping this and running ModPublisherCommand=Update) only when we're ready
+    to open the gate.
+  -->
+  <AccessLevel Value="Private" />
   <ModVersion Value="0.1.0" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
