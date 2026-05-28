@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.0" />
+  <ModVersion Value="0.1.1" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,7 +61,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.0** &#8212; first public beta.
+**0.1.1** &#8212; spatial enrichment and UI polish.
+
+* **Combined topographic map** &#8212; new `carto/processed/map.svg` rendered on every Carto refresh: hypsometric terrain (green &#8594; tan &#8594; brown &#8594; white), depth-shaded water, dashed district outlines, colored named roads (highways thicker), intersection markers, and labels.
+* **Storyteller can now answer location questions from text alone.** `roads.md` carries a centroid + quadrant for every named road and a new "Intersections of named roads" section listing junctions where two or more named roads converge. Un-districted named buildings carry quadrants in `index.md`. Previously the agent had no spatial coordinates and would fall back to running ad-hoc scripts against the raw GeoJSON.
+* **Agent guardrails.** The scaffolded `template/CLAUDE.md` now explicitly forbids the storyteller from spawning interpreters (Python, jq, awk, PowerShell-as-JSON-parser) to extract facts from files &#8212; the `Read` tool is the contract. Reading JSON / Markdown directly is fine; piping it through external parsers is not.
+* **Refresh map button pulses while working.** Bright animated background and ripple effect for the full duration of the Carto export, so the click feedback is unmissable.
+* **Visible chat scrollbar.** Reserved scrollbar gutter on the chat panel; explicit width / track / thumb styling.
+
+**0.1.0** &#8212; first closed beta.
 
 * In-game **Ghostwriter panel** (toolbar icon, top-left) with chat, slash commands, canon browser, and draggable file modals. Resizable.
 * **Five LLM providers** &#8212; Anthropic API direct, Claude Code CLI (uses your existing Max subscription), OpenAI, Gemini, and local Ollama. Switch in Options.

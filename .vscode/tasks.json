@@ -45,6 +45,27 @@
       "problemMatcher": "$msCompile"
     },
     {
+      // Rebuild the storyteller UI bundle (webpack → .mjs + .css in the
+      // deployed Mods folder). Run this AFTER a `dotnet build`, because
+      // the C# build wipes the deploy folder and removes the UI artifacts.
+      // UI-only iteration (TSX / SCSS changes) only needs this task — no
+      // CS2 restart required if you reopen the storyteller panel to pick
+      // up the new bundle.
+      "label": "Build UI (webpack)",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}/UI"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
       // Push a new version of the mod to Paradox Mods.
       // Bump <ModVersion> + write <ChangeLog> in PublishConfiguration.xml first.
       // Subscribers auto-update on next CS2 launch — there is no rollback.

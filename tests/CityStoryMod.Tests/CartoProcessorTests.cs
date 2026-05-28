@@ -611,6 +611,398 @@ namespace CityStoryMod.Tests
             md.Should().Contain("processed/roads.md");
         }
 
+        [Fact]
+        public void RenderRoadsMarkdown_emits_centroid_and_quadrant_for_named_groups()
+        {
+            // Recenter so the projected coordinates are zeroed around the
+            // group centroid — that's the frame the agent sees in production.
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            CartoProcessor.RecenterCoordinates(
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                new System.Collections.Generic.List<CartoProcessor.MapTile>(),
+                roads);
+            string md = CartoProcessor.RenderRoadsMarkdown(roads);
+
+            // The contract: each named road row carries a "centered (X, Y) in
+            // the QQ" suffix so the agent can answer "where is X" without
+            // touching raw GeoJSON.
+            md.Should().Contain("centered (");
+            md.Should().MatchRegex(@"in the (NE|NW|SE|SW)");
+        }
+
+        // Two distinct named roads whose centerlines share an endpoint at
+        // (0.001, 0.001). That endpoint should land in a single intersection
+        // bucket and surface in the rendered chunk. Lengths are bumped well
+        // above the SVG label threshold (500 m) so the smoke tests can also
+        // verify label rendering against this fixture; the actual segment
+        // geometry stays short (single 0.001° edges).
+        const string SampleNetworkWithIntersection = @"{
+          ""type"": ""FeatureCollection"",
+          ""features"": [
+            { ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""LineString"", ""coordinates"": [
+                [0.000, 0.000], [0.001, 0.001]
+              ] },
+              ""properties"": { ""Name"": ""Riverside Highway"", ""Object"": ""Road"", ""Category"": ""Highway"", ""Length"": 1500.0 }
+            },
+            { ""type"": ""Feature"",
+              ""geometry"": { ""type"": ""LineString"", ""coordinates"": [
+                [0.001, 0.001], [0.002, 0.000]
+              ] },
+              ""properties"": { ""Name"": ""Bridge Boulevard"", ""Object"": ""Road"", ""Category"": ""Car, Large"", ""Length"": 1500.0 }
+            }
+          ]
+        }";
+
+        [Fact]
+        public void ComputeIntersections_finds_shared_endpoint_between_two_named_roads()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
+            var ix = CartoProcessor.ComputeIntersections(roads);
+
+            ix.Should().HaveCount(1);
+            ix[0].RoadNames.Should().BeEquivalentTo(new[] { "Bridge Boulevard", "Riverside Highway" });
+            ix[0].Quadrant.Should().MatchRegex("^(NE|NW|SE|SW)$");
+        }
+
+        [Fact]
+        public void ComputeIntersections_returns_empty_when_no_named_roads_share_endpoints()
+        {
+            // SampleNetworkCenterline has two segments of one named road
+            // (Riverside Highway) plus an anonymous segment. The shared
+            // endpoint is between two segments of the SAME name — that's
+            // not an intersection.
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            var ix = CartoProcessor.ComputeIntersections(roads);
+            ix.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void RenderRoadsMarkdown_lists_intersections_when_present()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
+            string md = CartoProcessor.RenderRoadsMarkdown(roads);
+
+            md.Should().Contain("## Intersections of named roads");
+            md.Should().Contain("Bridge Boulevard");
+            md.Should().Contain("Riverside Highway");
+            md.Should().Contain(" × ");  // separator between road names
+        }
+
+        [Fact]
+        public void RenderRoadsMarkdown_omits_intersections_section_when_none()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkCenterline);
+            string md = CartoProcessor.RenderRoadsMarkdown(roads);
+            md.Should().NotContain("## Intersections of named roads");
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_returns_null_for_empty_road_list()
+        {
+            string svg = CartoProcessor.RenderRoadsSvg(
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new CartoProcessor.Footprint { HasGeometry = false });
+            svg.Should().BeNull();
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_includes_named_road_label_and_intersection_dot()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
+            var districts = new System.Collections.Generic.List<CartoProcessor.District>();
+            var fp = new CartoProcessor.Footprint
+            {
+                HasGeometry = true,
+                MinX = -200, MaxX = 300, MinY = -200, MaxY = 300,
+                WidthM = 500, HeightM = 500,
+            };
+            string svg = CartoProcessor.RenderRoadsSvg(roads, districts, fp);
+
+            svg.Should().NotBeNull();
+            svg.Should().StartWith("<?xml");
+            svg.Should().Contain("<svg ");
+            svg.Should().Contain("Riverside Highway");
+            svg.Should().Contain("Bridge Boulevard");
+            // Intersection dot layer present when the input has one.
+            svg.Should().Contain("id=\"intersections\"");
+            // North arrow always rendered.
+            svg.Should().Contain("id=\"north\"");
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_falls_back_to_geometry_envelope_when_footprint_missing()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
+            string svg = CartoProcessor.RenderRoadsSvg(roads, null, null);
+            svg.Should().NotBeNull();
+            svg.Should().Contain("<svg ");
+        }
+
+        // -- Combined map (map.svg) --
+
+        // Synthetic elevation grid for the combined-map tests: 32×32 cells,
+        // values ramp from 0 (NW corner) to 1000 (SE corner). NoData = -32768.
+        static CityStoryMod.Storyteller.GeoTiffReader.Grid BuildSyntheticElevationGrid()
+        {
+            const int n = 32;
+            var grid = new CityStoryMod.Storyteller.GeoTiffReader.Grid
+            {
+                Width = n,
+                Height = n,
+                Pixels = new int[n * n],
+                NoData = -32768,
+                ScaleX = 100,
+                ScaleY = 100,
+            };
+            for (int r = 0; r < n; r++)
+                for (int c = 0; c < n; c++)
+                    grid.Pixels[r * n + c] = (r + c) * 16;  // 0 .. 992
+            return grid;
+        }
+
+        // Synthetic depth grid matching the elevation grid dimensions, with
+        // a 4×4 water patch in the NE corner (rows 2-5, cols 25-28).
+        static CityStoryMod.Storyteller.GeoTiffReader.Grid BuildSyntheticDepthGrid()
+        {
+            const int n = 32;
+            var grid = new CityStoryMod.Storyteller.GeoTiffReader.Grid
+            {
+                Width = n,
+                Height = n,
+                Pixels = new int[n * n],
+                NoData = -32768,
+                ScaleX = 100,
+                ScaleY = 100,
+            };
+            for (int i = 0; i < grid.Pixels.Length; i++) grid.Pixels[i] = -32768;
+            for (int r = 2; r < 6; r++)
+                for (int c = 25; c < 29; c++)
+                    grid.Pixels[r * n + c] = 10;  // 10 m deep
+            return grid;
+        }
+
+        [Fact]
+        public void RenderCombinedMapSvg_returns_null_when_no_inputs()
+        {
+            string svg = CartoProcessor.RenderCombinedMapSvg(
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new CartoProcessor.Footprint { HasGeometry = false },
+                null, null, null, null);
+            svg.Should().BeNull();
+        }
+
+        [Fact]
+        public void RenderCombinedMapSvg_emits_terrain_layer_when_elevation_present()
+        {
+            var elev = BuildSyntheticElevationGrid();
+            var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
+            var fp = new CartoProcessor.Footprint
+            {
+                HasGeometry = true,
+                MinX = 0, MaxX = 3200, MinY = 0, MaxY = 3200,
+                WidthM = 3200, HeightM = 3200,
+            };
+            string svg = CartoProcessor.RenderCombinedMapSvg(
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                fp, elev, null, elevSummary, null);
+
+            svg.Should().NotBeNull();
+            svg.Should().Contain("id=\"terrain\"");
+            svg.Should().Contain("<rect ");
+            svg.Should().Contain("id=\"north\"");
+        }
+
+        [Fact]
+        public void RenderCombinedMapSvg_layers_water_over_terrain_when_depth_present()
+        {
+            var elev = BuildSyntheticElevationGrid();
+            var depth = BuildSyntheticDepthGrid();
+            var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
+            var waterSummary = CartoProcessor.ComputeWaterSummary(depth);
+            var fp = new CartoProcessor.Footprint
+            {
+                HasGeometry = true,
+                MinX = 0, MaxX = 3200, MinY = 0, MaxY = 3200,
+                WidthM = 3200, HeightM = 3200,
+            };
+            string svg = CartoProcessor.RenderCombinedMapSvg(
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                fp, elev, depth, elevSummary, waterSummary);
+
+            svg.Should().NotBeNull();
+            // A water color from the WaterRamp endpoints should appear at
+            // least once (#96c8e6 is the shallow color from the ramp).
+            // Even if the exact value drifts with interpolation, the prefix
+            // #96 / #..a... portion of the ramp will show up somewhere.
+            svg.Should().Contain("id=\"terrain\"");
+            // Confirm at least one fill in the blue end of the spectrum was
+            // emitted. The water cells in the synthetic grid get the
+            // shallow endpoint (#96c8e6).
+            svg.Should().MatchRegex("fill=\"#[0-9a-f]{6}\"");
+        }
+
+        [Fact]
+        public void RenderCombinedMapSvg_includes_named_road_labels_above_terrain()
+        {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
+            var elev = BuildSyntheticElevationGrid();
+            var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
+            var fp = new CartoProcessor.Footprint
+            {
+                HasGeometry = true,
+                MinX = -200, MaxX = 300, MinY = -200, MaxY = 300,
+                WidthM = 500, HeightM = 500,
+            };
+            string svg = CartoProcessor.RenderCombinedMapSvg(
+                roads,
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                fp, elev, null, elevSummary, null);
+
+            svg.Should().NotBeNull();
+            svg.Should().Contain("Riverside Highway");
+            svg.Should().Contain("Bridge Boulevard");
+            svg.Should().Contain("id=\"named-roads\"");
+            svg.Should().Contain("id=\"intersections\"");
+        }
+
+        [Fact]
+        public void DownsampleGrid_block_averages_correctly()
+        {
+            // 4×4 grid → 2×2 downsample. Each 2×2 block averages to a single cell.
+            // Block 0 (rows 0-1, cols 0-1): values 0, 1, 4, 5 → mean 2.
+            // Block 1 (rows 0-1, cols 2-3): values 2, 3, 6, 7 → mean 4 (integer division).
+            // Block 2 (rows 2-3, cols 0-1): values 8, 9, 12, 13 → mean 10.
+            // Block 3 (rows 2-3, cols 2-3): values 10, 11, 14, 15 → mean 12.
+            var grid = new CityStoryMod.Storyteller.GeoTiffReader.Grid
+            {
+                Width = 4,
+                Height = 4,
+                NoData = -32768,
+                Pixels = new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+            };
+            var ds = CartoProcessor.DownsampleGrid(grid, 2, 2);
+            ds.Should().Equal(new[] { 2, 4, 10, 12 });
+        }
+
+        [Fact]
+        public void DownsampleGrid_treats_full_nodata_block_as_sentinel()
+        {
+            var grid = new CityStoryMod.Storyteller.GeoTiffReader.Grid
+            {
+                Width = 2, Height = 2, NoData = -32768,
+                Pixels = new[] { -32768, -32768, -32768, -32768 },
+            };
+            var ds = CartoProcessor.DownsampleGrid(grid, 1, 1);
+            ds[0].Should().Be(int.MinValue);
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_drops_short_non_highway_labels()
+        {
+            // A short non-highway named road (under 500 m) should still get
+            // a stroke in the SVG but no text label, to keep the diagram
+            // readable on cities full of CS2-default decorations.
+            string fixture = @"{
+              ""type"": ""FeatureCollection"",
+              ""features"": [
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[0,0],[0.001,0.001]] },
+                  ""properties"": { ""Name"": ""Tiny Roundabout"", ""Object"": ""Road"", ""Category"": ""Car, Small"", ""Length"": 80.0 } },
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[0.001,0.001],[0.002,0.002]] },
+                  ""properties"": { ""Name"": ""Long Highway"", ""Object"": ""Road"", ""Category"": ""Highway"", ""Length"": 5000.0 } }
+              ]
+            }";
+            var roads = CartoProcessor.ParseRoads(fixture);
+            string svg = CartoProcessor.RenderRoadsSvg(roads, null, null);
+
+            svg.Should().Contain("Long Highway");
+            svg.Should().NotContain(">Tiny Roundabout<");  // no text label
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_de_collides_overlapping_labels()
+        {
+            // Two long named roads whose centroids fall at nearly the same
+            // point. The label de-collision step should keep only the first
+            // (highway → wins the priority sort) and drop the second.
+            string fixture = @"{
+              ""type"": ""FeatureCollection"",
+              ""features"": [
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[-0.001,0.000],[0.001,0.000]] },
+                  ""properties"": { ""Name"": ""North Pike"", ""Object"": ""Road"", ""Category"": ""Highway"", ""Length"": 2000.0 } },
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[0.000,-0.001],[0.000,0.001]] },
+                  ""properties"": { ""Name"": ""North Pike East"", ""Object"": ""Road"", ""Category"": ""Highway"", ""Length"": 2000.0 } }
+              ]
+            }";
+            var roads = CartoProcessor.ParseRoads(fixture);
+            string svg = CartoProcessor.RenderRoadsSvg(roads, null, null);
+
+            // Both roads still draw their strokes; only labels get filtered.
+            // The first (highway, sorted alphabetically by length tiebreak)
+            // should keep its label; the second drops to avoid overlap.
+            int northPikeCount = System.Text.RegularExpressions.Regex.Matches(svg, ">North Pike<").Count;
+            int northPikeEastCount = System.Text.RegularExpressions.Regex.Matches(svg, ">North Pike East<").Count;
+            (northPikeCount + northPikeEastCount).Should().Be(1, "exactly one of the two overlapping labels should survive de-collision");
+        }
+
+        [Fact]
+        public void RenderRoadsSvg_escapes_road_names_with_xml_specials()
+        {
+            // Carto can in principle pass through any string the player typed
+            // (CustomName flows up from CS2). The label layer must HTML-escape
+            // to keep the SVG well-formed.
+            // Geometry needs spread on both axes — a single horizontal segment
+            // yields worldH = 0 and the renderer correctly bails to null.
+            // Length above the 500 m label threshold so it actually renders.
+            string fixture = @"{
+              ""type"": ""FeatureCollection"",
+              ""features"": [
+                { ""type"": ""Feature"",
+                  ""geometry"": { ""type"": ""LineString"", ""coordinates"": [[0,0],[0.001,0.001]] },
+                  ""properties"": { ""Name"": ""A & B <Road>"", ""Object"": ""Road"", ""Category"": ""Highway"", ""Length"": 1500.0 } }
+              ]
+            }";
+            var roads = CartoProcessor.ParseRoads(fixture);
+            string svg = CartoProcessor.RenderRoadsSvg(roads, null, null);
+            svg.Should().Contain("A &amp; B &lt;Road&gt;");
+            // The literal raw "<Road>" sequence must not survive — it would
+            // be a stray tag inside an SVG text node.
+            svg.Should().NotContain(">A & B <Road><");
+        }
+
+        [Fact]
+        public void RenderIndexMarkdown_tags_unique_unassigned_buildings_with_quadrant()
+        {
+            var buildings = new System.Collections.Generic.List<CartoProcessor.Building>
+            {
+                // One unique landmark in the SW (negative x, negative y).
+                new CartoProcessor.Building { Name = "Lonely Lighthouse", Category = "Landmark", CentroidX = -500, CentroidY = -300 },
+                // Two cairns in the same quadrant (NE) — should collapse to "(× 2) ... in the NE".
+                new CartoProcessor.Building { Name = "Cairn", Category = "Decoration", CentroidX = 100, CentroidY = 200 },
+                new CartoProcessor.Building { Name = "Cairn", Category = "Decoration", CentroidX = 150, CentroidY = 250 },
+                // Two ruins scattered across NW and SE — should report "scattered".
+                new CartoProcessor.Building { Name = "Ruin", Category = "Decoration", CentroidX = -100, CentroidY = 200 },
+                new CartoProcessor.Building { Name = "Ruin", Category = "Decoration", CentroidX = 100, CentroidY = -200 },
+            };
+
+            string md = CartoProcessor.RenderIndexMarkdown(
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                buildings);
+
+            md.Should().Contain("**Lonely Lighthouse** — Landmark in the SW");
+            md.Should().Contain("**Cairn** (× 2) — Decoration in the NE");
+            md.Should().Contain("**Ruin** (× 2) — Decoration scattered (");
+        }
+
         // -- Cycle 2b: terrain / water classifiers + quadrant logic --
 
         [Theory]

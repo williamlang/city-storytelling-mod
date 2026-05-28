@@ -164,9 +164,18 @@ namespace CityStoryMod.Storyteller
                 // independently when answering geography questions. Always
                 // overwrite so it stays in sync with the latest export.
                 string roadsPath = Path.Combine(processedDir, "roads.md");
+                string roadsSvgPath = Path.Combine(processedDir, "roads.svg");
                 if (roads.Count > 0)
                 {
                     File.WriteAllText(roadsPath, RenderRoadsMarkdown(roads));
+                    // Companion SVG render of the road network — gives the
+                    // player (and a vision-capable agent) a quick visual
+                    // alongside the text chunk. Falls back to skipping the
+                    // file when the renderer can't compute a viewBox (no
+                    // footprint, no usable centerlines).
+                    string svg = RenderRoadsSvg(roads, districts, footprint);
+                    if (svg != null) File.WriteAllText(roadsSvgPath, svg);
+                    else { try { File.Delete(roadsSvgPath); } catch { } }
                 }
                 else
                 {
@@ -174,17 +183,41 @@ namespace CityStoryMod.Storyteller
                     // Delete any stale chunk from a prior export rather than
                     // leaving misleading data on disk.
                     try { File.Delete(roadsPath); } catch { }
+                    try { File.Delete(roadsSvgPath); } catch { }
                 }
 
                 // Raster summaries — both optional. The TIFF files are
                 // produced only when CartoBridge asked for them and the map
                 // has the underlying data (worldHeightmap missing on some
-                // editor saves). Per-cycle work: read pixels once, compute
-                // stats incrementally, emit a small prose chunk.
-                RasterSummary elevation = TryProcessElevation(cartoDir, processedDir);
-                RasterSummary water = TryProcessWater(cartoDir, processedDir);
+                // editor saves). Read the grids once here so the combined-
+                // map renderer below can reuse them without a second read
+                // (each grid is ~64 MB at Carto's default 4096² resolution).
+                GeoTiffReader.Grid elevGrid = SafeReadTiff(Path.Combine(cartoDir, "GeoTIFF", "Elevation.tif"));
+                GeoTiffReader.Grid depthGrid = SafeReadTiff(Path.Combine(cartoDir, "GeoTIFF", "Depth.tif"));
+
+                RasterSummary elevation = elevGrid != null ? ComputeElevationSummary(elevGrid) : null;
+                if (elevation != null) File.WriteAllText(Path.Combine(processedDir, "elevation.md"), RenderElevationMarkdown(elevation));
+
+                RasterSummary water = depthGrid != null ? ComputeWaterSummary(depthGrid) : null;
+                if (water != null) File.WriteAllText(Path.Combine(processedDir, "water.md"), RenderWaterMarkdown(water));
+
                 result.ElevationWritten = elevation != null;
                 result.WaterWritten = water != null;
+
+                // Combined map: terrain (hypsometric) + water (depth-shaded) +
+                // districts + roads + labels in one SVG. Renders when there's
+                // at least an elevation grid OR a road network to draw.
+                string combinedMapPath = Path.Combine(processedDir, "map.svg");
+                if (elevGrid != null || roads.Count > 0)
+                {
+                    string combined = RenderCombinedMapSvg(roads, districts, footprint, elevGrid, depthGrid, elevation, water);
+                    if (combined != null) File.WriteAllText(combinedMapPath, combined);
+                    else { try { File.Delete(combinedMapPath); } catch { } }
+                }
+                else
+                {
+                    try { File.Delete(combinedMapPath); } catch { }
+                }
 
                 string indexPath = Path.Combine(processedDir, "index.md");
                 File.WriteAllText(indexPath, RenderIndexMarkdown(districts, namedBuildings, roads, footprint, elevation, water));
@@ -252,6 +285,17 @@ namespace CityStoryMod.Storyteller
             public int Lane;                   // Lane count (0 if not applicable)
             public int Limit;                  // Speed limit (0 if not applicable)
             public double[][] Centerline;      // [n][2] of [x, y] in meters (may be null if geometry unavailable)
+        }
+
+        // Approximate intersection between 2+ distinct named roads. Computed
+        // by bucketing road-segment endpoints into a coarse grid and looking
+        // for cells where multiple road names converge. Coordinates are in
+        // the recentered meters frame.
+        internal class Intersection
+        {
+            public double X, Y;
+            public string Quadrant;            // "NE" / "NW" / "SE" / "SW"
+            public List<string> RoadNames = new List<string>();
         }
 
         internal class Footprint
@@ -633,6 +677,100 @@ namespace CityStoryMod.Storyteller
             return inside;
         }
 
+        // Quadrant label for a point in the recentered meters frame. +x is
+        // east, +y is north (same axis convention as BearingLabel). Used to
+        // give the agent a coarse "where on the map" answer for roads and
+        // un-districted buildings without making it parse coordinates.
+        internal static string QuadrantOfPoint(double x, double y)
+        {
+            bool north = y >= 0;
+            bool east = x >= 0;
+            return (north ? "N" : "S") + (east ? "E" : "W");
+        }
+
+        // Mean of every vertex across every segment in a named-road group.
+        // Returns (0, 0, false) when the group has no usable geometry.
+        internal static (double x, double y, bool hasGeometry) RoadGroupCentroid(IEnumerable<Road> segments)
+        {
+            double sx = 0, sy = 0;
+            int n = 0;
+            foreach (var r in segments)
+            {
+                if (r?.Centerline == null) continue;
+                foreach (var v in r.Centerline)
+                {
+                    if (v == null) continue;
+                    sx += v[0];
+                    sy += v[1];
+                    n++;
+                }
+            }
+            if (n == 0) return (0, 0, false);
+            return (sx / n, sy / n, true);
+        }
+
+        // Approximate intersections of named roads. Strategy: bucket every
+        // segment endpoint into a coarse grid (cellSizeM meters per cell)
+        // and report cells where ≥2 distinct named roads converge. This
+        // catches CS2 road-network nodes (where Carto splits a road into
+        // segments) at real interchanges; it also folds in two roads that
+        // happen to end within the same grid cell, which is fine for a
+        // storytelling map.
+        //
+        // Endpoints only — not intermediate centerline vertices — because
+        // CS2's road graph is built from edges whose endpoints sit on
+        // network nodes. The middle vertices are smoothing samples.
+        internal static List<Intersection> ComputeIntersections(List<Road> roads, double cellSizeM = 50.0)
+        {
+            var grid = new Dictionary<(int cx, int cy), (double sx, double sy, int n, HashSet<string> names)>();
+            foreach (var r in roads)
+            {
+                if (r == null || string.IsNullOrWhiteSpace(r.Name)) continue;
+                if (r.Centerline == null || r.Centerline.Length == 0) continue;
+                var endpoints = new[] { r.Centerline[0], r.Centerline[r.Centerline.Length - 1] };
+                foreach (var v in endpoints)
+                {
+                    if (v == null) continue;
+                    int cx = (int)Math.Floor(v[0] / cellSizeM);
+                    int cy = (int)Math.Floor(v[1] / cellSizeM);
+                    var key = (cx, cy);
+                    if (!grid.TryGetValue(key, out var entry))
+                    {
+                        entry = (0, 0, 0, new HashSet<string>(StringComparer.Ordinal));
+                    }
+                    entry.sx += v[0];
+                    entry.sy += v[1];
+                    entry.n++;
+                    entry.names.Add(r.Name);
+                    grid[key] = entry;
+                }
+            }
+
+            var result = new List<Intersection>();
+            foreach (var kv in grid)
+            {
+                if (kv.Value.names.Count < 2) continue;
+                double x = kv.Value.sx / kv.Value.n;
+                double y = kv.Value.sy / kv.Value.n;
+                result.Add(new Intersection
+                {
+                    X = x,
+                    Y = y,
+                    Quadrant = QuadrantOfPoint(x, y),
+                    RoadNames = kv.Value.names.OrderBy(n => n, StringComparer.Ordinal).ToList(),
+                });
+            }
+
+            // Stable ordering: quadrant, then north→south, then west→east.
+            // Within a quadrant the agent often wants to enumerate from one
+            // corner inward, so y-desc / x-asc reads naturally.
+            return result
+                .OrderBy(i => i.Quadrant, StringComparer.Ordinal)
+                .ThenByDescending(i => i.Y)
+                .ThenBy(i => i.X)
+                .ToList();
+        }
+
         // Compass label for the bearing from (fromX,fromY) to (toX,toY).
         // Y is treated as north-positive — matches both WGS84 latitude and
         // CS2's z axis (which Carto maps onto y in its projection).
@@ -841,7 +979,32 @@ namespace CityStoryMod.Storyteller
                     string sampleCat = group.Select(b => b.Category).FirstOrDefault(c => !string.IsNullOrEmpty(c));
                     string cat = string.IsNullOrEmpty(sampleCat) ? "" : $" — {sampleCat}";
                     string countTag = n > 1 ? $" (× {n})" : "";
-                    sb.AppendLine($"- **{group.Key}**{countTag}{cat}");
+                    string locationTag;
+                    if (n == 1)
+                    {
+                        var only = group.First();
+                        locationTag = $" in the {QuadrantOfPoint(only.CentroidX, only.CentroidY)}";
+                    }
+                    else
+                    {
+                        // Multiple instances of the same name (e.g. "Cairn 02 × 5")
+                        // are usually scattered. Report quadrant counts if any quadrant
+                        // holds them all, else label "scattered."
+                        var byQuad = group
+                            .GroupBy(b => QuadrantOfPoint(b.CentroidX, b.CentroidY), StringComparer.Ordinal)
+                            .OrderBy(g => g.Key, StringComparer.Ordinal)
+                            .ToList();
+                        if (byQuad.Count == 1)
+                        {
+                            locationTag = $" in the {byQuad[0].Key}";
+                        }
+                        else
+                        {
+                            string mix = string.Join(", ", byQuad.Select(g => $"{g.Key} × {g.Count()}"));
+                            locationTag = $" scattered ({mix})";
+                        }
+                    }
+                    sb.AppendLine($"- **{group.Key}**{countTag}{cat}{locationTag}");
                 }
             }
 
@@ -1057,6 +1220,17 @@ namespace CityStoryMod.Storyteller
             return 0;
         }
 
+        // Safe wrapper around GeoTiffReader.Read — returns null when the
+        // file is missing or the reader throws, instead of propagating the
+        // exception. Used by Process() to load both rasters once and share
+        // them between the summary writers and the combined-map renderer
+        // without paying a double-read penalty (each grid is ~64 MB).
+        internal static GeoTiffReader.Grid SafeReadTiff(string path)
+        {
+            try { return GeoTiffReader.Read(path); }
+            catch { return null; }
+        }
+
         // Read Carto's Elevation.tif, compute stats + a quadrant-aware
         // reading, write elevation.md. Pixel values are meters above the
         // map's internal floor (Carto's denormalization drops bounds.min —
@@ -1067,20 +1241,19 @@ namespace CityStoryMod.Storyteller
         // it; null means "no chunk emitted."
         internal static RasterSummary TryProcessElevation(string cartoDir, string processedDir)
         {
-            string elevationPath = Path.Combine(cartoDir, "GeoTIFF", "Elevation.tif");
-            GeoTiffReader.Grid grid;
-            try
-            {
-                grid = GeoTiffReader.Read(elevationPath);
-                if (grid == null) return null;
-            }
-            catch
-            {
-                // Bad parse — log via the caller's exception path. We
-                // intentionally don't crash the rest of the export.
-                return null;
-            }
+            GeoTiffReader.Grid grid = SafeReadTiff(Path.Combine(cartoDir, "GeoTIFF", "Elevation.tif"));
+            if (grid == null) return null;
+            var summary = ComputeElevationSummary(grid);
+            if (summary == null) return null;
+            File.WriteAllText(Path.Combine(processedDir, "elevation.md"), RenderElevationMarkdown(summary));
+            return summary;
+        }
 
+        // Pure-function compute step factored out of TryProcessElevation
+        // so the combined-map renderer can reuse the same numbers without
+        // reading the TIFF a second time.
+        internal static RasterSummary ComputeElevationSummary(GeoTiffReader.Grid grid)
+        {
             // Single pass: stats + argmax/argmin (for quadrant labels).
             int min = int.MaxValue, max = int.MinValue;
             long argMaxIdx = -1, argMinIdx = -1;
@@ -1111,7 +1284,7 @@ namespace CityStoryMod.Storyteller
             }
             double stdev = Math.Sqrt(sqDev / count);
 
-            var summary = new RasterSummary
+            return new RasterSummary
             {
                 Width = grid.Width,
                 Height = grid.Height,
@@ -1124,9 +1297,6 @@ namespace CityStoryMod.Storyteller
                 LowQuadrant = QuadrantOf(argMinIdx, grid.Width, grid.Height),
                 Reading = ClassifyTerrain(stdev, max - min, mean),
             };
-
-            File.WriteAllText(Path.Combine(processedDir, "elevation.md"), RenderElevationMarkdown(summary));
-            return summary;
         }
 
         // Map a row-major pixel index to a compass quadrant label. TIFF row 0
@@ -1177,18 +1347,19 @@ namespace CityStoryMod.Storyteller
         // cells are positive integers (depth in meters below sea level).
         internal static RasterSummary TryProcessWater(string cartoDir, string processedDir)
         {
-            string depthPath = Path.Combine(cartoDir, "GeoTIFF", "Depth.tif");
-            GeoTiffReader.Grid grid;
-            try
-            {
-                grid = GeoTiffReader.Read(depthPath);
-                if (grid == null) return null;
-            }
-            catch
-            {
-                return null;
-            }
+            GeoTiffReader.Grid grid = SafeReadTiff(Path.Combine(cartoDir, "GeoTIFF", "Depth.tif"));
+            if (grid == null) return null;
+            var summary = ComputeWaterSummary(grid);
+            if (summary == null) return null;
+            File.WriteAllText(Path.Combine(processedDir, "water.md"), RenderWaterMarkdown(summary));
+            return summary;
+        }
 
+        // Pure-function compute step factored out of TryProcessWater so
+        // the combined-map renderer can reuse the depth-grid stats without
+        // re-reading the TIFF.
+        internal static RasterSummary ComputeWaterSummary(GeoTiffReader.Grid grid)
+        {
             int max = 0;
             long argMaxIdx = -1;
             double sum = 0;
@@ -1284,8 +1455,6 @@ namespace CityStoryMod.Storyteller
                 HighQuadrant = QuadrantOf(argMaxIdx, w, h),  // deepest cell's quadrant
                 Reading = ClassifyWater(percent, qPercent, shorelineRatio),
             };
-
-            File.WriteAllText(Path.Combine(processedDir, "water.md"), RenderWaterMarkdown(summary));
             return summary;
         }
 
@@ -1473,7 +1642,9 @@ namespace CityStoryMod.Storyteller
 
             // Named roads — typically highways, signature streets the player
             // or CS2 has given a name to. Group by name so a long road
-            // composed of many segments shows as one bullet.
+            // composed of many segments shows as one bullet, and emit the
+            // group centroid + quadrant so the agent can answer "where is
+            // X?" without rolling its own parser.
             var named = roads.Where(r => !string.IsNullOrWhiteSpace(r.Name))
                 .GroupBy(r => r.Name, StringComparer.Ordinal)
                 .OrderBy(g => g.Key, StringComparer.Ordinal)
@@ -1497,11 +1668,673 @@ namespace CityStoryMod.Storyteller
                     if (!string.IsNullOrEmpty(sampleCat)) bits.Add(sampleCat);
                     bits.Add($"{km.ToString("F2", ci)} km");
                     if (segs > 1) bits.Add($"{segs} segments");
+                    var centroid = RoadGroupCentroid(group);
+                    if (centroid.hasGeometry)
+                    {
+                        bits.Add($"centered ({centroid.x.ToString("F0", ci)}, {centroid.y.ToString("F0", ci)}) in the {QuadrantOfPoint(centroid.x, centroid.y)}");
+                    }
                     sb.AppendLine($"- **{group.Key}** — {string.Join(", ", bits)}");
+                }
+            }
+            sb.AppendLine();
+
+            // Intersections: where two or more named roads meet. Naive
+            // grid-bucket detection, see ComputeIntersections. Skip when
+            // there's nothing to show — a fresh city with one named highway
+            // produces zero intersections, and an empty section is noise.
+            var intersections = ComputeIntersections(roads);
+            if (intersections.Count > 0)
+            {
+                sb.AppendLine("## Intersections of named roads");
+                sb.AppendLine();
+                sb.AppendLine("_Approximate junctions where two or more named roads converge (50 m buckets on segment endpoints). Use to anchor 'near the interchange at X' questions._");
+                sb.AppendLine();
+                foreach (var x in intersections)
+                {
+                    string roads_ = string.Join(" × ", x.RoadNames);
+                    sb.AppendLine($"- **{x.Quadrant}** at ({x.X.ToString("F0", ci)}, {x.Y.ToString("F0", ci)}) — {roads_}");
                 }
             }
 
             return sb.ToString();
+        }
+
+        // Render the road network to a self-contained SVG. Coordinates are
+        // taken from the recentered meters frame; +y world is north, but SVG
+        // +y is down, so we flip when mapping world → pixel.
+        //
+        // Layers (back to front):
+        //   1. District polygons (faint fill so they read as background)
+        //   2. Anonymous road segments (thin gray)
+        //   3. Named road segments (colored by name, thicker for highways)
+        //   4. Intersections (black dots)
+        //   5. Named-road labels (white halo for readability)
+        //   6. North arrow
+        //
+        // Returns null when there's no usable footprint or geometry to draw.
+        internal static string RenderRoadsSvg(List<Road> roads, List<District> districts, Footprint footprint)
+        {
+            if (roads == null || roads.Count == 0) return null;
+
+            // Footprint preferred. Fall back to the geometric envelope of
+            // every road centerline + district polygon if footprint is empty
+            // (older export, missing MapTiles, etc.).
+            double minX, minY, maxX, maxY;
+            if (footprint != null && footprint.HasGeometry)
+            {
+                minX = footprint.MinX; minY = footprint.MinY;
+                maxX = footprint.MaxX; maxY = footprint.MaxY;
+            }
+            else
+            {
+                minX = double.PositiveInfinity; minY = double.PositiveInfinity;
+                maxX = double.NegativeInfinity; maxY = double.NegativeInfinity;
+                foreach (var r in roads)
+                {
+                    if (r.Centerline == null) continue;
+                    foreach (var v in r.Centerline)
+                    {
+                        if (v == null) continue;
+                        if (v[0] < minX) minX = v[0];
+                        if (v[1] < minY) minY = v[1];
+                        if (v[0] > maxX) maxX = v[0];
+                        if (v[1] > maxY) maxY = v[1];
+                    }
+                }
+                if (districts != null)
+                {
+                    foreach (var d in districts)
+                    {
+                        if (d.MinX < minX) minX = d.MinX;
+                        if (d.MinY < minY) minY = d.MinY;
+                        if (d.MaxX > maxX) maxX = d.MaxX;
+                        if (d.MaxY > maxY) maxY = d.MaxY;
+                    }
+                }
+                if (double.IsInfinity(minX)) return null;
+            }
+
+            double worldW = maxX - minX;
+            double worldH = maxY - minY;
+            if (worldW <= 0 || worldH <= 0) return null;
+
+            const int targetWidthPx = 1200;
+            const double padding = 24;
+            double scale = targetWidthPx / worldW;
+            double drawH = worldH * scale;
+            double cssW = targetWidthPx + padding * 2;
+            double cssH = drawH + padding * 2;
+
+            // World → SVG pixel. Flip Y so north stays up.
+            double SX(double wx) => padding + (wx - minX) * scale;
+            double SY(double wy) => padding + (maxY - wy) * scale;
+
+            var ci = CultureInfo.InvariantCulture;
+            var sb = new StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+            sb.AppendLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{cssW.ToString("F0", ci)}\" height=\"{cssH.ToString("F0", ci)}\" viewBox=\"0 0 {cssW.ToString("F0", ci)} {cssH.ToString("F0", ci)}\" font-family=\"sans-serif\">");
+            sb.AppendLine("  <rect width=\"100%\" height=\"100%\" fill=\"#f7f7f2\"/>");
+
+            // Districts as faint background polygons. Keeps the road
+            // overlay readable while still giving the reader a sense of
+            // city footprint when districts exist.
+            if (districts != null && districts.Count > 0)
+            {
+                sb.AppendLine("  <g id=\"districts\" fill=\"#dde6dd\" stroke=\"#a8b8a8\" stroke-width=\"0.5\" opacity=\"0.6\">");
+                foreach (var d in districts)
+                {
+                    if (d.Polygon == null) continue;
+                    var pts = string.Join(" ", d.Polygon
+                        .Where(v => v != null)
+                        .Select(v => $"{SX(v[0]).ToString("F1", ci)},{SY(v[1]).ToString("F1", ci)}"));
+                    sb.AppendLine($"    <polygon points=\"{pts}\"/>");
+                }
+                sb.AppendLine("  </g>");
+            }
+
+            // Anonymous road segments. CS2's map-generated default roads
+            // appear here at t=0 and stay anonymous unless the player names
+            // them, so the gray underlayer is most of what you see early on.
+            sb.AppendLine("  <g id=\"unnamed-roads\" stroke=\"#b8b8b8\" stroke-width=\"0.6\" fill=\"none\" stroke-linecap=\"round\">");
+            foreach (var r in roads)
+            {
+                if (r.Centerline == null || r.Centerline.Length < 2) continue;
+                if (!string.IsNullOrWhiteSpace(r.Name)) continue;
+                AppendPolyline(sb, r.Centerline, SX, SY, ci);
+            }
+            sb.AppendLine("  </g>");
+
+            // Named roads. Group so all segments of one road share a color,
+            // and highways draw thicker. Palette is colorblind-aware (Okabe-Ito).
+            string[] palette =
+            {
+                "#d55e00", "#0072b2", "#009e73", "#cc79a7",
+                "#e69f00", "#56b4e9", "#f0e442", "#000000"
+            };
+            var namedGroups = roads
+                .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+                .GroupBy(r => r.Name, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .ToList();
+
+            sb.AppendLine("  <g id=\"named-roads\" fill=\"none\" stroke-linecap=\"round\">");
+            for (int gi = 0; gi < namedGroups.Count; gi++)
+            {
+                var group = namedGroups[gi];
+                string color = palette[gi % palette.Length];
+                bool isHighway = group.Any(r => (r.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0);
+                double strokeWidth = isHighway ? 2.4 : 1.4;
+                sb.AppendLine($"    <g stroke=\"{color}\" stroke-width=\"{strokeWidth.ToString("F1", ci)}\">");
+                foreach (var r in group)
+                {
+                    if (r.Centerline == null || r.Centerline.Length < 2) continue;
+                    AppendPolyline(sb, r.Centerline, SX, SY, ci);
+                }
+                sb.AppendLine("    </g>");
+            }
+            sb.AppendLine("  </g>");
+
+            // Intersections — black dots over the named-roads layer.
+            var intersections = ComputeIntersections(roads);
+            if (intersections.Count > 0)
+            {
+                sb.AppendLine("  <g id=\"intersections\" fill=\"#111\" stroke=\"white\" stroke-width=\"1.2\">");
+                foreach (var ix in intersections)
+                {
+                    sb.AppendLine($"    <circle cx=\"{SX(ix.X).ToString("F1", ci)}\" cy=\"{SY(ix.Y).ToString("F1", ci)}\" r=\"3.5\"/>");
+                }
+                sb.AppendLine("  </g>");
+            }
+
+            // Labels. Two filters keep the diagram readable on cities full of
+            // CS2-default named decorations like "Medium Roundabout with a
+            // Tree and Bushes":
+            //   1. Eligibility — highways always; non-highways only when at
+            //      least 500 m long (drops short Carto-default decorations
+            //      and player single-block streets).
+            //   2. Greedy de-collision — place labels in priority order
+            //      (highway first, then by length desc) and skip any whose
+            //      bounding box overlaps a previously placed label. Roads
+            //      still draw their colored strokes; only the text drops out.
+            // The full unfiltered list still lives in roads.md, which is the
+            // contract for the agent.
+            const double minLabelLengthM = 500.0;
+            const int maxLabels = 18;
+            const double fontSize = 11.0;
+            const double approxCharWidth = 6.0;     // empirical, sans-serif at 11px
+            const double lineHeight = 14.0;
+            const double labelPadding = 2.0;        // expand box for halo + breathing room
+
+            var labelCandidates = namedGroups
+                .Select(g => new
+                {
+                    Group = g,
+                    Length = g.Sum(r => r.Length),
+                    IsHighway = g.Any(r => (r.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0),
+                })
+                .Where(x => x.IsHighway || x.Length >= minLabelLengthM)
+                .OrderByDescending(x => x.IsHighway)
+                .ThenByDescending(x => x.Length)
+                .ToList();
+
+            // Track placed boxes in SVG-pixel space for overlap tests.
+            var placed = new List<(double X1, double Y1, double X2, double Y2)>();
+            sb.AppendLine($"  <g id=\"labels\" font-size=\"{fontSize.ToString("F0", ci)}\" fill=\"#222\" stroke=\"white\" stroke-width=\"3\" paint-order=\"stroke fill\" text-anchor=\"middle\">");
+            int placedCount = 0;
+            foreach (var cand in labelCandidates)
+            {
+                if (placedCount >= maxLabels) break;
+                var centroid = RoadGroupCentroid(cand.Group);
+                if (!centroid.hasGeometry) continue;
+
+                double cx = SX(centroid.x);
+                double cy = SY(centroid.y);
+                double halfW = (cand.Group.Key.Length * approxCharWidth) / 2.0 + labelPadding;
+                double halfH = lineHeight / 2.0 + labelPadding;
+                double x1 = cx - halfW, x2 = cx + halfW;
+                double y1 = cy - halfH, y2 = cy + halfH;
+
+                bool overlaps = false;
+                for (int p = 0; p < placed.Count; p++)
+                {
+                    var b = placed[p];
+                    if (x1 < b.X2 && x2 > b.X1 && y1 < b.Y2 && y2 > b.Y1) { overlaps = true; break; }
+                }
+                if (overlaps) continue;
+
+                placed.Add((x1, y1, x2, y2));
+                placedCount++;
+                sb.AppendLine($"    <text x=\"{cx.ToString("F1", ci)}\" y=\"{cy.ToString("F1", ci)}\">{EscapeXml(cand.Group.Key)}</text>");
+            }
+            sb.AppendLine("  </g>");
+
+            // North arrow. Keep it small in the top-right corner.
+            double arrowX = cssW - 36;
+            double arrowY = 24;
+            sb.AppendLine($"  <g id=\"north\" transform=\"translate({arrowX.ToString("F0", ci)} {arrowY.ToString("F0", ci)})\" fill=\"#222\" stroke=\"#222\" stroke-width=\"1.2\">");
+            sb.AppendLine("    <line x1=\"0\" y1=\"6\" x2=\"0\" y2=\"24\" stroke-linecap=\"round\"/>");
+            sb.AppendLine("    <polygon points=\"-5,6 5,6 0,-2\" stroke=\"none\"/>");
+            sb.AppendLine("    <text x=\"0\" y=\"36\" font-size=\"12\" text-anchor=\"middle\" stroke=\"none\">N</text>");
+            sb.AppendLine("  </g>");
+
+            sb.AppendLine("</svg>");
+            return sb.ToString();
+        }
+
+        static void AppendPolyline(StringBuilder sb, double[][] line, Func<double, double> sx, Func<double, double> sy, CultureInfo ci)
+        {
+            var pts = new StringBuilder();
+            bool first = true;
+            foreach (var v in line)
+            {
+                if (v == null) continue;
+                if (!first) pts.Append(' ');
+                pts.Append(sx(v[0]).ToString("F1", ci)).Append(',').Append(sy(v[1]).ToString("F1", ci));
+                first = false;
+            }
+            sb.Append("    <polyline points=\"").Append(pts).AppendLine("\"/>");
+        }
+
+        static string EscapeXml(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
+        }
+
+        // -- Combined map (carto/processed/map.svg) --
+        //
+        // Single SVG showing terrain (hypsometric tints), water bodies
+        // (depth-shaded blue), districts (outlines), roads (colored, by
+        // category), intersections, and labels. Designed as a player-facing
+        // visual; the agent's contract remains the text chunks (roads.md,
+        // index.md, etc.).
+        //
+        // Layer order (back to front):
+        //   1. Background fill
+        //   2. Terrain raster (downsampled to TerrainResolution, RLE'd rows)
+        //   3. District outlines (no fill — terrain shows through)
+        //   4. Anonymous roads (gray)
+        //   5. Named roads (colored, highways thicker)
+        //   6. Intersection markers
+        //   7. Filtered, de-collided labels
+        //   8. North arrow
+
+        // Downsampled cells per side. 192 strikes a good balance for a
+        // 14 km CS2 map: ~73 m per cell — enough relief structure shows
+        // through, output stays around 600–900 KB after RLE compression.
+        const int CombinedMapTerrainResolution = 192;
+
+        internal static string RenderCombinedMapSvg(
+            List<Road> roads,
+            List<District> districts,
+            Footprint footprint,
+            GeoTiffReader.Grid elevation,
+            GeoTiffReader.Grid depth,
+            RasterSummary elevSummary,
+            RasterSummary waterSummary)
+        {
+            // Need at least one of: a footprint with geometry, road centerlines,
+            // or a raster. Without all three we have nothing useful to draw.
+            double minX, minY, maxX, maxY;
+            if (footprint != null && footprint.HasGeometry)
+            {
+                minX = footprint.MinX; minY = footprint.MinY;
+                maxX = footprint.MaxX; maxY = footprint.MaxY;
+            }
+            else
+            {
+                minX = double.PositiveInfinity; minY = double.PositiveInfinity;
+                maxX = double.NegativeInfinity; maxY = double.NegativeInfinity;
+                if (roads != null)
+                {
+                    foreach (var r in roads)
+                    {
+                        if (r.Centerline == null) continue;
+                        foreach (var v in r.Centerline)
+                        {
+                            if (v == null) continue;
+                            if (v[0] < minX) minX = v[0];
+                            if (v[1] < minY) minY = v[1];
+                            if (v[0] > maxX) maxX = v[0];
+                            if (v[1] > maxY) maxY = v[1];
+                        }
+                    }
+                }
+                if (districts != null)
+                {
+                    foreach (var d in districts)
+                    {
+                        if (d.MinX < minX) minX = d.MinX;
+                        if (d.MinY < minY) minY = d.MinY;
+                        if (d.MaxX > maxX) maxX = d.MaxX;
+                        if (d.MaxY > maxY) maxY = d.MaxY;
+                    }
+                }
+                if (double.IsInfinity(minX)) return null;
+            }
+
+            double worldW = maxX - minX;
+            double worldH = maxY - minY;
+            if (worldW <= 0 || worldH <= 0) return null;
+
+            const int targetWidthPx = 1200;
+            const double padding = 24;
+            double scale = targetWidthPx / worldW;
+            double drawW = worldW * scale;
+            double drawH = worldH * scale;
+            double cssW = drawW + padding * 2;
+            double cssH = drawH + padding * 2;
+
+            double SX(double wx) => padding + (wx - minX) * scale;
+            double SY(double wy) => padding + (maxY - wy) * scale;
+
+            var ci = CultureInfo.InvariantCulture;
+            var sb = new StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+            sb.AppendLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{cssW.ToString("F0", ci)}\" height=\"{cssH.ToString("F0", ci)}\" viewBox=\"0 0 {cssW.ToString("F0", ci)} {cssH.ToString("F0", ci)}\" font-family=\"sans-serif\">");
+
+            // Plain neutral background — shown only at the corners outside the
+            // terrain raster (rare, but possible when the map's playable area
+            // doesn't span the full footprint).
+            sb.AppendLine("  <rect width=\"100%\" height=\"100%\" fill=\"#1a2330\"/>");
+
+            // 1. Terrain raster. Downsample elevation + depth in lockstep, then
+            // emit row-wise RLE rectangles. Each cell maps to a world rect
+            // whose SVG dimensions are the same across the grid.
+            if (elevation != null)
+            {
+                int dstW = CombinedMapTerrainResolution;
+                int dstH = CombinedMapTerrainResolution;
+                int[] dsElev = DownsampleGrid(elevation, dstW, dstH);
+                int[] dsDepth = depth != null ? DownsampleGrid(depth, dstW, dstH) : null;
+
+                int elevMin = elevSummary != null ? elevSummary.Min : int.MinValue;
+                int elevMax = elevSummary != null ? elevSummary.Max : int.MaxValue;
+                if (elevMin == int.MinValue || elevMax == int.MaxValue)
+                {
+                    elevMin = int.MaxValue; elevMax = int.MinValue;
+                    foreach (var v in dsElev)
+                    {
+                        if (v == int.MinValue) continue;
+                        if (v < elevMin) elevMin = v;
+                        if (v > elevMax) elevMax = v;
+                    }
+                }
+                int depthMax = waterSummary != null && waterSummary.Max > 0
+                    ? waterSummary.Max
+                    : 1;
+
+                double cellSvgW = drawW / dstW;
+                double cellSvgH = drawH / dstH;
+
+                sb.AppendLine("  <g id=\"terrain\" shape-rendering=\"crispEdges\">");
+                for (int r = 0; r < dstH; r++)
+                {
+                    int rowStart = r * dstW;
+                    int c = 0;
+                    while (c < dstW)
+                    {
+                        string color = TerrainCellColor(dsElev[rowStart + c], dsDepth?[rowStart + c] ?? 0, elevMin, elevMax, depthMax);
+                        int runStart = c;
+                        c++;
+                        while (c < dstW)
+                        {
+                            string nc = TerrainCellColor(dsElev[rowStart + c], dsDepth?[rowStart + c] ?? 0, elevMin, elevMax, depthMax);
+                            if (!ReferenceEquals(nc, color) && nc != color) break;
+                            c++;
+                        }
+                        if (color == null) continue;
+                        int runLen = c - runStart;
+                        double rx = padding + runStart * cellSvgW;
+                        double ry = padding + r * cellSvgH;
+                        double rw = runLen * cellSvgW + 0.5;   // +0.5 px overdraw so
+                                                                // adjacent rows don't
+                                                                // hairline-gap on
+                                                                // sub-pixel boundaries
+                        double rh = cellSvgH + 0.5;
+                        sb.AppendLine($"    <rect x=\"{rx.ToString("F2", ci)}\" y=\"{ry.ToString("F2", ci)}\" width=\"{rw.ToString("F2", ci)}\" height=\"{rh.ToString("F2", ci)}\" fill=\"{color}\"/>");
+                    }
+                }
+                sb.AppendLine("  </g>");
+            }
+
+            // 2. District outlines. Stroke only — the terrain raster is the
+            // background, we don't want to obscure it with district fills.
+            if (districts != null && districts.Count > 0)
+            {
+                sb.AppendLine("  <g id=\"districts\" fill=\"none\" stroke=\"rgba(255,255,255,0.55)\" stroke-width=\"1\" stroke-dasharray=\"4 3\">");
+                foreach (var d in districts)
+                {
+                    if (d.Polygon == null) continue;
+                    var pts = string.Join(" ", d.Polygon
+                        .Where(v => v != null)
+                        .Select(v => $"{SX(v[0]).ToString("F1", ci)},{SY(v[1]).ToString("F1", ci)}"));
+                    sb.AppendLine($"    <polygon points=\"{pts}\"/>");
+                }
+                sb.AppendLine("  </g>");
+            }
+
+            // 3. Anonymous roads — quiet gray over the terrain.
+            sb.AppendLine("  <g id=\"unnamed-roads\" stroke=\"rgba(40,40,40,0.7)\" stroke-width=\"0.7\" fill=\"none\" stroke-linecap=\"round\">");
+            foreach (var r in roads)
+            {
+                if (r.Centerline == null || r.Centerline.Length < 2) continue;
+                if (!string.IsNullOrWhiteSpace(r.Name)) continue;
+                AppendPolyline(sb, r.Centerline, SX, SY, ci);
+            }
+            sb.AppendLine("  </g>");
+
+            // 4. Named roads. Same palette / weight rules as roads.svg.
+            string[] palette =
+            {
+                "#d62728", "#1f5fb0", "#0a9655", "#b035a6",
+                "#e6a700", "#1da0c8", "#222222", "#7b3f00"
+            };
+            var namedGroups = roads
+                .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+                .GroupBy(r => r.Name, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .ToList();
+
+            sb.AppendLine("  <g id=\"named-roads\" fill=\"none\" stroke-linecap=\"round\">");
+            for (int gi = 0; gi < namedGroups.Count; gi++)
+            {
+                var group = namedGroups[gi];
+                string color = palette[gi % palette.Length];
+                bool isHighway = group.Any(r => (r.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0);
+                double strokeWidth = isHighway ? 2.6 : 1.6;
+                sb.AppendLine($"    <g stroke=\"{color}\" stroke-width=\"{strokeWidth.ToString("F1", ci)}\">");
+                foreach (var r in group)
+                {
+                    if (r.Centerline == null || r.Centerline.Length < 2) continue;
+                    AppendPolyline(sb, r.Centerline, SX, SY, ci);
+                }
+                sb.AppendLine("    </g>");
+            }
+            sb.AppendLine("  </g>");
+
+            // 5. Intersections — black dots with white halo for legibility.
+            var intersections = ComputeIntersections(roads);
+            if (intersections.Count > 0)
+            {
+                sb.AppendLine("  <g id=\"intersections\" fill=\"#111\" stroke=\"white\" stroke-width=\"1.4\">");
+                foreach (var ix in intersections)
+                {
+                    sb.AppendLine($"    <circle cx=\"{SX(ix.X).ToString("F1", ci)}\" cy=\"{SY(ix.Y).ToString("F1", ci)}\" r=\"3.8\"/>");
+                }
+                sb.AppendLine("  </g>");
+            }
+
+            // 6. Labels — same filter / de-collision rules as roads.svg.
+            const double minLabelLengthM = 500.0;
+            const int maxLabels = 18;
+            const double fontSize = 11.0;
+            const double approxCharWidth = 6.0;
+            const double lineHeight = 14.0;
+            const double labelPadding = 2.0;
+
+            var labelCandidates = namedGroups
+                .Select(g => new
+                {
+                    Group = g,
+                    Length = g.Sum(rr => rr.Length),
+                    IsHighway = g.Any(rr => (rr.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0),
+                })
+                .Where(x => x.IsHighway || x.Length >= minLabelLengthM)
+                .OrderByDescending(x => x.IsHighway)
+                .ThenByDescending(x => x.Length)
+                .ToList();
+
+            var placed = new List<(double X1, double Y1, double X2, double Y2)>();
+            sb.AppendLine($"  <g id=\"labels\" font-size=\"{fontSize.ToString("F0", ci)}\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"3\" paint-order=\"stroke fill\" text-anchor=\"middle\">");
+            int placedCount = 0;
+            foreach (var cand in labelCandidates)
+            {
+                if (placedCount >= maxLabels) break;
+                var centroid = RoadGroupCentroid(cand.Group);
+                if (!centroid.hasGeometry) continue;
+                double cx = SX(centroid.x);
+                double cy = SY(centroid.y);
+                double halfW = (cand.Group.Key.Length * approxCharWidth) / 2.0 + labelPadding;
+                double halfH = lineHeight / 2.0 + labelPadding;
+                double x1 = cx - halfW, x2 = cx + halfW;
+                double y1 = cy - halfH, y2 = cy + halfH;
+                bool overlaps = false;
+                foreach (var b in placed)
+                {
+                    if (x1 < b.X2 && x2 > b.X1 && y1 < b.Y2 && y2 > b.Y1) { overlaps = true; break; }
+                }
+                if (overlaps) continue;
+                placed.Add((x1, y1, x2, y2));
+                placedCount++;
+                sb.AppendLine($"    <text x=\"{cx.ToString("F1", ci)}\" y=\"{cy.ToString("F1", ci)}\">{EscapeXml(cand.Group.Key)}</text>");
+            }
+            sb.AppendLine("  </g>");
+
+            // 7. North arrow.
+            double arrowX = cssW - 36;
+            double arrowY = 24;
+            sb.AppendLine($"  <g id=\"north\" transform=\"translate({arrowX.ToString("F0", ci)} {arrowY.ToString("F0", ci)})\" fill=\"#fff\" stroke=\"#fff\" stroke-width=\"1.2\">");
+            sb.AppendLine("    <line x1=\"0\" y1=\"6\" x2=\"0\" y2=\"24\" stroke-linecap=\"round\"/>");
+            sb.AppendLine("    <polygon points=\"-5,6 5,6 0,-2\" stroke=\"none\"/>");
+            sb.AppendLine("    <text x=\"0\" y=\"36\" font-size=\"12\" text-anchor=\"middle\" stroke=\"none\">N</text>");
+            sb.AppendLine("  </g>");
+
+            sb.AppendLine("</svg>");
+            return sb.ToString();
+        }
+
+        // Block-average downsample for an int[] raster. NoData cells are
+        // skipped from the average; if a block has only NoData cells, the
+        // target cell gets int.MinValue (sentinel — caller maps it to a
+        // "no terrain" color, typically the background).
+        //
+        // For Carto's depth raster, NoData is -32768 (land) and water cells
+        // are positive. A block-averaged target cell is "water" when its
+        // average is > 0 — which only happens when at least some source
+        // cells in the block were water. The averaging itself smooths
+        // shoreline pixels nicely.
+        internal static int[] DownsampleGrid(GeoTiffReader.Grid grid, int dstW, int dstH)
+        {
+            int[] dst = new int[dstW * dstH];
+            int srcW = grid.Width, srcH = grid.Height;
+            int[] src = grid.Pixels;
+            int nodata = grid.NoData;
+            for (int dy = 0; dy < dstH; dy++)
+            {
+                int y0 = (int)((long)dy * srcH / dstH);
+                int y1 = (int)((long)(dy + 1) * srcH / dstH);
+                if (y1 <= y0) y1 = y0 + 1;
+                for (int dx = 0; dx < dstW; dx++)
+                {
+                    int x0 = (int)((long)dx * srcW / dstW);
+                    int x1 = (int)((long)(dx + 1) * srcW / dstW);
+                    if (x1 <= x0) x1 = x0 + 1;
+                    long sum = 0;
+                    int count = 0;
+                    for (int sy = y0; sy < y1; sy++)
+                    {
+                        int rowStart = sy * srcW;
+                        for (int sx = x0; sx < x1; sx++)
+                        {
+                            int v = src[rowStart + sx];
+                            if (v == nodata) continue;
+                            sum += v;
+                            count++;
+                        }
+                    }
+                    dst[dy * dstW + dx] = count == 0 ? int.MinValue : (int)(sum / count);
+                }
+            }
+            return dst;
+        }
+
+        // Pick a fill color for a single downsampled cell. Water takes
+        // precedence — any cell where the depth block averaged > 0 reads as
+        // water, shaded by depth. Otherwise hypsometric tint based on
+        // elevation. Returns null for cells outside the playable map (both
+        // sentinels) — the caller skips emission, the background shows
+        // through.
+        internal static string TerrainCellColor(int elev, int depth, int elevMin, int elevMax, int depthMax)
+        {
+            if (depth > 0)
+            {
+                double t = depthMax > 0 ? Math.Min(1.0, (double)depth / depthMax) : 0.0;
+                return InterpolateColors(WaterRamp, t);
+            }
+            if (elev == int.MinValue) return null;
+            double tt = elevMax > elevMin
+                ? (double)(elev - elevMin) / (elevMax - elevMin)
+                : 0.0;
+            return InterpolateColors(LandRamp, tt);
+        }
+
+        // 5-stop hypsometric tint for land. Walks from a low forest green
+        // through agricultural yellows up to bare rock white. Matches the
+        // intuitive "what altitude is this" reading on a paper topo map.
+        static readonly (double t, int r, int g, int b)[] LandRamp = new (double, int, int, int)[]
+        {
+            (0.00, 60, 110, 60),     // lowland green
+            (0.25, 130, 165, 80),    // mid green
+            (0.50, 200, 175, 100),   // tan / dry grass
+            (0.75, 150, 115, 80),    // brown
+            (1.00, 235, 230, 220),   // bare rock / snow
+        };
+
+        // 3-stop blue ramp for water depth. Shallow → deep.
+        static readonly (double t, int r, int g, int b)[] WaterRamp = new (double, int, int, int)[]
+        {
+            (0.00, 150, 200, 230),   // shallow
+            (0.50, 70, 130, 190),    // mid
+            (1.00, 25, 60, 105),     // deep
+        };
+
+        // Linear interpolation along a color-ramp table. Caches the last
+        // returned color string is NOT done here — same colors recur often
+        // enough that callers could intern them, but the per-call cost is
+        // small and the RLE pass collapses runs anyway.
+        static string InterpolateColors((double t, int r, int g, int b)[] ramp, double t)
+        {
+            if (t <= ramp[0].t) return RgbHex(ramp[0].r, ramp[0].g, ramp[0].b);
+            if (t >= ramp[ramp.Length - 1].t) return RgbHex(ramp[ramp.Length - 1].r, ramp[ramp.Length - 1].g, ramp[ramp.Length - 1].b);
+            for (int i = 1; i < ramp.Length; i++)
+            {
+                if (t <= ramp[i].t)
+                {
+                    double f = (t - ramp[i - 1].t) / (ramp[i].t - ramp[i - 1].t);
+                    int rr = (int)(ramp[i - 1].r + f * (ramp[i].r - ramp[i - 1].r));
+                    int gg = (int)(ramp[i - 1].g + f * (ramp[i].g - ramp[i - 1].g));
+                    int bb = (int)(ramp[i - 1].b + f * (ramp[i].b - ramp[i - 1].b));
+                    return RgbHex(rr, gg, bb);
+                }
+            }
+            var last = ramp[ramp.Length - 1];
+            return RgbHex(last.r, last.g, last.b);
+        }
+
+        static string RgbHex(int r, int g, int b)
+        {
+            return "#" + ((r & 0xff) << 16 | (g & 0xff) << 8 | (b & 0xff)).ToString("x6", CultureInfo.InvariantCulture);
         }
     }
 }

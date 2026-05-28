@@ -285,7 +285,7 @@ export function StorytellerToolbar() {
                   {cartoAvailable && (
                     <button
                       type="button"
-                      className={styles.secondary}
+                      className={`${styles.secondary} ${refreshDisabled ? styles.secondaryPulsing : ""}`}
                       disabled={refreshDisabled}
                       title="Update spatial data via Carto. Locks the main thread briefly."
                       onClick={handleRefreshClick}
