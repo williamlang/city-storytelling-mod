@@ -515,7 +515,7 @@ namespace CityStoryMod.Systems
         // workplace, school, plus followed/is_criminal flags. Households'
         // wealth tier is deferred — needs a CitizenHappinessParameterData
         // singleton join we don't do yet. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.7";
+        const string SchemaVersion = "0.8";
 
         void Export(string triggeredBy)
         {
@@ -598,7 +598,8 @@ namespace CityStoryMod.Systems
             Dictionary<string, NamedBuilding> namedBuildings = CollectNamedBuildings(districtNameByEntity);
             Dictionary<string, BuildingFingerprint> allBuildings = CollectAllBuildings(districtNameByEntity);
             object pollution = CollectPollution(districtNameByEntity);
-            var (landValue, crime) = CollectLandValueAndCrime(districtNameByEntity);
+            object landValue = CollectLandValue(districtNameByEntity);
+            object crime = CollectCrimeByDistrict(districtNameByEntity);
             object citizensSample = CollectCitizensSample(districtNameByEntity, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
@@ -683,11 +684,11 @@ namespace CityStoryMod.Systems
                 // positions are the simplest place-where-people-live proxy.
                 pollution = pollution,
 
-                // v0.6 — same per-building → bin-by-district sampling pattern.
-                // land_value reads LandValueSystem's cell grid at each building
-                // position; crime reads Game.Buildings.CrimeProducer.m_Crime
-                // on buildings that have it (mostly residential/commercial).
-                // Sample populations differ — see CollectLandValueAndCrime.
+                // v0.6 — per-district land_value via LandValueSystem's cell
+                // grid sampled at every building position.
+                // v0.8 — crime switched from CrimeProducer.m_Crime (saturated
+                // per-building accumulator with no spatial signal) to a count
+                // of active resident criminals binned by home district.
                 land_value = landValue,
                 crime = crime,
 
@@ -1485,19 +1486,11 @@ namespace CityStoryMod.Systems
             };
         }
 
-        // Samples land value at every building position and reads CrimeProducer
-        // per building, binning both by district. Mirrors CollectPollution but
-        // returns two separate top-level blocks (land_value, crime) because the
-        // two metrics have different sample populations:
-        //   • land_value: every building with a Transform contributes.
-        //   • crime: only buildings carrying Game.Buildings.CrimeProducer
-        //     contribute (mostly residential / commercial — service buildings
-        //     and pure transport are usually skipped by CS2).
-        // Returns (null, null) if neither metric resolved or no samples landed.
-        // Storytelling angle: per-district crime + land_value pair with
-        // per-district pollution to localize "this neighborhood is rough" or
-        // "this is where the money lives" without the agent having to invent it.
-        (object land_value, object crime) CollectLandValueAndCrime(Dictionary<Entity, string> districtNameByEntity)
+        // Samples land value at every building position, binning by district.
+        // Mirrors CollectPollution: every building with a Transform contributes
+        // one cell sample. Returns null if the cell grid hasn't allocated yet
+        // (fresh save) or no buildings landed inside the grid bounds.
+        object CollectLandValue(Dictionary<Entity, string> districtNameByEntity)
         {
             NativeArray<LandValueCell> lvMap = default;
             bool lvOk = false;
@@ -1513,14 +1506,11 @@ namespace CityStoryMod.Systems
                     _log.Warn($"LandValue map fetch failed: {ex.Message}");
                 }
             }
+            if (!lvOk) return null;
 
-            long lvCitySum = 0;
-            int lvCitySamples = 0;
-            var lvDistrictSums = new Dictionary<string, (double sum, int samples)>();
-
-            long crimeCitySum = 0;
-            int crimeCitySamples = 0;
-            var crimeDistrictSums = new Dictionary<string, (double sum, int samples)>();
+            long citySum = 0;
+            int citySamples = 0;
+            var districtSums = new Dictionary<string, (double sum, int samples)>();
 
             using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < entities.Length; i++)
@@ -1529,85 +1519,108 @@ namespace CityStoryMod.Systems
                 if (!EntityManager.HasComponent<Game.Objects.Transform>(b)) continue;
                 var pos = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
 
-                string districtName = null;
+                int idx = LandValueSystem.GetCellIndex(pos);
+                if (idx < 0 || idx >= lvMap.Length) continue;
+
+                float lv = lvMap[idx].m_LandValue;
+                citySum += (long)Math.Round(lv);
+                citySamples++;
+
                 if (EntityManager.HasComponent<CurrentDistrict>(b))
                 {
                     var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
-                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
-                }
-
-                if (lvOk)
-                {
-                    int idx = LandValueSystem.GetCellIndex(pos);
-                    if (idx >= 0 && idx < lvMap.Length)
+                    if (d != Entity.Null && districtNameByEntity.TryGetValue(d, out var districtName))
                     {
-                        float lv = lvMap[idx].m_LandValue;
-                        lvCitySum += (long)Math.Round(lv);
-                        lvCitySamples++;
-                        if (districtName != null)
-                        {
-                            lvDistrictSums.TryGetValue(districtName, out var s);
-                            s.sum += lv; s.samples++;
-                            lvDistrictSums[districtName] = s;
-                        }
-                    }
-                }
-
-                if (EntityManager.HasComponent<Game.Buildings.CrimeProducer>(b))
-                {
-                    float crime = EntityManager.GetComponentData<Game.Buildings.CrimeProducer>(b).m_Crime;
-                    crimeCitySum += (long)Math.Round(crime);
-                    crimeCitySamples++;
-                    if (districtName != null)
-                    {
-                        crimeDistrictSums.TryGetValue(districtName, out var s);
-                        s.sum += crime; s.samples++;
-                        crimeDistrictSums[districtName] = s;
+                        districtSums.TryGetValue(districtName, out var s);
+                        s.sum += lv; s.samples++;
+                        districtSums[districtName] = s;
                     }
                 }
             }
 
-            object landValueBlock = null;
-            if (lvOk && lvCitySamples > 0)
+            if (citySamples == 0) return null;
+
+            var byDistrict = new Dictionary<string, object>();
+            foreach (var kv in districtSums)
             {
-                var byDistrict = new Dictionary<string, object>();
-                foreach (var kv in lvDistrictSums)
+                byDistrict[kv.Key] = new
                 {
-                    byDistrict[kv.Key] = new
-                    {
-                        average = Math.Round(kv.Value.sum / kv.Value.samples, 2),
-                        samples = kv.Value.samples,
-                    };
-                }
-                landValueBlock = new
-                {
-                    city = new { average = Math.Round((double)lvCitySum / lvCitySamples, 2) },
-                    samples = lvCitySamples,
-                    by_district = byDistrict,
+                    average = Math.Round(kv.Value.sum / kv.Value.samples, 2),
+                    samples = kv.Value.samples,
                 };
             }
-
-            object crimeBlock = null;
-            if (crimeCitySamples > 0)
+            return new
             {
-                var byDistrict = new Dictionary<string, object>();
-                foreach (var kv in crimeDistrictSums)
+                city = new { average = Math.Round((double)citySum / citySamples, 2) },
+                samples = citySamples,
+                by_district = byDistrict,
+            };
+        }
+
+        // Counts active criminals (citizens carrying Game.Citizens.Criminal),
+        // binned by home district. Replaces the v0.6 CrimeProducer.m_Crime
+        // accumulator, which saturated everywhere and gave no spatial signal —
+        // ~all buildings carry CrimeProducer and the per-building counter
+        // climbs over time regardless of district. Active criminals concentrate
+        // in specific home districts so the agent gets the "rough neighborhood"
+        // signal it needs.
+        //
+        // Applies the same resident filter as CollectCitizensSample (skips
+        // tourists, commuters, moving-away, dead). City-wide count is the
+        // unfiltered total of active resident criminals; per-district counts
+        // only include those whose home district resolves.
+        object CollectCrimeByDistrict(Dictionary<Entity, string> districtNameByEntity)
+        {
+            int cityCount = 0;
+            var byDistrictCounts = new Dictionary<string, int>();
+
+            using var entities = _citizenQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var c = entities[i];
+                if (!EntityManager.HasComponent<Criminal>(c)) continue;
+                if (!TryGet<Citizen>(c, out var citizen)) continue;
+                if ((citizen.m_State & (CitizenFlags.Tourist | CitizenFlags.Commuter | CitizenFlags.MovingAwayReachOC)) != 0) continue;
+                if (!EntityManager.HasComponent<HouseholdMember>(c)) continue;
+                var hh = EntityManager.GetComponentData<HouseholdMember>(c).m_Household;
+                if (EntityManager.HasComponent<TouristHousehold>(hh)) continue;
+                if (EntityManager.HasComponent<CommuterHousehold>(hh)) continue;
+                if (TryGet<HealthProblem>(c, out var hp)
+                    && (hp.m_Flags & HealthProblemFlags.Dead) != 0) continue;
+
+                cityCount++;
+
+                Entity homeBuilding = Entity.Null;
+                if (TryGet<Game.Buildings.PropertyRenter>(hh, out var renter)
+                    && EntityManager.Exists(renter.m_Property))
                 {
-                    byDistrict[kv.Key] = new
-                    {
-                        average = Math.Round(kv.Value.sum / kv.Value.samples, 2),
-                        samples = kv.Value.samples,
-                    };
+                    homeBuilding = renter.m_Property;
                 }
-                crimeBlock = new
+                else if (TryGet<HomelessHousehold>(hh, out var homeless)
+                    && EntityManager.Exists(homeless.m_TempHome))
                 {
-                    city = new { average = Math.Round((double)crimeCitySum / crimeCitySamples, 2) },
-                    samples = crimeCitySamples,
-                    by_district = byDistrict,
-                };
+                    homeBuilding = homeless.m_TempHome;
+                }
+                if (homeBuilding != Entity.Null && EntityManager.HasComponent<CurrentDistrict>(homeBuilding))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(homeBuilding).m_District;
+                    if (d != Entity.Null && districtNameByEntity.TryGetValue(d, out var districtName))
+                    {
+                        byDistrictCounts.TryGetValue(districtName, out int n);
+                        byDistrictCounts[districtName] = n + 1;
+                    }
+                }
             }
 
-            return (landValueBlock, crimeBlock);
+            var byDistrict = new Dictionary<string, object>();
+            foreach (var kv in byDistrictCounts)
+                byDistrict[kv.Key] = new { active_criminals = kv.Value };
+
+            return new
+            {
+                city = new { active_criminals = cityCount },
+                by_district = byDistrict,
+            };
         }
 
         // Per-citizen sample. Walks every Citizen entity, filters down to
@@ -1625,6 +1638,20 @@ namespace CityStoryMod.Systems
         // workplace, school. Wealth tier requires a CitizenHappinessParameterData
         // singleton join we don't do yet — punted to a follow-up.
         const int CitizensSampleMaxSize = 30;
+
+        // EntityManager in this DOTS version doesn't expose TryGetComponent —
+        // wrap HasComponent + GetComponentData so the sampler stays readable.
+        bool TryGet<T>(Entity e, out T value) where T : unmanaged, IComponentData
+        {
+            if (EntityManager.HasComponent<T>(e))
+            {
+                value = EntityManager.GetComponentData<T>(e);
+                return true;
+            }
+            value = default;
+            return false;
+        }
+
         object CollectCitizensSample(Dictionary<Entity, string> districtNameByEntity, int sampleSeed)
         {
             var followed = new List<Entity>();
@@ -1634,7 +1661,7 @@ namespace CityStoryMod.Systems
             for (int i = 0; i < entities.Length; i++)
             {
                 var c = entities[i];
-                if (!EntityManager.TryGetComponent<Citizen>(c, out var citizen)) continue;
+                if (!TryGet<Citizen>(c, out var citizen)) continue;
                 // Filter out non-residents using the same logic as
                 // Game.Citizens.CitizenUtils.IsResident.
                 if ((citizen.m_State & (CitizenFlags.Tourist | CitizenFlags.Commuter | CitizenFlags.MovingAwayReachOC)) != 0) continue;
@@ -1644,7 +1671,7 @@ namespace CityStoryMod.Systems
                 if (EntityManager.HasComponent<CommuterHousehold>(hh)) continue;
                 // Skip dead citizens — the agent shouldn't reference them
                 // as if they're still around.
-                if (EntityManager.TryGetComponent<HealthProblem>(c, out var hp)
+                if (TryGet<HealthProblem>(c, out var hp)
                     && (hp.m_Flags & HealthProblemFlags.Dead) != 0) continue;
 
                 if (EntityManager.HasComponent<Followed>(c))
@@ -1692,12 +1719,12 @@ namespace CityStoryMod.Systems
                 // then HomelessHousehold.m_TempHome as a fallback.
                 string homeDistrict = null;
                 Entity homeBuilding = Entity.Null;
-                if (EntityManager.TryGetComponent<Game.Buildings.PropertyRenter>(hh, out var renter)
+                if (TryGet<Game.Buildings.PropertyRenter>(hh, out var renter)
                     && EntityManager.Exists(renter.m_Property))
                 {
                     homeBuilding = renter.m_Property;
                 }
-                else if (EntityManager.TryGetComponent<HomelessHousehold>(hh, out var homeless)
+                else if (TryGet<HomelessHousehold>(hh, out var homeless)
                     && EntityManager.Exists(homeless.m_TempHome))
                 {
                     homeBuilding = homeless.m_TempHome;
@@ -1712,11 +1739,11 @@ namespace CityStoryMod.Systems
                 // the company carries PropertyRenter, the rented building
                 // is the human-readable name we want (e.g. "Brevik Lumber Co.").
                 string workplace = null;
-                if (EntityManager.TryGetComponent<Worker>(c, out var worker)
+                if (TryGet<Worker>(c, out var worker)
                     && EntityManager.Exists(worker.m_Workplace))
                 {
                     Entity wp = worker.m_Workplace;
-                    if (EntityManager.TryGetComponent<Game.Buildings.PropertyRenter>(wp, out var wrenter)
+                    if (TryGet<Game.Buildings.PropertyRenter>(wp, out var wrenter)
                         && EntityManager.Exists(wrenter.m_Property))
                     {
                         workplace = _nameSystem.GetRenderedLabelName(wrenter.m_Property);
@@ -1728,7 +1755,7 @@ namespace CityStoryMod.Systems
                 }
 
                 string school = null;
-                if (EntityManager.TryGetComponent<Game.Citizens.Student>(c, out var student)
+                if (TryGet<Game.Citizens.Student>(c, out var student)
                     && EntityManager.Exists(student.m_School))
                 {
                     school = _nameSystem.GetRenderedLabelName(student.m_School);
