@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.2" />
+  <ModVersion Value="0.1.3" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,6 +61,14 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
+**0.1.3** &#8212; richer city snapshots and a simpler /new-city.
+
+* **Named residents in every snapshot.** Up to 30 residents per export with name, age band, education, gender, happiness, home district, workplace, and school. Citizens you've followed in-game are always included; the rest are a random sample that rotates between exports. The ghostwriter can now name actual people in your city when the story needs a face &#8212; no more invented placeholders for characters who already exist.
+* **Per-district crime and land value.** Crime now tracks how many active criminals live in each district (binned by home district). Land value is sampled at every building position and averaged per district. Combined with the existing per-district pollution, the agent can write neighborhood-level stories grounded in real data &#8212; "the bottom fell out of the North Yards" or "Pine Quarter is where the new money lives."
+* **/new-city no longer asks for a screenshot.** The mod-generated topographic map at `carto/processed/map.svg` is now the ghostwriter's visual anchor &#8212; terrain in hypsometric tints, water depth-shaded, districts and roads overlaid. Bootstrap a new city without alt-tabbing for a Steam screenshot.
+* **Storyteller now uses the new signals.** The scaffolded `CLAUDE.md` gained a "Story-worthy signals in the snapshot body" section so the ghostwriter actively uses pollution, churn (incl. why people are leaving), social conditions, budget, land value, crime, and the resident sample &#8212; instead of seeing them and ignoring them.
+* **Removed Ctrl+Shift+M.** The manual screenshot hotkey is gone; the auto-generated combined map replaces it.
+
 **0.1.2** &#8212; spatial enrichment and UI polish.
 
 * **Combined topographic map** &#8212; new `carto/processed/map.svg` rendered on every Carto refresh: hypsometric terrain (green &#8594; tan &#8594; brown &#8594; white), depth-shaded water, dashed district outlines, colored named roads (highways thicker), intersection markers, and labels.
