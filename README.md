@@ -235,15 +235,15 @@ Ghostwriter learned how to talk to CS2 by reading other people's mods and decomp
 - **[bruceyboy24804/InfoLoom](https://github.com/bruceyboy24804/InfoLoom)** — citizen / household / workplace resolution patterns (`CitizenUIUtils` helpers, `m_NameSystem.GetRenderedLabelName` for rendered names, `PropertyRenter` chain for home buildings) were learned from `InfoLoom/Systems/Sections/ILCitizenSection.cs`. InfoLoom surfaces a lot of demographic detail in-game; Ghostwriter just needed to translate the same reads into JSON.
 - **[Infixo/CS2-InfoLoom](https://github.com/Infixo/CS2-InfoLoom)** — the original demographics/population extraction work that influenced our `demographics` schema fields.
 - **[krzychu124/SceneExplorer](https://github.com/krzychu124/SceneExplorer)** — runtime ECS browser. Indispensable for discovering what components exist on a given entity before writing a query.
-- **VehicleCounter** by CaptainOfCoit ([Thunderstore source](https://thunderstore.io/c/cities-skylines-ii/p/CaptainOfCoit/VehicleCounter/source/)) — the minimal "hello world" ECS-query mod we read first to understand the basic `GameSystemBase` lifecycle.
+- **VehicleCounter** by CaptainOfCoit ([Thunderstore source](https://thunderstore.io/c/cities-skylines-ii/p/CaptainOfCoit/VehicleCounter/source/)) — the minimal "hello world" ECS-query mod I read first to understand the basic `GameSystemBase` lifecycle.
 - **[River-Mochi/CS2-Templates](https://github.com/River-Mochi/CS2-Templates)** — the maintained starter template + QuickStart.md that fills in toolchain gaps the official wiki leaves out.
 
-Several non-public bits of CS2 itself were read via ILSpy-style decompile dumps shared by other modders. We credit them as decompile *sources* — the code inside is Colossal Order's:
+Several non-public bits of CS2 itself were read via ILSpy-style decompile dumps shared by other modders. I credit them as decompile *sources* — the code inside is Colossal Order's:
 
-- **[bworthy89/roadmod](https://github.com/bworthy89/roadmod)** — extensive decompile of `Game.dll`. We used it to verify shapes for `LandValueSystem` / `LandValueCell`, `Game.Buildings.CrimeProducer`, `CellMapSystem<T>`, `Citizen` / `HouseholdMember` / `Worker` / `PropertyRenter`, and `CitizenUIUtils` before writing the corresponding sensor code.
+- **[bworthy89/roadmod](https://github.com/bworthy89/roadmod)** — extensive decompile of `Game.dll`. I used it to verify shapes for `LandValueSystem` / `LandValueCell`, `Game.Buildings.CrimeProducer`, `CellMapSystem<T>`, `Citizen` / `HouseholdMember` / `Worker` / `PropertyRenter`, and `CitizenUIUtils` before writing the corresponding sensor code.
 - **[Jimmyokok/LandValueOverhaul](https://github.com/Jimmyokok/LandValueOverhaul)** and **[JadHajjar/HardMode](https://github.com/JadHajjar/HardMode)** — confirmed the canonical `m_LandValueSystem.GetMap(true, out _)` + `LandValueSystem.GetCellIndex(pos)` access pattern.
 
-If you see something in this codebase that came from your mod and we missed crediting you here, please open an issue — happy to fix it.
+If you see something in this codebase that came from your mod and I missed crediting you here, please open an issue — happy to fix it.
 
 ## License
 
