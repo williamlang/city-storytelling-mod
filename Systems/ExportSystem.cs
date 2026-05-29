@@ -156,6 +156,15 @@ namespace CityStoryMod.Systems
         FieldInfo _f_groundPollutionMap;
         FieldInfo _f_noisePollutionMap;
 
+        // LandValueSystem — same CellMapSystem<T> shape as pollution, but the
+        // cell type is LandValueCell (a single float m_LandValue). Read via
+        // LandValueSystem.GetCellIndex(pos) + the protected m_Map field.
+        // Crime is NOT a cell grid: it lives per-building on the
+        // Game.Buildings.CrimeProducer component, so it doesn't need a system
+        // reference here — the sampler reads it directly on each building.
+        LandValueSystem _landValueSystem;
+        FieldInfo _f_landValueMap;
+
         // Statistics system. Concrete class fails the GetTypes() load
         // (depends on Burst-generated types), so we resolve it reflectively
         // and cast to the loadable interface for population churn reads.
@@ -239,6 +248,23 @@ namespace CityStoryMod.Systems
             catch (Exception ex)
             {
                 _log.Warn($"Pollution system resolution failed: {ex.Message}; pollution block will stay null.");
+            }
+
+            // LandValueSystem — same CellMapSystem<T> shape as pollution; the
+            // m_Map field is protected on the base class (CellMapSystem<T>),
+            // so binding flags need NonPublic | Instance, and we resolve it
+            // against the base type, not the concrete LandValueSystem.
+            try
+            {
+                _landValueSystem = World.GetOrCreateSystemManaged<LandValueSystem>();
+                const BindingFlags lvFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+                _f_landValueMap = typeof(CellMapSystem<LandValueCell>).GetField("m_Map", lvFlags);
+                if (_f_landValueMap == null)
+                    _log.Warn("LandValue m_Map field not resolved; land_value block will stay null.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"LandValueSystem resolution failed: {ex.Message}; land_value block will stay null.");
             }
 
             // CityStatisticsSystem (concrete type isn't loadable here — its
@@ -481,12 +507,15 @@ namespace CityStoryMod.Systems
             }
         }
 
-        // 0.5 — Added `city.social` (homeless / unemployed / crime), `city.budget`
-        // (income + residential tax — non-residential tax + expense dropped pending
-        // parameter-shape investigation), and `city.churn.moved_away_by_reason`
-        // (the eight Game.Agents.MoveAwayReason values — not_happy / no_money / etc.) —
-        // all city-wide via CityStatisticsSystem. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.5";
+        // 0.7 — Replaced the empty `citizens_sample` placeholder with a
+        // real per-citizen sample (up to CitizensSampleMaxSize entries).
+        // Always includes every Followed citizen, fills the rest with a
+        // uniform random sample of resident citizens. Each entry carries
+        // name, age band, education, gender, happiness, home district,
+        // workplace, school, plus followed/is_criminal flags. Households'
+        // wealth tier is deferred — needs a CitizenHappinessParameterData
+        // singleton join we don't do yet. See docs/snapshot-schema.md.
+        const string SchemaVersion = "0.7";
 
         void Export(string triggeredBy)
         {
@@ -569,6 +598,8 @@ namespace CityStoryMod.Systems
             Dictionary<string, NamedBuilding> namedBuildings = CollectNamedBuildings(districtNameByEntity);
             Dictionary<string, BuildingFingerprint> allBuildings = CollectAllBuildings(districtNameByEntity);
             object pollution = CollectPollution(districtNameByEntity);
+            var (landValue, crime) = CollectLandValueAndCrime(districtNameByEntity);
+            object citizensSample = CollectCitizensSample(districtNameByEntity, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
             object budget = ReadBudgetStats();
@@ -652,13 +683,28 @@ namespace CityStoryMod.Systems
                 // positions are the simplest place-where-people-live proxy.
                 pollution = pollution,
 
+                // v0.6 — same per-building → bin-by-district sampling pattern.
+                // land_value reads LandValueSystem's cell grid at each building
+                // position; crime reads Game.Buildings.CrimeProducer.m_Crime
+                // on buildings that have it (mostly residential/commercial).
+                // Sample populations differ — see CollectLandValueAndCrime.
+                land_value = landValue,
+                crime = crime,
+
                 // v0.2: districts[], buildings[], roads[], other_named[] are
                 // no longer emitted — they live in carto/processed/ as
                 // storyteller-facing markdown. outside_connections and
                 // water_sources stay (Carto doesn't surface those).
                 outside_connections = named.outsideConnections,
                 water_sources = named.waterSources,
-                citizens_sample = new object[0],
+
+                // v0.7 — sampled per-citizen detail. Up to CitizensSampleMaxSize
+                // entries; always includes every Followed citizen, fills the
+                // rest with a uniform random sample of other residents
+                // (seeded by the export's unix timestamp for reproducibility).
+                // Tourists, commuters, moving-away, and dead citizens are
+                // filtered out at the source.
+                citizens_sample = citizensSample,
 
                 // Per-district zone counts. Same shape as city.zones but
                 // keyed by district name (matching Carto chunks). Backs the
@@ -1438,6 +1484,289 @@ namespace CityStoryMod.Systems
                 by_district = byDistrict,
             };
         }
+
+        // Samples land value at every building position and reads CrimeProducer
+        // per building, binning both by district. Mirrors CollectPollution but
+        // returns two separate top-level blocks (land_value, crime) because the
+        // two metrics have different sample populations:
+        //   • land_value: every building with a Transform contributes.
+        //   • crime: only buildings carrying Game.Buildings.CrimeProducer
+        //     contribute (mostly residential / commercial — service buildings
+        //     and pure transport are usually skipped by CS2).
+        // Returns (null, null) if neither metric resolved or no samples landed.
+        // Storytelling angle: per-district crime + land_value pair with
+        // per-district pollution to localize "this neighborhood is rough" or
+        // "this is where the money lives" without the agent having to invent it.
+        (object land_value, object crime) CollectLandValueAndCrime(Dictionary<Entity, string> districtNameByEntity)
+        {
+            NativeArray<LandValueCell> lvMap = default;
+            bool lvOk = false;
+            if (_landValueSystem != null && _f_landValueMap != null)
+            {
+                try
+                {
+                    lvMap = (NativeArray<LandValueCell>)_f_landValueMap.GetValue(_landValueSystem);
+                    lvOk = lvMap.IsCreated && lvMap.Length > 0;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"LandValue map fetch failed: {ex.Message}");
+                }
+            }
+
+            long lvCitySum = 0;
+            int lvCitySamples = 0;
+            var lvDistrictSums = new Dictionary<string, (double sum, int samples)>();
+
+            long crimeCitySum = 0;
+            int crimeCitySamples = 0;
+            var crimeDistrictSums = new Dictionary<string, (double sum, int samples)>();
+
+            using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var b = entities[i];
+                if (!EntityManager.HasComponent<Game.Objects.Transform>(b)) continue;
+                var pos = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
+
+                string districtName = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(b))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
+                }
+
+                if (lvOk)
+                {
+                    int idx = LandValueSystem.GetCellIndex(pos);
+                    if (idx >= 0 && idx < lvMap.Length)
+                    {
+                        float lv = lvMap[idx].m_LandValue;
+                        lvCitySum += (long)Math.Round(lv);
+                        lvCitySamples++;
+                        if (districtName != null)
+                        {
+                            lvDistrictSums.TryGetValue(districtName, out var s);
+                            s.sum += lv; s.samples++;
+                            lvDistrictSums[districtName] = s;
+                        }
+                    }
+                }
+
+                if (EntityManager.HasComponent<Game.Buildings.CrimeProducer>(b))
+                {
+                    float crime = EntityManager.GetComponentData<Game.Buildings.CrimeProducer>(b).m_Crime;
+                    crimeCitySum += (long)Math.Round(crime);
+                    crimeCitySamples++;
+                    if (districtName != null)
+                    {
+                        crimeDistrictSums.TryGetValue(districtName, out var s);
+                        s.sum += crime; s.samples++;
+                        crimeDistrictSums[districtName] = s;
+                    }
+                }
+            }
+
+            object landValueBlock = null;
+            if (lvOk && lvCitySamples > 0)
+            {
+                var byDistrict = new Dictionary<string, object>();
+                foreach (var kv in lvDistrictSums)
+                {
+                    byDistrict[kv.Key] = new
+                    {
+                        average = Math.Round(kv.Value.sum / kv.Value.samples, 2),
+                        samples = kv.Value.samples,
+                    };
+                }
+                landValueBlock = new
+                {
+                    city = new { average = Math.Round((double)lvCitySum / lvCitySamples, 2) },
+                    samples = lvCitySamples,
+                    by_district = byDistrict,
+                };
+            }
+
+            object crimeBlock = null;
+            if (crimeCitySamples > 0)
+            {
+                var byDistrict = new Dictionary<string, object>();
+                foreach (var kv in crimeDistrictSums)
+                {
+                    byDistrict[kv.Key] = new
+                    {
+                        average = Math.Round(kv.Value.sum / kv.Value.samples, 2),
+                        samples = kv.Value.samples,
+                    };
+                }
+                crimeBlock = new
+                {
+                    city = new { average = Math.Round((double)crimeCitySum / crimeCitySamples, 2) },
+                    samples = crimeCitySamples,
+                    by_district = byDistrict,
+                };
+            }
+
+            return (landValueBlock, crimeBlock);
+        }
+
+        // Per-citizen sample. Walks every Citizen entity, filters down to
+        // residents (skips tourists, commuters, moving-away, dead), then
+        // builds the output by:
+        //   1. always including every Followed citizen (rare — the player
+        //      has explicitly opted in to tracking them, so they're the
+        //      ones most likely to anchor a story),
+        //   2. randomly filling the remaining slots up to MaxSample, seeded
+        //      by the export's unix timestamp so each snapshot's sample is
+        //      reproducible-from-the-filename while still rotating over time.
+        //
+        // Per-citizen fields cover the storyteller's "who are these people"
+        // anchors: rendered name, age band, education, home district,
+        // workplace, school. Wealth tier requires a CitizenHappinessParameterData
+        // singleton join we don't do yet — punted to a follow-up.
+        const int CitizensSampleMaxSize = 30;
+        object CollectCitizensSample(Dictionary<Entity, string> districtNameByEntity, int sampleSeed)
+        {
+            var followed = new List<Entity>();
+            var others = new List<Entity>();
+
+            using var entities = _citizenQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var c = entities[i];
+                if (!EntityManager.TryGetComponent<Citizen>(c, out var citizen)) continue;
+                // Filter out non-residents using the same logic as
+                // Game.Citizens.CitizenUtils.IsResident.
+                if ((citizen.m_State & (CitizenFlags.Tourist | CitizenFlags.Commuter | CitizenFlags.MovingAwayReachOC)) != 0) continue;
+                if (!EntityManager.HasComponent<HouseholdMember>(c)) continue;
+                var hh = EntityManager.GetComponentData<HouseholdMember>(c).m_Household;
+                if (EntityManager.HasComponent<TouristHousehold>(hh)) continue;
+                if (EntityManager.HasComponent<CommuterHousehold>(hh)) continue;
+                // Skip dead citizens — the agent shouldn't reference them
+                // as if they're still around.
+                if (EntityManager.TryGetComponent<HealthProblem>(c, out var hp)
+                    && (hp.m_Flags & HealthProblemFlags.Dead) != 0) continue;
+
+                if (EntityManager.HasComponent<Followed>(c))
+                    followed.Add(c);
+                else
+                    others.Add(c);
+            }
+
+            int eligibleTotal = followed.Count + others.Count;
+
+            var picked = new List<Entity>(followed);
+            if (picked.Count < CitizensSampleMaxSize && others.Count > 0)
+            {
+                int needed = CitizensSampleMaxSize - picked.Count;
+                if (others.Count <= needed)
+                {
+                    picked.AddRange(others);
+                }
+                else
+                {
+                    var rand = new System.Random(sampleSeed);
+                    // Fisher-Yates partial shuffle: first `needed` slots
+                    // of `others` after the loop is a uniform random subset.
+                    for (int i = 0; i < needed; i++)
+                    {
+                        int j = rand.Next(i, others.Count);
+                        (others[i], others[j]) = (others[j], others[i]);
+                        picked.Add(others[i]);
+                    }
+                }
+            }
+
+            var citizens = new List<object>(picked.Count);
+            for (int i = 0; i < picked.Count; i++)
+            {
+                var c = picked[i];
+                var citizen = EntityManager.GetComponentData<Citizen>(c);
+                var hh = EntityManager.GetComponentData<HouseholdMember>(c).m_Household;
+
+                string name = _nameSystem.GetRenderedLabelName(c);
+
+                // Home: resolve the household's residence building, then
+                // bin by CurrentDistrict. Mirrors the CitizenUIUtils.GetResidenceEntity
+                // resolution order: PropertyRenter (normal renter) first,
+                // then HomelessHousehold.m_TempHome as a fallback.
+                string homeDistrict = null;
+                Entity homeBuilding = Entity.Null;
+                if (EntityManager.TryGetComponent<Game.Buildings.PropertyRenter>(hh, out var renter)
+                    && EntityManager.Exists(renter.m_Property))
+                {
+                    homeBuilding = renter.m_Property;
+                }
+                else if (EntityManager.TryGetComponent<HomelessHousehold>(hh, out var homeless)
+                    && EntityManager.Exists(homeless.m_TempHome))
+                {
+                    homeBuilding = homeless.m_TempHome;
+                }
+                if (homeBuilding != Entity.Null && EntityManager.HasComponent<CurrentDistrict>(homeBuilding))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(homeBuilding).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out homeDistrict);
+                }
+
+                // Workplace: Worker.m_Workplace is the company entity; if
+                // the company carries PropertyRenter, the rented building
+                // is the human-readable name we want (e.g. "Brevik Lumber Co.").
+                string workplace = null;
+                if (EntityManager.TryGetComponent<Worker>(c, out var worker)
+                    && EntityManager.Exists(worker.m_Workplace))
+                {
+                    Entity wp = worker.m_Workplace;
+                    if (EntityManager.TryGetComponent<Game.Buildings.PropertyRenter>(wp, out var wrenter)
+                        && EntityManager.Exists(wrenter.m_Property))
+                    {
+                        workplace = _nameSystem.GetRenderedLabelName(wrenter.m_Property);
+                    }
+                    else
+                    {
+                        workplace = _nameSystem.GetRenderedLabelName(wp);
+                    }
+                }
+
+                string school = null;
+                if (EntityManager.TryGetComponent<Game.Citizens.Student>(c, out var student)
+                    && EntityManager.Exists(student.m_School))
+                {
+                    school = _nameSystem.GetRenderedLabelName(student.m_School);
+                }
+
+                citizens.Add(new
+                {
+                    id = $"{c.Index}-{c.Version}",
+                    name = name,
+                    gender = (citizen.m_State & CitizenFlags.Male) != 0 ? "male" : "female",
+                    age = citizen.GetAge().ToString().ToLowerInvariant(),
+                    education = CitizenEducationToString(citizen.GetEducationLevel()),
+                    happiness = citizen.Happiness,
+                    home_district = homeDistrict,
+                    workplace = workplace,
+                    school = school,
+                    followed = EntityManager.HasComponent<Followed>(c),
+                    is_criminal = EntityManager.HasComponent<Criminal>(c),
+                });
+            }
+
+            return new
+            {
+                sampled = citizens.Count,
+                eligible_total = eligibleTotal,
+                followed_count = followed.Count,
+                citizens = citizens,
+            };
+        }
+
+        static string CitizenEducationToString(int level) => level switch
+        {
+            1 => "poorly_educated",
+            2 => "educated",
+            3 => "well_educated",
+            4 => "highly_educated",
+            _ => "uneducated",
+        };
 
         // Mapping from Game.Agents.MoveAwayReason int values to snake_case
         // JSON keys. CS2's enum splits resident reasons (1-4) from tourist

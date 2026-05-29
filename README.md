@@ -127,19 +127,22 @@ Logs at:
 
 ## Snapshot schema
 
-[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.4**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
+[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.7**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
 
 Currently populated:
 - Metadata header — schema version, snapshot id, session id, wall-clock + in-game timestamps
 - `map.*` — name, theme, latitude / longitude, temperature range, cloudiness, precipitation, water availability (from `Game.UI.MapMetadataSystem`)
-- `city.*` — population (HUD + with-move-in), money, happiness, health, tourists, attractiveness, danger, milestone, XP, zone counts, and **`city.churn`** (births / deaths / move-ins / move-aways per day, from `ICityStatisticsSystem`)
+- `city.*` — population, money, happiness, health, tourists, attractiveness, danger, milestone, XP, zone counts, **`city.churn`** (births / deaths / move-ins / move-aways per day, including a `moved_away_by_reason` breakdown), **`city.social`** (homeless / unemployed / crime counts), **`city.budget`** (income + residential tax)
 - **`pollution`** — air / ground / noise sampled at every building position, binned by `CurrentDistrict`; emits city-wide + per-district averages with sample counts
+- **`land_value`** — same per-building → bin-by-district sampling pattern, reading `LandValueSystem`'s cell grid
+- **`crime`** — per-building `Game.Buildings.CrimeProducer.m_Crime` binned by district (sample population is a subset of buildings)
+- **`citizens_sample`** — up to 30 sampled residents per export; always includes every `Followed` citizen, fills the rest with a timestamp-seeded random sample. Per-entry: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags
 - `outside_connections`, `water_sources` — `CustomName` entities Carto doesn't surface
 - `district_zones` — per-district building-type counts (backs the subdivision-growth signal)
 - `demographics` — citizen flag counts, average wellbeing / health, employed count
 - `diff.*` — full change-since-last-snapshot block: zone deltas, district zone deltas, **`building_churn`** (per-district demolition + construction counts), named-building churn, outside-connection / water-source diffs, in-game days elapsed
 
-Still null / empty (next-up targets): `citizens_sample[]`, `trade.imports/exports`, `services.coverage_gaps`. Spatial geometry (district polygons, building positions, roads, terrain, water bodies) lives in `carto/processed/*.md` chunks alongside the JSON.
+Still null / empty (next-up targets): per-citizen wealth tier, `trade.imports/exports`, `services.coverage_gaps`. Spatial geometry (district polygons, building positions, roads, terrain, water bodies) lives in `carto/processed/*.md` chunks alongside the JSON.
 
 ## Project layout
 
@@ -223,6 +226,24 @@ New React components go next to a `Foo.test.tsx`. Vitest auto-discovers via the 
 - **React edit, layout/logic only:** `npm run dev:web` running in the background; edit and the browser hot-reloads.
 - **React edit, ready to verify in CS2:** quit CS2 → `dotnet build` (or `npm run build` in `UI/`) → relaunch.
 - **Tests:** `dotnet test` and `npm test` whenever; neither needs CS2.
+
+## Acknowledgements
+
+Ghostwriter learned how to talk to CS2 by reading other people's mods and decompiles. Credit where it's due:
+
+- **[taipei-native/Carto](https://github.com/taipei-native/Carto)** — peer dependency for spatial export. Our `CartoBridge` calls into it reflectively (no compile-time reference) and `CartoProcessor` consumes its GeoJSON + GeoTIFF output. Carto's own project layout (Mod.cs, Systems/, csproj) is also the model our project structure follows.
+- **[bruceyboy24804/InfoLoom](https://github.com/bruceyboy24804/InfoLoom)** — citizen / household / workplace resolution patterns (`CitizenUIUtils` helpers, `m_NameSystem.GetRenderedLabelName` for rendered names, `PropertyRenter` chain for home buildings) were learned from `InfoLoom/Systems/Sections/ILCitizenSection.cs`. InfoLoom surfaces a lot of demographic detail in-game; Ghostwriter just needed to translate the same reads into JSON.
+- **[Infixo/CS2-InfoLoom](https://github.com/Infixo/CS2-InfoLoom)** — the original demographics/population extraction work that influenced our `demographics` schema fields.
+- **[krzychu124/SceneExplorer](https://github.com/krzychu124/SceneExplorer)** — runtime ECS browser. Indispensable for discovering what components exist on a given entity before writing a query.
+- **VehicleCounter** by CaptainOfCoit ([Thunderstore source](https://thunderstore.io/c/cities-skylines-ii/p/CaptainOfCoit/VehicleCounter/source/)) — the minimal "hello world" ECS-query mod we read first to understand the basic `GameSystemBase` lifecycle.
+- **[River-Mochi/CS2-Templates](https://github.com/River-Mochi/CS2-Templates)** — the maintained starter template + QuickStart.md that fills in toolchain gaps the official wiki leaves out.
+
+Several non-public bits of CS2 itself were read via ILSpy-style decompile dumps shared by other modders. We credit them as decompile *sources* — the code inside is Colossal Order's:
+
+- **[bworthy89/roadmod](https://github.com/bworthy89/roadmod)** — extensive decompile of `Game.dll`. We used it to verify shapes for `LandValueSystem` / `LandValueCell`, `Game.Buildings.CrimeProducer`, `CellMapSystem<T>`, `Citizen` / `HouseholdMember` / `Worker` / `PropertyRenter`, and `CitizenUIUtils` before writing the corresponding sensor code.
+- **[Jimmyokok/LandValueOverhaul](https://github.com/Jimmyokok/LandValueOverhaul)** and **[JadHajjar/HardMode](https://github.com/JadHajjar/HardMode)** — confirmed the canonical `m_LandValueSystem.GetMap(true, out _)` + `LandValueSystem.GetCellIndex(pos)` access pattern.
+
+If you see something in this codebase that came from your mod and we missed crediting you here, please open an issue — happy to fix it.
 
 ## License
 

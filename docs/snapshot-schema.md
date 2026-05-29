@@ -1,4 +1,4 @@
-# Snapshot schema (v0.5)
+# Snapshot schema (v0.7)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -56,11 +56,47 @@ The "easy wins" tier from #18 — every field here is a single `ICityStatisticsS
 
 Per-district crime and land value are deferred to v0.6 — both follow the pollution sampling pattern (sample at building positions, bin by district) and pair well as a single batch.
 
+## v0.6 — per-district land value and crime
+
+Two new top-level blocks, shipped together because they share the same per-building → bin-by-district sampling loop. They pair with per-district `pollution` to localize friction signals the storyteller otherwise has to invent.
+
+- **`land_value`** — per-district + city-wide averages of `LandValueCell.m_LandValue`, sampled at every building position via the same `CellMapSystem<T>` pattern that backed pollution in v0.4. Drives "this is where the money lives" / "the bottom fell out of this district" stories.
+- **`crime`** — per-district + city-wide averages of `Game.Buildings.CrimeProducer.m_Crime`. Unlike land value and pollution, crime is **not** a diffused cell grid — it lives on a per-building component, so only buildings carrying `CrimeProducer` contribute (mostly residential and commercial; service buildings and pure transport are typically skipped by CS2). The sample population for `crime` is therefore a subset of the building set, distinct from `pollution.samples` and `land_value.samples`. The city-wide `social.crime_count` / `crime_rate` still carry the totals — `crime` adds the spatial dimension.
+
+Both blocks return `null` if their underlying source didn't resolve (e.g. `LandValueSystem.m_Map` not allocated on a fresh save before sim has run, or no buildings carry `CrimeProducer` yet).
+
+## v0.7 — per-citizen sample
+
+Replaces the empty `citizens_sample[]` placeholder with a real sample. Each export captures up to `CitizensSampleMaxSize` (currently 30) resident citizens. The selection strategy is:
+
+1. **Every `Game.Citizens.Followed` citizen is always included.** These are the citizens the player has explicitly opted into tracking via the in-game UI — they're the ones the storyteller is most likely to anchor canon around, so dropping them would defeat the purpose of the sample.
+2. **Remaining slots are filled with a uniform random sample** of other residents, seeded by the export's unix timestamp. Same snapshot file always reproduces the same sample (debuggable); successive snapshots rotate over time (the storyteller sees fresh faces).
+
+Non-residents are filtered out at the source: tourists (`CitizenFlags.Tourist`), commuters (`CitizenFlags.Commuter`), citizens with `MovingAwayReachOC`, members of `TouristHousehold` / `CommuterHousehold`, and dead citizens (`HealthProblemFlags.Dead`).
+
+Per-entry fields:
+
+| Field | Source | Notes |
+|---|---|---|
+| `id` | Entity index/version | Stable across snapshots within a save. |
+| `name` | `NameSystem.GetRenderedLabelName(citizen)` | CS2's rendered display name. |
+| `gender` | `Citizen.m_State & CitizenFlags.Male` | `"male"` / `"female"`. |
+| `age` | `Citizen.GetAge()` | `"child"` / `"teen"` / `"adult"` / `"elderly"`. |
+| `education` | `Citizen.GetEducationLevel()` | `"uneducated"` → `"highly_educated"` (5-tier `CitizenEducationLevel`). |
+| `happiness` | `Citizen.Happiness` | 0–100; average of `m_WellBeing` and `m_Health`. |
+| `home_district` | `HouseholdMember.m_Household` → `PropertyRenter.m_Property` → `CurrentDistrict` | `null` if homeless w/ no temp home, or building outside any district. |
+| `workplace` | `Worker.m_Workplace` (resolved via `PropertyRenter` when present) | Rendered name of the company / building. `null` for unemployed, students, retirees. |
+| `school` | `Game.Citizens.Student.m_School` | Rendered name; `null` if not a student. |
+| `followed` | `HasComponent<Followed>` | `true` if the player has clicked "follow" on this citizen. |
+| `is_criminal` | `HasComponent<Criminal>` | `true` while actively flagged as a criminal. |
+
+**Wealth / household money is deferred.** Computing it correctly needs a `CitizenHappinessParameterData` singleton + the household's `Resources` dynamic buffer, which is a bigger join than the others. The current schema's `city.social.unemployed_count` + `city.budget` already give a city-wide picture; per-citizen wealth waits for v0.8.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.5",
+  "schema_version": "0.7",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
@@ -138,6 +174,24 @@ Per-district crime and land value are deferred to v0.6 — both follow the pollu
     }
   },
 
+  "land_value": {                    // v0.6 — LandValueCell sampled at building positions, binned by district
+    "city": { "average": 184.5 },
+    "samples": 247,                  // same population as pollution.samples (every building w/ a Transform)
+    "by_district": {
+      "Pine Quarter":    { "average": 312.7, "samples": 89 },
+      "The North Yards": { "average":  64.2, "samples": 56 }
+    }
+  },
+
+  "crime": {                         // v0.6 — Game.Buildings.CrimeProducer.m_Crime per building
+    "city": { "average": 8.4 },
+    "samples": 188,                  // subset: only buildings carrying CrimeProducer (mostly res/com)
+    "by_district": {
+      "Pine Quarter":    { "average":  3.1, "samples": 78 },
+      "The North Yards": { "average": 24.6, "samples": 41 }
+    }
+  },
+
   // districts[], buildings[], roads[], other_named[]: REMOVED in v0.2.
   // See carto/processed/index.md + carto/processed/districts/<slug>.md.
 
@@ -156,11 +210,26 @@ Per-district crime and land value are deferred to v0.6 — both follow the pollu
     // Stays in the snapshot — Carto's water output is raster-only by default.
   ],
 
-  "citizens_sample": [
-    // Up to N sampled citizens, not every citizen.
-    // { "id": "...", "name": "...", "age": N, "education": "...", "wealth_tier": "...",
-    //   "home_district_id": "...", "workplace_company_id": "..." }
-  ],
+  "citizens_sample": {                 // v0.7 — see "per-citizen sample" above for shape
+    "sampled": 30,                     // number of entries in citizens[]
+    "eligible_total": 1842,            // residents that passed the non-tourist/commuter/dead filter
+    "followed_count": 2,               // how many of those were Followed (always included in sample)
+    "citizens": [
+      {
+        "id": "12345-1",
+        "name": "Inger Brevik",
+        "gender": "female",
+        "age": "adult",
+        "education": "well_educated",
+        "happiness": 73,
+        "home_district": "Pine Quarter",
+        "workplace": "Brevik Lumber Co.",
+        "school": null,
+        "followed": true,
+        "is_criminal": false
+      }
+    ]
+  },
 
   "district_zones": {
     // Per-district building-type counts. Same shape as city.zones but keyed by
@@ -296,6 +365,8 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 - `0.2` — Spatial data extracted to Carto chunks (`carto/processed/`). Snapshot retains city stats, demographics, trade, and the bulk-signal diff (`zones_delta`, `outside_connections`, `water_sources`). Per-building churn removed; rebuild against Carto chunks if it becomes story-relevant.
 - `0.3` — Added `map.*` block (world identity). Carto pipeline expanded to include Network (roads) + MapTile (footprint); new-city Carto auto-trigger on save-load edge.
 - `0.4` — Added top-level `pollution` block (per-district + city-wide air/ground/noise), `city.churn` (births/deaths/move-ins/move-aways daily rates), and `diff.building_churn` (per-district demolition + construction counts separate from the net `district_zone_deltas`). Implements the top-3 from the [snapshot fields wishlist](https://github.com/williamlang/city-storytelling-mod/issues/18).
-- `0.5` — current. Added `city.social` (homeless / unemployed / crime), `city.budget` (income + residential tax — non-residential tax + expense dropped pending parameter-shape investigation), and `city.churn.moved_away_by_reason` (Game.Agents.MoveAwayReason breakdown). All city-wide rolls via CityStatisticsSystem.
+- `0.5` — Added `city.social` (homeless / unemployed / crime), `city.budget` (income + residential tax — non-residential tax + expense dropped pending parameter-shape investigation), and `city.churn.moved_away_by_reason` (Game.Agents.MoveAwayReason breakdown). All city-wide rolls via CityStatisticsSystem.
+- `0.6` — Added top-level `land_value` and `crime` blocks: per-district + city-wide averages, same per-building → bin-by-district pattern as v0.4 pollution. `land_value` reads `LandValueSystem`'s cell grid; `crime` reads the per-building `Game.Buildings.CrimeProducer` component (so its sample population is a subset of buildings, distinct from pollution's).
+- `0.7` — current. `citizens_sample` is now a real per-citizen array (up to 30 entries) instead of an empty placeholder. Every `Followed` citizen is always included; remaining slots filled with a timestamp-seeded uniform random sample of residents. Per-entry fields: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags. Wealth tier deferred to v0.8.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 
