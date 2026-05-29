@@ -121,7 +121,7 @@ If the player opens a conversation *without* `/session-start` and I notice the c
 
 The player has four project commands at `.claude/commands/`:
 
-- **`/new-city`** — bootstrap a new playthrough: ask for a map screenshot, suggest a name and founding history, write `canon/city.md` and `canon/playthrough-premise.md` into this city folder. Used once per city, before the first `/session-start`.
+- **`/new-city`** — bootstrap a new playthrough: read the combined topographic map the mod already wrote, suggest a name and founding history, write `canon/city.md` and `canon/playthrough-premise.md` into this city folder. Used once per city, before the first `/session-start`.
 - **`/session-start`** — open a session: state scan + checklist of opening tasks.
 - **`/story-driven`** — generate 3–5 concrete in-game choices grounded in current canon, with for/against character framing. Live secrets and arcs bias which choices surface.
 - **`/session-end`** — close a session: record what happened in-game, propagate consequences (characters, events, secret status), commit.
@@ -217,6 +217,45 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               "where in North America" enormously.
                 city.*      — money, happiness, health, tourists, milestone,
                               danger, XP, zone counts by type.
+                city.churn  — daily births / deaths / moved-in / moved-away
+                              rates, plus moved_away_by_reason (no_money,
+                              not_happy, no_suitable_property, no_adults,
+                              + tourist variants). The sleeper signal:
+                              moved_away_by_reason lets the agent write
+                              "people are fleeing the Yards over the noise"
+                              with data backing it.
+                city.social — homeless_count, unemployed_count, crime_count,
+                              crime_rate. City-wide pressure signals.
+                city.budget — income_daily, tax_residential. Pair with
+                              city.money across snapshots to compute net
+                              flow per period.
+                pollution   — per-district + city-wide air / ground / noise
+                              averages, sampled at every building. NIMBY
+                              fights, health scandals, "the Yards smell
+                              like a refinery" all anchor here.
+                land_value  — per-district + city-wide LandValue averages.
+                              The spatial expression of money: pair with
+                              pollution to write "the bottom fell out of
+                              the North Yards" or "Pine Quarter is where
+                              the new money lives."
+                crime       — per-district counts of active resident
+                              criminals (citizens carrying the Criminal
+                              component, binned by home district). Real
+                              spatial signal — districts with no active
+                              criminals are omitted from by_district.
+                              city.social.crime_count has the rolled-up
+                              reported-crime stat; this adds the spatial
+                              dimension and the "who's actively criminal
+                              right now" headcount.
+                citizens_sample — up to 30 sampled residents per snapshot
+                              with name, gender, age band, education,
+                              happiness, home district, workplace, school,
+                              followed/is_criminal flags. Every Followed
+                              citizen (player-tracked) is always included;
+                              the rest is a timestamp-seeded random sample.
+                              This is the agent's pool of candidate
+                              characters — pluck named individuals here
+                              when the story needs a face.
                 demographics — citizen flag counts, average wellbeing/health,
                               employed count, sampled population.
                 outside_connections, water_sources — named entities Carto
@@ -224,9 +263,10 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                 district_zones — per-district building-type counts (subdivision
                               growth signal).
                 diff        — change-since-last-snapshot block: zone deltas,
-                              district zone deltas, named-building churn,
-                              outside-connection / water-source diffs, in-world
-                              days elapsed.
+                              district zone deltas, building_churn (demos +
+                              constructions per district), named-building
+                              churn, outside-connection / water-source
+                              diffs, in-world days elapsed.
               Read snapshots for "what is the city's state right now / what
               changed since last play / what region of the world is this."
 
@@ -274,8 +314,11 @@ carto/        Spatial geography. Refreshed automatically on first export of a
                    (green lowland → tan → brown → white peaks), water
                    bodies in depth-shaded blue, district outlines dashed,
                    roads/intersections/labels overlaid. Same data as the
-                   surrounding text chunks. Primarily for the player; the
-                   text chunks remain the agent's contract.
+                   surrounding text chunks. The agent reads this as its
+                   visual anchor during /new-city — shape and adjacency
+                   come through faster from the image than from numbers.
+                   The text chunks remain the source of truth for any
+                   number cited in prose.
     districts/
       <slug>.md    Per-district detail: centroid, bounding box, area, neighbors
                    with compass directions, Carto's own resident/employee
@@ -295,6 +338,9 @@ carto/        Spatial geography. Refreshed automatically on first export of a
 - "What kind of world is this city in?" / "What's the climate?" → `map.*` in the latest snapshot.
 - "What's the city's current state?" → latest `snapshots/*.json` (`city.*`, `demographics`).
 - "What changed since last play?" → `diff` block in the latest snapshot.
+- "Why are people leaving?" → `city.churn.moved_away_by_reason`.
+- "How rough is this neighborhood?" → `pollution.by_district[<name>]` + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
+- "Give me a named resident in <district>" → `citizens_sample.citizens` filtered by `home_district`.
 - "What does the terrain look like?" → `carto/processed/elevation.md`.
 - "How much water is there and what shape?" → `carto/processed/water.md`.
 - "Where is Old Halverson relative to Riverside?" / "What's in this district?" → `carto/processed/index.md` + `districts/<slug>.md`.
@@ -305,9 +351,20 @@ carto/        Spatial geography. Refreshed automatically on first export of a
 
 - `diff.zones_delta` — city-wide growth or decline. "The city added 65 residential lots in the last month" is a backdrop signal for a boom narrative.
 - `diff.district_zone_deltas` — localized growth. A spike in one district's residential count is a new subdivision opening — name it, write a small `events/` entry, possibly introduce a developer character.
+- `diff.building_churn` — per-district demolitions + constructions, separate from the net `district_zone_deltas`. "6 lots torn down AND 4 built" is a displacement / gentrification signal that the net change alone hides.
 - `diff.named_buildings.added` — civic infrastructure or player-renamed places appearing for the first time. Schools, fire stations, transformer stations, rail yards, named landmarks. Each one is an `events/*.md` candidate (e.g., "Inger Brevik Elementary opened, March 2027").
 - `diff.named_buildings.removed` — demolitions of previously-named places. Worth noting if the building had a canon entry; not every removal needs an event.
 - `diff.outside_connections.added` — new highway/rail/air destination connected. "Route to Canmore opened" is a real civic milestone.
+
+**Story-worthy signals in the snapshot body** — these are *standing* signals (the current state, not a change), useful for grounding character motives, faction positions, and the city's mood when writing canon at any point:
+
+- `city.churn.moved_away_by_reason` — *why* people are leaving (no_money / not_happy / no_suitable_property / no_adults, plus tourist variants). High `not_happy` is a "the city is hostile" story; high `no_money` is a "can't afford to live here" story; high `no_suitable_property` is a housing-shortage story. Each maps to a different character agenda.
+- `city.social` — homeless_count, unemployed_count, crime_count, crime_rate. The headline social-pressure dashboard. Cross-reference against `pollution.by_district` and `crime.by_district` to localize the pressure to a place worth writing about.
+- `city.budget` — income_daily, tax_residential. Combine with `city.money` across two snapshots to compute net cash flow per in-world period; a city running deficits or hoarding surplus is a different political climate.
+- `pollution.by_district` — per-district air / ground / noise. The agent's NIMBY-fight engine. A district with `noise: 400+` next to one with `noise: <50` is a story about a highway, an industrial neighbor, or a flight path — name the friction and write the residents complaining about it.
+- `land_value.by_district` — per-district averages. "This is where the money lives" + "the bottom fell out of this district" both live here. Cross-reference against pollution (pollution drags land value down — the engine's own update job subtracts pollution penalties).
+- `crime.by_district` — per-district active-criminal counts. Districts with no active criminals are omitted; districts with elevated counts vs. their population are the "rough neighborhoods" the storyteller should be writing about. Pair with `pollution.by_district` and low `land_value.by_district` to spot the classic neglected-quarter triple.
+- `citizens_sample.citizens` — the candidate-character pool. When the story needs a named face (a homeowner objecting to a rezoning, a small-business owner in a struggling district, a teenager about to leave town), pluck one whose attributes fit: matching home_district, matching workplace, matching age band, matching education. Always-included `followed: true` citizens are the player's explicit picks — anchor canon around them first.
 
 **Reading the spatial chunks — what to take literally vs. softly:**
 
@@ -459,7 +516,7 @@ It lives in `canon/playthrough-premise.md` as plain prose. **I infer it; the pla
 
 1. The chosen founding-history paragraph in `canon/city.md` — era, original economic engine, 20th-century trajectory (boom / decline / reinvention), region. This is the dominant signal.
 2. **The spatial data the mod collected on first export** — read from `snapshots/snapshot-*.json` (the `map.*` block: name, theme, latitude, longitude, temperature range, cloudiness, precipitation) and `carto/processed/{index, elevation, water, roads}.md`. Latitude + temperature alone pin the climate (boreal vs. Mediterranean vs. temperate); the terrain reading and water reading carry the dominant landform; the named decorations (cairns, ruins, monuments) and bridge / highway names carry implicit history.
-3. The visual map read from `/new-city`'s screenshot step — coastline shape, vegetation density, anything the rasters and vectors don't capture. Augments (2); doesn't override it.
+3. The visual read of `carto/processed/map.svg` from `/new-city`'s map-image step — coastline shape, valley orientation, anything the text chunks didn't make obvious. Augments (2); doesn't override it.
 4. The chosen city name — sometimes carries tone (a founders' surname implies entrenched-money; a geographic-feature name implies a place-rooted story).
 
 **Inference heuristics** (writerly judgments, not a lookup table):

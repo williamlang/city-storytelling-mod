@@ -172,7 +172,7 @@ What's wired up:
 - **Carto peer-mod integration** via `Storyteller/CartoBridge.cs` (reflective, no compile-time dependency on Carto.dll). Requests `Area + Building + Network + Raster` systems → `District + Building + MapTile + Road` features, plus `Elevation + Depth` GeoTIFFs.
 - **`CartoProcessor`** turns the raw GeoJSON + GeoTIFF output into storyteller-facing markdown chunks (see "Output format" above). Includes a minimal Int16 TIFF reader (`Storyteller/GeoTiffReader.cs`), stdev-based terrain classifier, coastline extractor with complexity ratio, and per-quadrant water/coast distribution analysis.
 - **First-Carto-on-new-city auto-trigger.** New city detected via `!Directory.Exists("<dir>/carto")` on the save-load edge → `RequestCartoExport()` queued before the agent ever opens the folder.
-- **Founding flow on the agent side** — `template/.claude/commands/new-city.md` reads spatial data first (snapshot.map.* + carto/processed/*) as the primary anchor, with the screenshot as a secondary visual signal. Premise inference in `template/CLAUDE.md` lists spatial signals as priority-2 inputs.
+- **Founding flow on the agent side** — `template/.claude/commands/new-city.md` reads spatial data first (snapshot.map.* + carto/processed/*) as the primary anchor, and reads `carto/processed/map.svg` (the mod-generated combined topographic image) as its secondary visual signal. No player-supplied screenshot needed. Premise inference in `template/CLAUDE.md` lists spatial signals as priority-2 inputs.
 - **Storyteller window UI** with map/canon/refresh-map buttons (`Systems/PromptUISystem.cs` + `UI/src/mods/storyteller/`).
 
 Known caveats / open questions:
@@ -183,11 +183,10 @@ Known caveats / open questions:
 
 ## Next-up tasks
 
-1. **`citizens_sample[]`** — sample N citizens, pull name (via `Lifepath`), age, education, wealth, home, work. Highest-leverage remaining snapshot field.
-2. **Service coverage gaps** — depends on building service-area data; advanced. Drives the "where political pressure originates" storytelling.
-3. **`companies[]` standalone array** — name, sector, headcount. Today only surfaced via renamed buildings.
-4. **Auto-screenshot capture** — mod calls into the CS2 / Unity rendering API to grab the in-game map view on the new-city auto-trigger, drops it into `maps/<slug>-overview.png`. Removes `/new-city`'s "give me a screenshot path" step. `/new-city` already auto-detects `maps/*-overview.*` if present.
-5. **Classifier tuning as more maps surface** — the terrain and water classifiers are calibrated against Lakeland (boreal lake district), Archipelago (heavy archipelago), and Verdant Vale (mid-water valley). Edge cases (Sunbelt desert, alpine, dense coastal) will need threshold tweaks.
+1. **`companies[]` standalone array** — name, sector, headcount, district. Today only surfaced via renamed buildings; the storyteller can't see the full employer roster except through whichever citizens happen to roll into `citizens_sample`.
+2. **Citizen wealth tier** — completes `citizens_sample`. Needs `CitizenHappinessParameterData` singleton + household `Resources` buffer join.
+3. **Service coverage gaps** — depends on building service-area data; advanced. Drives the "where political pressure originates" storytelling.
+4. **Classifier tuning as more maps surface** — the terrain and water classifiers are calibrated against Lakeland (boreal lake district), Archipelago (heavy archipelago), and Verdant Vale (mid-water valley). Edge cases (Sunbelt desert, alpine, dense coastal) will need threshold tweaks.
 
 ## Gotchas
 

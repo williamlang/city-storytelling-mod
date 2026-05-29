@@ -471,18 +471,6 @@ namespace CityStoryMod.Systems
                 _log.Info($"OnSubmitPrompt: /{command} triggers a Carto refresh.");
                 World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
             }
-            // /new-city also captures a map screenshot. Better trigger than
-            // the save-load edge — at /new-city time the framebuffer is
-            // fully rendered (the player has been looking at the city) and
-            // the player chose this moment deliberately. Queued with a tiny
-            // delay so the storyteller window's submit-handler UI flash
-            // doesn't dominate the shot.
-            if (command == "new-city")
-            {
-                _log.Info("OnSubmitPrompt: /new-city triggers a map screenshot capture.");
-                World.GetExistingSystemManaged<ExportSystem>()?.RequestScreenshotCaptureForCurrentCity(ticksToDelay: 2);
-            }
-
             StorytellerDispatcher.RunFunc runFunc = StorytellerRun.BuildFreeForm(prompt, _log);
             dispatcher.Start("ui-prompt", runFunc);
         }
