@@ -98,11 +98,18 @@ namespace CityStoryMod.Storyteller
         async Task<AssistantTurn> PostAndCapture(CancellationToken ct)
         {
             JObject response = await Post(ct);
-            JObject message = (JObject)response["message"];
+            if (!(response["message"] is JObject message))
+            {
+                string preview = response.ToString(Formatting.None);
+                if (preview.Length > 500) preview = preview.Substring(0, 500) + "…";
+                throw new Exception($"Ollama response missing 'message' field. Raw: {preview}");
+            }
 
             // Echo the assistant message back into history so subsequent
             // requests carry tool_calls intact.
             _messages.Add((JObject)message.DeepClone());
+
+            string doneReason = (string)response["done_reason"];
 
             StringBuilder text = new StringBuilder();
             string content = (string)message["content"];
@@ -114,7 +121,11 @@ namespace CityStoryMod.Storyteller
                 int synthIndex = 0;
                 foreach (JToken tc in toolCalls)
                 {
-                    JObject fn = (JObject)tc["function"];
+                    if (!(tc["function"] is JObject fn))
+                    {
+                        _log.Warn($"Ollama tool_call without 'function' field; skipping: {tc.ToString(Formatting.None)}");
+                        continue;
+                    }
                     string name = (string)fn["name"];
                     // Ollama returns arguments as a structured object on
                     // /api/chat — no JSON-string parse required.
@@ -129,6 +140,24 @@ namespace CityStoryMod.Storyteller
                     calls.Add(new ToolCall { Id = id, Name = name, Input = (JObject)args.DeepClone() });
                 }
             }
+
+            int contentLen = content?.Length ?? 0;
+            _log.Info($"Ollama turn: done_reason={doneReason ?? "(none)"} content_len={contentLen} tool_calls={calls.Count}");
+
+            // num_predict cap hit — output was truncated mid-stream. AgentLoop
+            // would otherwise treat this as a completed turn and the model's
+            // partial sentence becomes the final answer. Loud warn so debugging
+            // "why did it cut off mid-paragraph" is fast.
+            if (doneReason == "length")
+                _log.Warn($"Ollama: response truncated at num_predict={MaxOutputTokens}. Bump it if outputs keep cutting off.");
+
+            // Silent-tool-failure mode: tools were configured, the model didn't
+            // call any, didn't produce text, and didn't return done_reason=stop.
+            // Almost always: this model doesn't actually support function calling
+            // (most small chat-tuned models). Cheaper to surface here than to
+            // chase "the agent just stops doing anything" downstream.
+            if (_toolsArray != null && _toolsArray.Count > 0 && calls.Count == 0 && contentLen == 0 && doneReason != "stop")
+                _log.Warn($"Ollama: tools were sent but the model returned no tool_calls and no text (done_reason={doneReason ?? "(none)"}). Most likely the model doesn't support function-calling — try llama3.1 / qwen2.5 / mistral-nemo or another tool-capable model.");
 
             // done_reason is "stop" when finished, "tool_calls" when handing off
             // to tools on capable models. Some models / versions don't set
@@ -156,18 +185,31 @@ namespace CityStoryMod.Storyteller
                 },
             };
 
+            int toolCount = _toolsArray?.Count ?? 0;
+            _log.Info($"Ollama POST {url} model={_model} messages={_messages.Count} tools={toolCount} num_predict={MaxOutputTokens}");
+
             HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json"),
             };
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 using (HttpResponseMessage resp = await _http.SendAsync(req, ct))
                 {
                     string text = await resp.Content.ReadAsStringAsync();
+                    sw.Stop();
                     if (!resp.IsSuccessStatusCode)
+                    {
+                        // Bare 404 on /api/chat with a "model not found" body is
+                        // the common "you didn't pull the model" failure mode —
+                        // the wrapped exception already echoes Ollama's body so
+                        // the player sees the actionable hint.
+                        _log.Warn($"Ollama API {(int)resp.StatusCode} after {sw.ElapsedMilliseconds}ms: {text}");
                         throw new Exception($"Ollama API {(int)resp.StatusCode}: {text}");
+                    }
+                    _log.Info($"Ollama responded in {sw.ElapsedMilliseconds}ms ({text.Length} bytes)");
                     return JObject.Parse(text);
                 }
             }
@@ -175,6 +217,8 @@ namespace CityStoryMod.Storyteller
             {
                 // Most likely: Ollama isn't running. Surface a clear hint
                 // rather than the raw network error.
+                sw.Stop();
+                _log.Warn($"Ollama unreachable after {sw.ElapsedMilliseconds}ms: {ex.Message}");
                 throw new Exception($"Could not reach Ollama at {url}. Is the server running? ({ex.Message})");
             }
         }

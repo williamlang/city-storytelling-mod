@@ -72,9 +72,16 @@ namespace CityStoryMod.Storyteller
         }
 
         // Reject absolute paths, .. traversal, and any resolved path that escapes
-        // the city dir.
+        // the city dir. Tolerate a leading '/' or '\' (small local models like
+        // llama3.1:8b tend to write paths POSIX-style as if the city dir were
+        // root, e.g. "/sessions/foo.md" instead of "sessions/foo.md"); strip
+        // any leading separators before validating. Windows-drive prefixes
+        // ("C:\foo") still fail the IsPathRooted check after trimming, so the
+        // safety property is preserved.
         string ResolveSafePath(string relative)
         {
+            if (string.IsNullOrEmpty(relative)) throw new Exception("Path is empty.");
+            relative = relative.TrimStart('/', '\\');
             if (string.IsNullOrEmpty(relative)) throw new Exception("Path is empty.");
             if (Path.IsPathRooted(relative)) throw new Exception("Path must be relative to the city dir.");
             if (relative.Contains("..")) throw new Exception("Path may not contain '..'.");

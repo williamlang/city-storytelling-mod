@@ -21,7 +21,7 @@ namespace CityStoryMod.Storyteller
                 {
                     ["type"] = "object",
                     ["properties"] = new JObject {
-                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir." },
+                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir, starting with a subdirectory name (e.g. 'canon/city.md', 'sessions/2026-01-12-session-start.md'). No leading slash." },
                     },
                     ["required"] = new JArray { "path" },
                 },
@@ -34,7 +34,7 @@ namespace CityStoryMod.Storyteller
                 {
                     ["type"] = "object",
                     ["properties"] = new JObject {
-                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir." },
+                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir, starting with a subdirectory name (e.g. 'canon/city.md', 'sessions/2026-01-12-session-start.md'). No leading slash." },
                         ["content"] = new JObject { ["type"] = "string", ["description"] = "UTF-8 text to write." },
                     },
                     ["required"] = new JArray { "path", "content" },
@@ -48,7 +48,7 @@ namespace CityStoryMod.Storyteller
                 {
                     ["type"] = "object",
                     ["properties"] = new JObject {
-                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir. Use '.' for the city root." },
+                        ["path"] = new JObject { ["type"] = "string", ["description"] = "Path relative to the city dir, e.g. 'canon' or 'sessions'. Use '.' for the city root. No leading slash." },
                     },
                     ["required"] = new JArray { "path" },
                 },
