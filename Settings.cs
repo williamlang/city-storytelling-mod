@@ -44,6 +44,29 @@ namespace CityStoryMod
         // if an open session already exists, so it never stacks duplicates.
         public bool AutoSessionStartOnSaveLoad { get; set; }
 
+        // Active event generation (issue #38). When on, the mod periodically
+        // invokes /story-driven on the storyteller to propose new open events
+        // the player has to respond to in-game, and runs /events-resolve after
+        // every snapshot export to close events the player has already acted
+        // on. Off by default — continuous LLM activity has a real token cost
+        // and the player should opt in. Idle detection (sim paused OR no
+        // input for several minutes) suspends the cadence so the storyteller
+        // doesn't burn tokens into a void. The agent enforces a 3-5 open-
+        // event cap at the file level; this system also skips generation
+        // when the cap is hit to save a wasted LLM round-trip.
+        public bool ActiveEventsEnabled { get; set; }
+
+        // Wall-clock-minute floor between autonomous /story-driven invocations.
+        // The actual fire time can be later if the player is idle when the
+        // interval elapses — the system waits for activity before generating.
+        // 1-60 minute range; defaults to 10.
+        [SettingsUISlider(min = 1, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(IsActiveEventsDisabled))]
+        public int ActiveEventsIntervalMinutes { get; set; }
+
+        [SettingsUIHidden]
+        public bool IsActiveEventsDisabled => !ActiveEventsEnabled;
+
         // LLM credentials for the in-game ghostwriter. Key/model are kept generic
         // (not Anthropic-prefixed) so they apply to whichever provider is selected
         // below — switch provider, paste a different key, paste a matching model
@@ -90,6 +113,8 @@ namespace CityStoryMod
         {
             IntervalMinutes = 5;
             AutoSessionStartOnSaveLoad = false;
+            ActiveEventsEnabled = false;
+            ActiveEventsIntervalMinutes = 10;
             Provider = LlmProvider.AnthropicAPI;
             ApiKey = "";
             Model = "claude-opus-4-7";

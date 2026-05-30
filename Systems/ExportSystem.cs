@@ -814,6 +814,13 @@ namespace CityStoryMod.Systems
             // linearly with city size. The player triggers refreshes manually
             // via the Refresh map button in the storyteller window. See
             // RequestCartoExport.
+
+            // Active events (#38): flag the autonomous loop to run
+            // /events-resolve on the next tick. ActiveEventsSystem handles
+            // the actual dispatch, gating on Settings.ActiveEventsEnabled
+            // and the presence of any `status: open` events to scan. This
+            // is fire-and-forget — the export call doesn't wait on it.
+            World.GetExistingSystemManaged<ActiveEventsSystem>()?.QueueResolveRun();
         }
 
         // User-triggered Carto export. Called from PromptUISystem when the

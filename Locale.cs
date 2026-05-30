@@ -28,6 +28,14 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AutoSessionStartOnSaveLoad]"] =
                 "When on, the mod writes an open session stub into the city's sessions folder the moment a save is loaded. The next Claude conversation lands in a live session without needing /session-start. Skipped if a prior session is still open. Off by default — when off, the agent prompts you to run /session-start yourself.",
 
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ActiveEventsEnabled]"] = "Active events (autonomous storyteller)",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ActiveEventsEnabled]"] =
+                "When on, the Ghostwriter periodically proposes new story events while you play — open threads with 2-4 in-world response options for you to act on in-game — and auto-resolves them when the snapshot shows you've acted (or when their in-world deadline passes). Off by default. Continuous LLM activity costs real provider tokens; the storyteller is paused when the sim is paused or you've been idle for several minutes so it doesn't run into a void. The agent caps open events at 3-5 to keep the inbox manageable.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ActiveEventsIntervalMinutes]"] = "Active events interval (minutes)",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ActiveEventsIntervalMinutes]"] =
+                "Wall-clock minutes between autonomous /story-driven runs. The actual gap can be longer — if you're idle when the interval elapses, the storyteller waits until you're active again. Lower values mean more frequent proposals (and higher token spend); higher values mean a slower-paced inbox. Hidden when active events is off.",
+
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] = "LLM provider",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.Provider]"] =
                 "Which LLM service drives the in-game ghostwriter. Anthropic (API) uses a direct key against api.anthropic.com — paste a key below and you're done. Anthropic (Claude Code CLI) shells out to the `claude` command on your PATH and uses whatever credentials you've logged into the CLI with (including a Max subscription) — requires Claude Code to be installed and `claude --version` to work in the same shell CS2 was launched from. OpenAI / Gemini / Ollama use their respective HTTP APIs.",
