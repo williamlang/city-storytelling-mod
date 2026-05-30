@@ -5,7 +5,9 @@ order: 40
 
 Run the session-end checklist.
 
-**0. Find the open session.**
+**0a. Resolve open events first.** Run the `/events-resolve` flow (see `.claude/commands/events-resolve.md`) inline as the first step. Any `events/*.md` whose acceptance criteria the snapshot now satisfies closes as `resolved-by-player`; anything past `in_world_deadline` closes as `resolved-by-timeout` with the consequence canon written. This shapes what's left for the player to describe in step 1 — they don't need to re-narrate things that already auto-resolved, only the parts that *weren't* covered by an open event. Summarize the resolutions in one line for the player after the pass.
+
+**0b. Find the open session.**
 
 Scan `sessions/` for the most recent file. Expect to find an open stub (no `ended_real_date:` in frontmatter), usually named `SXX-YYYY-MM-DD-open.md` — created either by `/session-start` or by the mod's auto-start-on-save-load setting.
 
@@ -14,11 +16,13 @@ Scan `sessions/` for the most recent file. Expect to find an open stub (no `ende
 
 Otherwise, this is the file you'll be updating in steps 3–5 below.
 
-**1. Ask** the player what happened this session:
-- What did you build / zone / change in-game?
-- Any milestones (population thresholds, new districts unlocked, services failing or expanding)?
-- Did any `proposed` / `planned` canon become real (a planned farm got built; a pitched tower broke ground)? Did anything proposed get abandoned?
-- Anything visually distinct worth a screenshot reference?
+**1. Ask** the player what happened this session — *beyond* what step 0a already auto-resolved. Frame the question around the gap: "Anything else worth recording that wasn't part of [the resolved events from 0a]?" Specifically prompt for:
+- Things they built / zoned / changed that didn't match an open event's acceptance criteria.
+- Any milestones (population thresholds, new districts unlocked, services failing or expanding).
+- Whether any `proposed` / `planned` canon outside the resolved events became real or got abandoned.
+- Anything visually distinct worth a screenshot reference.
+
+If the 0a pass already covered the whole session, this prompt can be a one-line check ("anything else?") rather than a full questionnaire.
 
 **2. Propose the in-world time window** (default 2–6 months per real-world session) and confirm with the player.
 
@@ -32,10 +36,10 @@ Then fill the body: `## What I built in-game`, `## Story consequences`, `## Open
 **4. Propagate consequences**:
 - Advance `places/` status (planned → under-construction → existing). Update `built:` dates.
 - Update affected `characters/` (status, agenda, allies/adversaries) and `companies/` (status, key_people).
-- Add `events/` entries for milestones (openings, deals, scandals, groundbreakings, ribbon-cuttings).
+- Add `events/` entries for things that happened in-game *without* a corresponding open event — openings, deals, scandals, groundbreakings, ribbon-cuttings the player just describes. These are `status: historical`: no `options`, no `in_world_deadline`, no resolution loop. (Events that *were* covered by an open proposal already got their canon written in step 0a — don't double-record them.)
 - **Check `secrets/`.** Did anything this session put pressure on a hidden fact? Update `status` (hidden → suspected if rumors started; suspected → partially-revealed if a leak landed; → revealed if it broke fully). If a secret flipped to `revealed`, write the corresponding `events/` entry and update implicated entity files. Whether to quote unrevealed secret content to the player follows `secrets_visibility` in `settings.json` (see CLAUDE.md "Secrets").
 - **Check for a city level-up.** Diff `city.milestone_level` between the latest snapshot in `snapshots/` and the most recent prior snapshot. If it rose, the city hit a milestone this session (which in CS2 means a funds influx + new unlocks). Always record the advance as a one-line bullet in the session log. Then check `levelup_storylines` in `settings.json`:
-  - If `true`: write an `events/` entry for the milestone advance (the council vote / budget allocation / unlock decision) and a short narrative piece in `stories/` (council transcript, news clipping, developer memo) about who pushed for what spending, who lost out, the political fallout. Ground the storyline in active characters/factions and the playthrough premise — don't generate generic boilerplate. Update implicated `characters/` / `companies/` (e.g., a developer who won the contract gets a status / agenda update).
+  - If `true`: write a `status: historical` `events/` entry for the milestone advance (the council vote / budget allocation / unlock decision) and a short narrative piece in `stories/` (council transcript, news clipping, developer memo) about who pushed for what spending, who lost out, the political fallout. Ground the storyline in active characters/factions and the playthrough premise — don't generate generic boilerplate. Update implicated `characters/` / `companies/` (e.g., a developer who won the contract gets a status / agenda update).
   - If `false`: stop after the session-log bullet. No `events/` or `stories/` entry for this milestone.
 - Optionally draft short narrative pieces (news clipping, council transcript, developer email) into `stories/` for the most consequential moments.
 

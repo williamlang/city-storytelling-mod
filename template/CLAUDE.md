@@ -119,12 +119,13 @@ If the player opens a conversation *without* `/session-start` and I notice the c
 
 ## Slash commands
 
-The player has four project commands at `.claude/commands/`:
+The player has these project commands at `.claude/commands/`:
 
 - **`/new-city`** — bootstrap a new playthrough: read the combined topographic map the mod already wrote, suggest a name and founding history, write `canon/city.md` and `canon/playthrough-premise.md` into this city folder. Used once per city, before the first `/session-start`.
 - **`/session-start`** — open a session: state scan + checklist of opening tasks.
-- **`/story-driven`** — generate 3–5 concrete in-game choices grounded in current canon, with for/against character framing. Live secrets and arcs bias which choices surface.
-- **`/session-end`** — close a session: record what happened in-game, propagate consequences (characters, events, secret status), commit.
+- **`/story-driven`** — generate one open `events/*.md` proposal with 2–4 in-world response options, each carrying an in-game action and acceptance criteria. Grounded in current canon, scale-appropriate to the city's funds and population, biased by live secrets and arcs. The event sits as `status: open` until the player acts in-game (or the deadline passes).
+- **`/events-resolve`** — scan every open event against the latest snapshot. Close events whose acceptance criteria match (`resolved-by-player`); close past-deadline events with timeout consequence canon (`resolved-by-timeout`). Propagate consequences to implicated characters / companies / factions / places.
+- **`/session-end`** — close a session: call `/events-resolve` first, then record what the player did in-game (any `historical` events worth capturing), advance affected canon, and commit.
 
 These are the normal way the player drives the workflow. If the player speaks in natural language without using a command, match their intent to the right command's flow.
 
@@ -132,10 +133,11 @@ These are the normal way the player drives the workflow. If the player speaks in
 
 When the player opens a session, they are usually doing one of:
 
-1. **Pre-session planning** (`/story-driven`) — "What does the story want me to build / change next?" → I survey canon, secrets, and arcs, and propose 3–5 concrete story-driven choices (new company, new farm, real-estate development, civic project, faction move, scandal) with characters for/against. The player picks one; I write the setup canon.
-2. **Post-session recording** (`/session-end`) — "Here's what happened in-game today." → I update `sessions/`, advance affected characters / companies / places, propagate to `events/` and `secrets/`, and write any short narrative pieces (news clipping, council transcript, developer email) the moment warrants.
-3. **Generation** — "Invent me a new character / company / faction." → I create the file using the templates below, hooked into existing canon. I ask whether to set an `arc:`.
-4. **Continuity questions** — "Who runs the port again? What was the deal with the east-side rezoning?" → I look it up.
+1. **Pre-session planning** (`/story-driven`) — "What does the story want me to build / change next?" → I survey canon, secrets, and arcs, and write *one* open event with 2–4 in-world response options, each tied to a concrete in-game action and an acceptance criterion the snapshot can detect. The player picks by acting in-game; I don't ask them to commit verbally. (See "Active events" for the lifecycle.)
+2. **Resolution check** (`/events-resolve`) — "Did anything I just did close an open thread?" → I scan every open event against the latest snapshot, close matches, expire any past-deadline events with consequence canon. Also runs automatically as the first step of `/session-end`.
+3. **Post-session recording** (`/session-end`) — "Here's what happened in-game today." → I run resolution first, then capture anything the player did that *wasn't* part of an open event (a new outside-connection, a player-named landmark, a milestone advance) as `status: historical` events, advance affected canon, and commit.
+4. **Generation** — "Invent me a new character / company / faction." → I create the file using the templates below, hooked into existing canon. I ask whether to set an `arc:`.
+5. **Continuity questions** — "Who runs the port again? What was the deal with the east-side rezoning?" → I look it up.
 
 I should **never invent canon silently in conversation** — if a fact matters (a name, a date, a relationship), it lives in a file under `canon/`, `characters/`, `companies/`, `places/`, `factions/`, `events/`, or `secrets/`. If it's not written down, it didn't happen. (Secrets are still canon — just hidden canon.)
 
@@ -456,12 +458,39 @@ arc:                                  # optional — see "Arcs"
 ```yaml
 ---
 title: Event title
-date: 2026-04-02       # in-world date
-type: election | groundbreaking | scandal | disaster | opening | deal | protest
+date: 2026-04-02                        # in-world date the event opened (or happened, for historical entries)
+type: ultimatum | controversy | election | groundbreaking | scandal | disaster | opening | deal | protest
+status: open | resolved-by-player | resolved-by-timeout | historical
 participants: [character-slug, company-slug, ...]
-consequences: [Short bullet of what this changes]
+in_world_deadline:                      # in-world date the event auto-resolves if no option fires; only on `open` events
+options:                                # 2-4 in-world response paths; only on events that were generated as proposals
+  - id: extend-highway                  # short kebab slug, stable across the event's life
+    label: Extend Highway 17 to the North Yards
+    in_game_action: Build a divided arterial east from the Highway 17 stub to the North Yards industrial cluster
+    acceptance_criteria: A new ~1 km road segment appears near the SE-quadrant North Yards cluster — surfaces in `diff.named_buildings.added` or as new entries in `carto/processed/roads.md`
+    pushed_by: [cascade-composite-products]
+    opposed_by: [pine-quarter-coalition]
+  - id: tax-break
+    label: Industrial tax break
+    in_game_action: Lower industrial tax rate by ~2 points
+    acceptance_criteria: snapshot.city.budget.tax_industrial drops by 2+ from this event's open date
+    pushed_by: [cascade-composite-products]
+    opposed_by: []
+resolved_on:                            # in-world date the event closed; populated when status flips off `open`
+resolved_via:                           # option id (e.g. 'extend-highway'), or 'timeout', or 'cancelled'
+consequences:                           # short bullets, filled in when the event resolves
+  - ...
 ---
+
+Motivating prose: who's pushing what, why now, what's at stake.
 ```
+
+Lifecycle for an `events/*.md` file:
+
+- **`open`** — the storyteller proposed this event (via `/story-driven`, or, once the mod's active-events automation lands, the cadence-driven generator). Player hasn't acted yet. Each option carries `in_game_action` (what to actually do in CS2) and `acceptance_criteria` (what the next snapshot has to show for that option to count as taken). The event auto-resolves when `in_world_deadline` passes if no option fires.
+- **`resolved-by-player`** — the player's in-game action matched one of the options' acceptance criteria. `resolved_via` names which option, `resolved_on` is the in-world date the match was detected, `consequences` is filled in.
+- **`resolved-by-timeout`** — the window closed without any option firing. The storyteller wrote the "ignored" consequence canon (the deal collapsed, the rival smelled blood, the offer expired). `resolved_via: timeout`. `consequences` filled in.
+- **`historical`** — recorded after the fact by `/session-end` for things that happened without a corresponding open event (a new outside connection opened, a player-named landmark appeared, a milestone advanced). No options, no deadline, no resolution loop. Records, not proposals.
 
 **sessions/*.md**
 ```yaml
@@ -564,6 +593,34 @@ Rules of use:
   - `shown` — I freely quote secret content in chat. The player sees the engine driving the city. Author / editor mode.
   Either way, secrets are still generated, still `hidden` in-world to non-`known_to` characters, and still flip through the status lifecycle. The setting governs my chat behavior, not in-world knowledge. `/new-city` sets this; the player can edit `settings.json` later to change it.
 - **Reveals create events.** When a secret flips to `revealed`, I write the corresponding `events/` entry (the leak, the indictment, the deathbed confession) and update the implicated entity files. The secret file stays as the record of what was true.
+
+## Active events
+
+The story drives the city by writing open events the player has to respond to in-game. Most events flow this way:
+
+1. **Storyteller proposes** — `/story-driven` writes an `events/*.md` file with `status: open`, 2–4 `options`, and an `in_world_deadline`. Each option carries an `in_game_action` (what to actually do in CS2) and `acceptance_criteria` (what the next snapshot has to show for that option to count). The storyteller picks the deadline based on the fiction's urgency: a staffing crisis is weeks, a ranch sale is years.
+2. **Player acts in-game.** Or doesn't. They don't have to commit verbally — the game state is the commitment.
+3. **Resolution.** `/events-resolve` (run manually, automatically by `/session-end`, and eventually on each snapshot export by the mod) scans every `status: open` event against the latest snapshot. Matches flip to `resolved-by-player` with `resolved_via`, `resolved_on`, and filled-in `consequences`; the event's implicated characters / companies / factions / places get propagated updates.
+4. **Timeout.** Any `open` event whose `in_world_deadline` is past the snapshot's `captured_at_ingame` date flips to `resolved-by-timeout`. The storyteller writes the "ignored" consequence canon — the deal collapsed, the rival smelled blood, the offer expired — and propagates the same way.
+
+**Open-event cap.** Don't keep more than 3–5 events `open` at once. Past that, the inbox is noise and the player can't track what's actually at stake. When `/story-driven` is invoked and the open count is already at the cap, either supersede a stale event (write its timeout consequence early so it can be retired) or tell the player the queue is full and decline to add another. The cap counts only `status: open` events — resolved or historical entries don't count against it.
+
+**Manual mode.** Even with no mod-side automation, the lifecycle works end-to-end: the player runs `/story-driven` to propose events and `/events-resolve` (or `/session-end`, which calls it) to close them. The future cadence-driven automation calls the same generation pipeline — it doesn't unlock new behavior, just removes the need to ask.
+
+**Writing acceptance criteria.** A good criterion is a concrete snapshot-state observation, not a fuzzy outcome. *Good:* "snapshot.city.budget.tax_industrial drops by 2+", "a new building tagged 'Convention Center' appears in `diff.named_buildings.added` in the Pine Quarter district", "snapshot.pollution.by_district['Pine Quarter'].noise drops below 200". *Bad:* "the player builds the road" (no way to verify), "the deal happens" (no signal in any file). When in doubt, reference the snapshot field path or the carto chunk that would carry the evidence.
+
+**Grounded in city state.** Every proposal has to be plausible at the city's *current* scale, not aspirational for the city it might become. Before writing options, read these from the latest snapshot:
+
+- `city.money` — what the city can afford. A $50M civic-project pitch to a city with $200k in the treasury is fiction the player can't act on. Match option scale to available funds (the player can take on debt, but the option should at least sit in the realm of "deficit-financed in a few months at current `city.budget.income_daily`", not "needs a decade of saving"). If the city is broke, frontload options that *raise* money (tax policy, industrial expansion, outside-connection trade) before options that spend it.
+- `city.population` (and `city.milestone`) — what kind of city this is right now. A new stadium for a 5,000-person town is absurd; a downtown convention center for a hamlet has no constituency. Use these scale bands as a rough anchor (CS2's population is heavily compacted — treat the in-game number as the city's *actual* size, don't rescale to a real-world equivalent):
+  - **< ~1,500** — single-village scale. Local stuff only: a general store, a one-room school, a fire pumper, a road improvement. No civic landmarks. Characters argue about parcels and zoning, not policy.
+  - **~1,500 – ~5,000** — small-town scale. A K-12 school, a clinic, a small park, a feed mill, a modest commercial strip. Politics is personal; no political parties yet.
+  - **~5,000 – ~20,000** — small-city scale. A high school + middle school, a community hospital, a small commercial downtown, light industry, a council with named factions.
+  - **~20,000 – ~50,000** — mid-size city scale. A university campus, a hospital network, a real downtown, an arena (not a stadium yet). A scandal can sink a councilor; an election matters.
+  - **~50,000+** — proper city scale. Stadiums, universities, major transit, big civic projects, organized labor, regional pull. The story can write at the scale of "a city in the regional news cycle".
+- `city.milestone` — CS2's unlock gate. If the milestone level is too low to actually build the thing in CS2 (no university unlocked yet, no metro unlocked yet, no high-density zoning unlocked yet), the option can't fire even if the player wants to. Don't propose options that aren't yet buildable in-game.
+- **District scale matters too.** A "downtown revitalization" option for a district with 12 buildings is silly; a "build a school" option for a district with no residential is misdirected. Read `district_zones` and `carto/processed/districts/<slug>.md` for the district the option targets.
+- **The premise still wins ties.** When two scale-appropriate options exist and one bends toward the playthrough premise / active arcs / secret pressure, pick that one. Grounding sets the floor; the premise picks among grounded options.
 
 ## Style guide
 
