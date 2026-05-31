@@ -50,6 +50,8 @@ namespace CityStoryMod.Systems
         ValueBinding<int> _nextEventAtUtcSecBinding;
         int _lastNextEventAtUtcSec;
         bool _lastActiveEventsPaused;
+        ValueBinding<string> _openEventsBinding;
+        string _openEventsScannedCityDir;
 
         // Caches the city dir we last scanned for slash commands / canon
         // tree. OnUpdate rescans when LastExportedCityDir changes, when a
@@ -118,6 +120,12 @@ namespace CityStoryMod.Systems
             // bounce that comes from int-second binding lag vs continuous
             // Date.now() in the UI.
             _activeEventsPausedBinding = new ValueBinding<bool>(Group, "activeEventsPaused", false);
+            // Compact JSON list of open events (status: open in frontmatter)
+            // for the in-panel inbox above the chat/canon body. Each entry is
+            // {path, title, date, in_world_deadline}. Updated on the same
+            // canon-watcher debounce as canonTree — /events-resolve closing
+            // events triggers a rescan automatically.
+            _openEventsBinding = new ValueBinding<string>(Group, "openEvents", "[]");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
@@ -129,6 +137,7 @@ namespace CityStoryMod.Systems
             AddBinding(_activeEventsEnabledBinding);
             AddBinding(_nextEventAtUtcSecBinding);
             AddBinding(_activeEventsPausedBinding);
+            AddBinding(_openEventsBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
@@ -423,6 +432,7 @@ namespace CityStoryMod.Systems
                 {
                     System.Threading.Interlocked.Exchange(ref _canonChangeTicksUtc, 0);
                     _canonScannedCityDir = null;
+                    _openEventsScannedCityDir = null;
                 }
             }
 
@@ -430,6 +440,12 @@ namespace CityStoryMod.Systems
             {
                 _canonScannedCityDir = cityDir;
                 _canonTreeBinding.Update(ScanCanonTree(cityDir));
+            }
+
+            if (cityDir != _openEventsScannedCityDir)
+            {
+                _openEventsScannedCityDir = cityDir;
+                _openEventsBinding.Update(ScanOpenEvents(cityDir));
             }
 
             // Reflect Carto availability into the UI. CartoBridge.IsAvailable
@@ -716,6 +732,107 @@ namespace CityStoryMod.Systems
         // template/CLAUDE.md → Secrets). Empty subdirs are dropped so the
         // sidebar doesn't show headers with no entries.
         const int CanonLiteModeThreshold = 500;
+
+        // Walks <cityDir>/events/*.md, parses minimal frontmatter, returns a
+        // JSON array of entries with `status: open`. Output is sorted by
+        // in_world_deadline ascending (most urgent first). Reads only the
+        // first 4 KB of each file — one frontmatter block fits comfortably
+        // and a cap bounds the cost when there are many events.
+        //
+        // No YAML parser dependency — we walk top-level lines looking for
+        // `key:` prefixes. Nested fields (like the options list's per-item
+        // attributes) are intentionally skipped; the inbox card only needs
+        // title + date + deadline. Players opening an event from the inbox
+        // see the full body via the existing FileModal.
+        static string ScanOpenEvents(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return "[]";
+            string eventsDir = Path.Combine(cityDir, "events");
+            if (!Directory.Exists(eventsDir)) return "[]";
+
+            var entries = new List<JObject>();
+            string[] files;
+            try { files = Directory.GetFiles(eventsDir, "*.md"); }
+            catch (Exception ex)
+            {
+                _log.Warn($"Open-events scan: listing {eventsDir} failed: {ex.Message}");
+                return "[]";
+            }
+
+            foreach (string path in files)
+            {
+                string head;
+                try
+                {
+                    using FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using StreamReader sr = new StreamReader(fs);
+                    char[] buf = new char[4096];
+                    int n = sr.Read(buf, 0, buf.Length);
+                    if (n <= 0) continue;
+                    head = new string(buf, 0, n);
+                }
+                catch { continue; }
+
+                int first = head.IndexOf("---", StringComparison.Ordinal);
+                if (first < 0) continue;
+                int second = head.IndexOf("---", first + 3, StringComparison.Ordinal);
+                string fm = second > 0
+                    ? head.Substring(first + 3, second - first - 3)
+                    : head.Substring(first + 3);
+
+                string status = ExtractTopLevelField(fm, "status");
+                if (!string.Equals(status, "open", StringComparison.Ordinal)) continue;
+
+                string title = ExtractTopLevelField(fm, "title");
+                if (string.IsNullOrEmpty(title)) title = Path.GetFileNameWithoutExtension(path);
+                string date = ExtractTopLevelField(fm, "date") ?? "";
+                string deadline = ExtractTopLevelField(fm, "in_world_deadline") ?? "";
+
+                entries.Add(new JObject
+                {
+                    ["path"] = "events/" + Path.GetFileName(path),
+                    ["title"] = title,
+                    ["date"] = date,
+                    ["in_world_deadline"] = deadline,
+                });
+            }
+
+            // Sort by deadline ascending (empty deadline sorts last). Same-
+            // deadline ties: keep file order, stable.
+            entries.Sort((a, b) =>
+            {
+                string da = (string)a["in_world_deadline"];
+                string db = (string)b["in_world_deadline"];
+                bool ea = string.IsNullOrEmpty(da);
+                bool eb = string.IsNullOrEmpty(db);
+                if (ea && eb) return 0;
+                if (ea) return 1;
+                if (eb) return -1;
+                return string.CompareOrdinal(da, db);
+            });
+
+            return JsonConvert.SerializeObject(entries);
+        }
+
+        // Reads the first top-level YAML field with the given key name from
+        // a frontmatter body (no enclosing --- markers). Top-level means
+        // unindented and not a comment line. Strips an inline `# comment`
+        // suffix from the returned value. Returns null when not found.
+        static string ExtractTopLevelField(string frontmatter, string key)
+        {
+            string prefix = key + ":";
+            foreach (string raw in frontmatter.Split('\n'))
+            {
+                string line = raw.TrimEnd('\r');
+                if (line.Length == 0 || line[0] == ' ' || line[0] == '\t' || line[0] == '#') continue;
+                if (!line.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                string val = line.Substring(prefix.Length).Trim();
+                int hash = val.IndexOf('#');
+                if (hash >= 0) val = val.Substring(0, hash).Trim();
+                return val;
+            }
+            return null;
+        }
 
         static string ScanCanonTree(string cityDir)
         {

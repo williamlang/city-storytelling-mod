@@ -25,6 +25,20 @@ export const nextEventAtUtcSecBinding = bindValue<number>(GROUP, "nextEventAtUtc
 // "remaining" was at the pause→true edge, and skips its 1Hz tick.
 export const activeEventsPausedBinding = bindValue<boolean>(GROUP, "activeEventsPaused", false);
 
+// JSON-serialized list of currently-open story events (status: open in
+// frontmatter), sorted by deadline ascending. Drives the inbox strip
+// rendered above the chat/canon body. Refreshes on the same canon-
+// watcher debounce as canonTree, so /events-resolve closing entries
+// updates the inbox automatically.
+export const openEventsBinding = bindValue<string>(GROUP, "openEvents", "[]");
+
+export interface OpenEvent {
+  path: string;              // relative to cityDir, e.g. "events/2026-03-14-foo.md"
+  title: string;
+  date: string;              // in-world ISO date the event opened
+  in_world_deadline: string; // in-world ISO date the event auto-resolves
+}
+
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
 // results are intentionally NOT in the wire — the C# side drops them so the

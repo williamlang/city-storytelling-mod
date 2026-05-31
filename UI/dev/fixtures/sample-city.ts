@@ -221,4 +221,22 @@ export function seedSampleCity() {
     sessions: [],
     stories: [],
   }));
+
+  // Open-events inbox seed — these paths must match entries in canonTree's
+  // events array above so clicking a card resolves through flatCanon into
+  // the FileModal. Sorted ascending by deadline.
+  bindValue("CityStoryMod", "openEvents", JSON.stringify([
+    {
+      path: "events/2026-07-28-mill-restart-decision.md",
+      title: "Mill-restart application filed",
+      date: "2026-07-28",
+      in_world_deadline: "2027-03-01",
+    },
+    {
+      path: "events/2026-05-28-selkirk-meeting.md",
+      title: "Selkirk Co-op rate hike on the agenda",
+      date: "2026-05-28",
+      in_world_deadline: "2027-08-15",
+    },
+  ]));
 }

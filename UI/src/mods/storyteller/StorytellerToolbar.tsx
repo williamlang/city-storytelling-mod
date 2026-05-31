@@ -17,16 +17,18 @@ import {
   activeEventsEnabledBinding,
   nextEventAtUtcSecBinding,
   activeEventsPausedBinding,
+  openEventsBinding,
   submitPrompt,
   cancelRun,
   refreshGeography,
   setActiveEventsEnabled,
 } from "./bindings";
-import type { ChatMessage, SlashCommand, CanonTree, CanonEntry } from "./bindings";
+import type { ChatMessage, SlashCommand, CanonTree, CanonEntry, OpenEvent } from "./bindings";
 import { ChatRow } from "./ChatRow";
 import { CommandMenu } from "./CommandMenu";
 import { CanonBrowser } from "./CanonBrowser";
 import { FileModal } from "./FileModal";
+import { OpenEventsInbox } from "./OpenEventsInbox";
 
 // Top-level Storyteller entry. The toolbar icon (floating variant matches
 // CS2's other top-left tool mods) toggles a draggable panel with:
@@ -72,6 +74,7 @@ export function StorytellerToolbar() {
   const lastError = useValue(lastErrorBinding);
   const commandsJson = useValue(availableCommandsBinding);
   const canonJson = useValue(canonTreeBinding);
+  const openEventsJson = useValue(openEventsBinding);
   const cartoExporting = useValue(cartoExportingBinding);
   const cartoAvailable = useValue(cartoAvailableBinding);
   const activeEventsEnabled = useValue(activeEventsEnabledBinding);
@@ -136,6 +139,10 @@ export function StorytellerToolbar() {
   const canonTree = useMemo<CanonTree>(() => {
     try { return JSON.parse(canonJson); } catch { return {}; }
   }, [canonJson]);
+
+  const openEvents = useMemo<OpenEvent[]>(() => {
+    try { return JSON.parse(openEventsJson); } catch { return []; }
+  }, [openEventsJson]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -295,6 +302,8 @@ export function StorytellerToolbar() {
               {refreshConfirm}
             </div>
           ) : null}
+
+          <OpenEventsInbox events={openEvents} onOpen={openFile} />
 
           <div className={styles.body}>
             <div className={styles.main}>
