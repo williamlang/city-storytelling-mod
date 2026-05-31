@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.3" />
+  <ModVersion Value="0.1.4" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,30 +61,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.3** &#8212; richer city snapshots and a simpler /new-city.
+**0.1.4** &#8212; the storyteller now drives the city.
 
-* **Named residents in every snapshot.** Up to 30 residents per export with name, age band, education, gender, happiness, home district, workplace, and school. Citizens you've followed in-game are always included; the rest are a random sample that rotates between exports. The ghostwriter can now name actual people in your city when the story needs a face &#8212; no more invented placeholders for characters who already exist.
-* **Per-district crime and land value.** Crime now tracks how many active criminals live in each district (binned by home district). Land value is sampled at every building position and averaged per district. Combined with the existing per-district pollution, the agent can write neighborhood-level stories grounded in real data &#8212; "the bottom fell out of the North Yards" or "Pine Quarter is where the new money lives."
-* **/new-city no longer asks for a screenshot.** The mod-generated topographic map at `carto/processed/map.svg` is now the ghostwriter's visual anchor &#8212; terrain in hypsometric tints, water depth-shaded, districts and roads overlaid. Bootstrap a new city without alt-tabbing for a Steam screenshot.
-* **Storyteller now uses the new signals.** The scaffolded `CLAUDE.md` gained a "Story-worthy signals in the snapshot body" section so the ghostwriter actively uses pollution, churn (incl. why people are leaving), social conditions, budget, land value, crime, and the resident sample &#8212; instead of seeing them and ignoring them.
-* **Removed Ctrl+Shift+M.** The manual screenshot hotkey is gone; the auto-generated combined map replaces it.
-
-**0.1.2** &#8212; spatial enrichment and UI polish.
-
-* **Combined topographic map** &#8212; new `carto/processed/map.svg` rendered on every Carto refresh: hypsometric terrain (green &#8594; tan &#8594; brown &#8594; white), depth-shaded water, dashed district outlines, colored named roads (highways thicker), intersection markers, and labels.
-* **Storyteller can now answer location questions from text alone.** `roads.md` carries a centroid + quadrant for every named road and a new "Intersections of named roads" section listing junctions where two or more named roads converge. Un-districted named buildings carry quadrants in `index.md`. Previously the agent had no spatial coordinates and would fall back to running ad-hoc scripts against the raw GeoJSON.
-* **Agent guardrails.** The scaffolded `template/CLAUDE.md` now explicitly forbids the storyteller from spawning interpreters (Python, jq, awk, PowerShell-as-JSON-parser) to extract facts from files &#8212; the `Read` tool is the contract. Reading JSON / Markdown directly is fine; piping it through external parsers is not.
-* **Refresh map button pulses while working.** Bright animated background and ripple effect for the full duration of the Carto export, so the click feedback is unmissable.
-* **Visible chat scrollbar.** Reserved scrollbar gutter on the chat panel; explicit width / track / thumb styling.
-
-**0.1.0** &#8212; first closed beta.
-
-* In-game **Ghostwriter panel** (toolbar icon, top-left) with chat, slash commands, canon browser, and draggable file modals. Resizable.
-* **Five LLM providers** &#8212; Anthropic API direct, Claude Code CLI (uses your existing Max subscription), OpenAI, Gemini, and local Ollama. Switch in Options.
-* **Snapshot schema v0.4** &#8212; per-export JSON capturing city stats, map identity (climate, latitude, theme), per-district pollution (air / ground / noise), city-wide churn (births / deaths / move-ins / move-aways), zone counts per district, demographics, and a full change-since-last-snapshot diff (named-building churn, demolitions and constructions per district by zone type).
-* **Carto integration** &#8212; on first save load, the mod auto-triggers a Carto spatial export and turns its GeoJSON / GeoTIFF output into storyteller-facing Markdown chunks (terrain reading, water reading, road network, per-district detail). The storyteller reads these as primary spatial context.
-* **Save-load detection** &#8212; sessions start automatically on save load (opt-in), city folders migrate when a save is renamed, chat history clears on city change so cross-save context doesn't leak.
-* **Per-city storytelling workspace** &#8212; canon / characters / companies / places / factions / events / sessions / stories / secrets folders scaffolded from an embedded template on first export and kept in sync as the template evolves (player edits are never clobbered).
-* **Hotkeys** &#8212; Ctrl+Shift+E forces a snapshot export; Ctrl+Shift+M captures a manual map screenshot for the storyteller's spatial context.
+* **Active events.** The ghostwriter periodically proposes story events with 2&#8211;4 in-world response options for you to act on in-game. Each event carries an in-world deadline; act in-game and the next snapshot auto-closes the event with consequence canon, or let it expire and the storyteller writes the "ignored" consequence &#8212; rivals smell blood, deals collapse, opportunities pass. Off by default; flip the **Active** button in the Ghostwriter panel footer to opt in. The interval (1&#8211;60 minutes) lives in Options.
+* **Open-events inbox.** A new strip above the chat lists every open event with title and deadline, sorted by urgency. Click a card to read the motivating prose, the response options, and what each option needs the city to look like for it to count as done.
+* **Live countdown.** The Active button shows wall-clock time until the next autonomous run (`Active: on &#183; 4:32`). Freezes when the sim is paused so you can step away without the timer draining.
+* **Idle-aware.** The autonomous loop suspends when the sim is paused or there's been no keyboard / mouse input for several minutes &#8212; the storyteller won't burn provider tokens generating events into a void.
+* **/story-driven rewritten.** Now writes one open event with multiple in-game response options instead of asking you to pick from a list. You pick by acting in-game; the snapshot tells the storyteller which option you took.
+* **/events-resolve.** New command that scans open events against the latest snapshot, closes matches as `resolved-by-player`, and expires past-deadline events with timeout consequence canon. Runs manually, automatically after each snapshot export (when Active events is on), and as the first step of `/session-end`.
+* **Grounded in city state.** Generated events are now scale-appropriate to your city's current funds, population, and milestone level &#8212; no stadium pitches to a 5,000-person town. The storyteller checks `city.money`, `city.population`, and `city.milestone` before proposing options.
+* **Ollama fixes.** Wire-level request/response logging for debugging local-model setups; tolerates leading-slash tool paths some models emit.
   </ChangeLog>
 </Publish>
