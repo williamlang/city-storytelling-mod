@@ -101,6 +101,62 @@ export function trigger(group: string, name: string, ...args: any[]) {
     registry.get("CityStoryMod.messages")?.update("[]");
     return;
   }
+
+  if (name === "setActiveEventsEnabled") {
+    // Round-trip into the activeEventsEnabled binding so the toolbar
+    // toggle visibly flips between on/off in the dev harness. The real
+    // C# handler (PromptUISystem.OnSetActiveEventsEnabled) also writes
+    // the value into the ModSetting; the mock has no equivalent to
+    // persist, but the in-memory binding is enough for UI iteration.
+    const enabled = !!args[0];
+    registry.get("CityStoryMod.activeEventsEnabled")?.update(enabled);
+    // Pretend a fresh interval just started: deadline = now + 2 min so
+    // the countdown is visibly moving in the dev harness. When the
+    // toggle flips off, drop to 0 to mirror the real PromptUISystem
+    // behavior (binding emits 0 when ActiveEventsEnabled is false).
+    // Carried as unix seconds to match the real binding's wire type.
+    const nextFire = registry.get("CityStoryMod.nextEventAtUtcSec");
+    nextFire?.update(enabled ? Math.floor(Date.now() / 1000) + 120 : 0);
+    return;
+  }
+}
+
+// Auto-renew the active-events deadline when it elapses, so the
+// countdown harness keeps moving rather than parking at "ready"
+// forever. Mirrors the real loop's behavior of advancing _last-
+// GenerationUtc after each fire. Only ticks while a deadline is
+// non-zero (i.e. active events is on) and not paused.
+if (typeof window !== "undefined") {
+  setInterval(() => {
+    const paused = registry.get("CityStoryMod.activeEventsPaused");
+    if (paused?.value) return;
+    const b = registry.get("CityStoryMod.nextEventAtUtcSec");
+    if (!b || !b.value) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (b.value > nowSec) return;
+    b.update(nowSec + 120);
+  }, 1000);
+
+  // Dev convenience: window.__togglePaused() flips the paused flag in
+  // the harness so the freeze behavior can be exercised without running
+  // CS2. Mirrors the real loop's pause-edge advancement of the deadline:
+  // on the unpause edge we push nextEventAtUtcSec forward by the paused
+  // duration so the countdown picks up where it left off.
+  let pausedAtMs: number | null = null;
+  (window as any).__togglePaused = () => {
+    const paused = registry.get("CityStoryMod.activeEventsPaused");
+    if (!paused) return;
+    const next = !paused.value;
+    if (next) {
+      pausedAtMs = Date.now();
+    } else if (pausedAtMs != null) {
+      const elapsedSec = Math.floor((Date.now() - pausedAtMs) / 1000);
+      const b = registry.get("CityStoryMod.nextEventAtUtcSec");
+      if (b && b.value) b.update(b.value + elapsedSec);
+      pausedAtMs = null;
+    }
+    paused.update(next);
+  };
 }
 
 // Unused in this mod's UI, included for API surface completeness.

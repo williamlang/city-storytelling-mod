@@ -14,6 +14,16 @@ export const availableCommandsBinding = bindValue<string>(GROUP, "availableComma
 export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
 export const cartoExportingBinding = bindValue<boolean>(GROUP, "cartoExporting", false);
 export const cartoAvailableBinding = bindValue<boolean>(GROUP, "cartoAvailable", false);
+export const activeEventsEnabledBinding = bindValue<boolean>(GROUP, "activeEventsEnabled", false);
+// Unix-seconds timestamp of the next eligible autonomous /story-driven
+// fire. 0 when active events is off. UI computes a local countdown
+// against wall-clock time. Carried as seconds (not ms) because CS2's
+// ValueBinding type system has no writer for Int64.
+export const nextEventAtUtcSecBinding = bindValue<number>(GROUP, "nextEventAtUtcSec", 0);
+// True while the autonomous loop is frozen — sim paused or game not in
+// an active session. UI freezes the displayed countdown to whatever
+// "remaining" was at the pause→true edge, and skips its 1Hz tick.
+export const activeEventsPausedBinding = bindValue<boolean>(GROUP, "activeEventsPaused", false);
 
 // Wire-format mirror of CityStoryMod.Systems.ChatMessage (lowercase fields
 // match the JsonConvert.SerializeObject output from C#). Tool calls / tool
@@ -58,6 +68,10 @@ export function clearMessages() {
 
 export function refreshGeography() {
   trigger(GROUP, "refreshGeography");
+}
+
+export function setActiveEventsEnabled(enabled: boolean) {
+  trigger(GROUP, "setActiveEventsEnabled", enabled);
 }
 
 // Pipe a diagnostic message to the C# mod log. Coherent UI has no

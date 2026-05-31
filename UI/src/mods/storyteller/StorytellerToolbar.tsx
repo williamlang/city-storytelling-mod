@@ -14,9 +14,13 @@ import {
   canonTreeBinding,
   cartoExportingBinding,
   cartoAvailableBinding,
+  activeEventsEnabledBinding,
+  nextEventAtUtcSecBinding,
+  activeEventsPausedBinding,
   submitPrompt,
   cancelRun,
   refreshGeography,
+  setActiveEventsEnabled,
 } from "./bindings";
 import type { ChatMessage, SlashCommand, CanonTree, CanonEntry } from "./bindings";
 import { ChatRow } from "./ChatRow";
@@ -70,6 +74,56 @@ export function StorytellerToolbar() {
   const canonJson = useValue(canonTreeBinding);
   const cartoExporting = useValue(cartoExportingBinding);
   const cartoAvailable = useValue(cartoAvailableBinding);
+  const activeEventsEnabled = useValue(activeEventsEnabledBinding);
+  const nextEventAtUtcSec = useValue(nextEventAtUtcSecBinding);
+  const activeEventsPaused = useValue(activeEventsPausedBinding);
+
+  // 1Hz tick so the countdown re-renders without the C# side thrashing
+  // the binding. nextEventAtUtcSec only changes when the deadline
+  // anchor shifts (run fires, interval setting changes, toggle flips);
+  // the visible MM:SS comes from this local clock subtracting it.
+  // Skip the tick entirely while paused — frozenRemainingMs holds the
+  // captured value across the pause.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!activeEventsEnabled || activeEventsPaused) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [activeEventsEnabled, activeEventsPaused]);
+
+  // Capture the visible remaining at the moment paused flips to true,
+  // so the displayed value sits still through the entire pause. Cleared
+  // when paused flips back to false (live countdown resumes from the
+  // C# side's freshly-advanced deadline).
+  const [frozenRemainingMs, setFrozenRemainingMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (activeEventsPaused) {
+      setFrozenRemainingMs(Math.max(0, nextEventAtUtcSec * 1000 - Date.now()));
+    } else {
+      setFrozenRemainingMs(null);
+    }
+    // Intentionally NOT depending on nextEventAtUtcSec — we want the
+    // snapshot at the moment of the pause edge, not a moving target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEventsPaused]);
+
+  // Format remaining seconds as M:SS / MM:SS, capped at 99 minutes for
+  // layout sanity (caller's interval slider tops out at 60 anyway).
+  // Negative remaining renders as "ready" — the deadline has passed
+  // but the loop hasn't fired yet (idle, queue full, or dispatcher busy).
+  const activeLabel = (() => {
+    if (!activeEventsEnabled) return "Active: off";
+    if (!nextEventAtUtcSec) return activeEventsPaused ? "Active: on paused" : "Active: on";
+    const remainingMs = activeEventsPaused
+      ? (frozenRemainingMs ?? 0)
+      : nextEventAtUtcSec * 1000 - nowMs;
+    const suffix = activeEventsPaused ? " paused" : "";
+    if (remainingMs <= 0) return `Active: on · ready${suffix}`;
+    const totalSec = Math.floor(remainingMs / 1000);
+    const m = Math.min(99, Math.floor(totalSec / 60));
+    const s = totalSec % 60;
+    return `Active: on · ${m}:${s.toString().padStart(2, "0")}${suffix}`;
+  })();
 
   const messages = useMemo<ChatMessage[]>(() => {
     try { return JSON.parse(messagesJson); } catch { return []; }
@@ -282,6 +336,18 @@ export function StorytellerToolbar() {
                   {tokenSummary || (isRunning ? "Running…" : "Idle")}
                 </span>
                 <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={`${styles.secondary} ${activeEventsEnabled ? styles.toggleOn : ""}`}
+                    title={
+                      activeEventsEnabled
+                        ? "Active events on — the storyteller periodically proposes events and auto-resolves them after each snapshot. Countdown shows wall-clock until the next eligible fire; 'ready' means the deadline passed but the loop is waiting (paused, idle, or queue full). Click to disable."
+                        : "Active events off — the storyteller only runs when you invoke it manually. Click to enable autonomous events."
+                    }
+                    onClick={() => setActiveEventsEnabled(!activeEventsEnabled)}
+                  >
+                    {activeLabel}
+                  </button>
                   {cartoAvailable && (
                     <button
                       type="button"

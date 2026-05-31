@@ -45,6 +45,11 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _canonTreeBinding;
         ValueBinding<bool> _cartoExportingBinding;
         ValueBinding<bool> _cartoAvailableBinding;
+        ValueBinding<bool> _activeEventsEnabledBinding;
+        ValueBinding<bool> _activeEventsPausedBinding;
+        ValueBinding<int> _nextEventAtUtcSecBinding;
+        int _lastNextEventAtUtcSec;
+        bool _lastActiveEventsPaused;
 
         // Caches the city dir we last scanned for slash commands / canon
         // tree. OnUpdate rescans when LastExportedCityDir changes, when a
@@ -94,6 +99,25 @@ namespace CityStoryMod.Systems
             _canonTreeBinding = new ValueBinding<string>(Group, "canonTree", "{}");
             _cartoExportingBinding = new ValueBinding<bool>(Group, "cartoExporting", false);
             _cartoAvailableBinding = new ValueBinding<bool>(Group, "cartoAvailable", false);
+            // Initial value reflects the persisted ModSetting. PromptUISystem
+            // also re-emits this binding each time setActiveEventsEnabled
+            // fires so the React panel sees the new state immediately rather
+            // than after a roundtrip via the AssetDatabase.
+            _activeEventsEnabledBinding = new ValueBinding<bool>(Group, "activeEventsEnabled",
+                Mod.Settings != null && Mod.Settings.ActiveEventsEnabled);
+            // Unix-seconds timestamp of the next eligible /story-driven fire.
+            // Re-emitted in OnUpdate only when the value drifts, so UI can
+            // run a local 1Hz setInterval to render the countdown without
+            // the mod thrashing the binding every frame. Int (not long)
+            // because CS2's ValueWriters layer has no writer for Int64.
+            _nextEventAtUtcSecBinding = new ValueBinding<int>(Group, "nextEventAtUtcSec", 0);
+            // True while the autonomous loop is frozen (sim paused / out of
+            // game). UI uses this to freeze the displayed countdown and skip
+            // its 1Hz tick — no need for the C# side to advance the deadline
+            // per frame and trigger the second-boundary "18:59 ↔ 19:00"
+            // bounce that comes from int-second binding lag vs continuous
+            // Date.now() in the UI.
+            _activeEventsPausedBinding = new ValueBinding<bool>(Group, "activeEventsPaused", false);
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
@@ -102,12 +126,16 @@ namespace CityStoryMod.Systems
             AddBinding(_canonTreeBinding);
             AddBinding(_cartoExportingBinding);
             AddBinding(_cartoAvailableBinding);
+            AddBinding(_activeEventsEnabledBinding);
+            AddBinding(_nextEventAtUtcSecBinding);
+            AddBinding(_activeEventsPausedBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
             AddBinding(new TriggerBinding(Group, "clearMessages", OnClearMessages));
             AddBinding(new TriggerBinding(Group, "refreshGeography", OnRefreshGeography));
             AddBinding(new TriggerBinding<string>(Group, "uiLog", OnUILog));
+            AddBinding(new TriggerBinding<bool>(Group, "setActiveEventsEnabled", OnSetActiveEventsEnabled));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -413,6 +441,24 @@ namespace CityStoryMod.Systems
                 _cartoAvailableBinding.Update(cartoAvail);
             }
 
+            // Active-events countdown anchor + paused flag. ActiveEventsSystem
+            // exposes both; we re-emit only when each value shifts so the
+            // bindings aren't thrashed every frame. UI counts down locally
+            // when not paused, freezes the display when paused.
+            ActiveEventsSystem activeEvents = World.GetExistingSystemManaged<ActiveEventsSystem>();
+            int nextFire = activeEvents != null ? activeEvents.NextFireUtcSec : 0;
+            if (nextFire != _lastNextEventAtUtcSec)
+            {
+                _lastNextEventAtUtcSec = nextFire;
+                _nextEventAtUtcSecBinding.Update(nextFire);
+            }
+            bool paused = activeEvents != null && activeEvents.IsActiveEventsPaused;
+            if (paused != _lastActiveEventsPaused)
+            {
+                _lastActiveEventsPaused = paused;
+                _activeEventsPausedBinding.Update(paused);
+            }
+
             if (_pendingRunStart)
             {
                 _pendingRunStart = false;
@@ -544,6 +590,19 @@ namespace CityStoryMod.Systems
         void OnUILog(string message)
         {
             _log.Info("[UI] " + (message ?? ""));
+        }
+
+        // Toggle handler for the Ghostwriter toolbar's active-events button.
+        // Writes the new value into the ModSetting (which AssetDatabase will
+        // persist on its own cadence) and re-emits the value binding so the
+        // React panel sees the new state on the next frame.
+        void OnSetActiveEventsEnabled(bool enabled)
+        {
+            if (Mod.Settings == null) return;
+            if (Mod.Settings.ActiveEventsEnabled == enabled) return;
+            Mod.Settings.ActiveEventsEnabled = enabled;
+            _activeEventsEnabledBinding.Update(enabled);
+            _log.Info($"Active events toggled {(enabled ? "on" : "off")} via UI.");
         }
 
         static string FormatTokens(TokenUsage u)

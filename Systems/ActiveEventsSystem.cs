@@ -53,8 +53,19 @@ namespace CityStoryMod.Systems
         SimulationSystem _simulationSystem;
         FieldInfo _f_selectedSpeed;       // SimulationSystem.selectedSpeed-like field, resolved reflectively
 
+        // Throttle the sim-paused reflection probe — pause / unpause edges
+        // don't need sub-second responsiveness, and the per-frame cost
+        // (reflective field read on SimulationSystem) was wasted overhead.
+        const double PauseCheckIntervalMs = 250.0;
+
         DateTime _lastGenerationUtc;
         DateTime _lastInputUtc;
+        DateTime _lastPauseCheckUtc;
+        // null when running normally; the UTC of the most recent pause-edge
+        // transition while currently frozen. On unpause edge we advance
+        // _lastGenerationUtc by (now - this) so the cadence picks up where
+        // it was when pause started, instead of having drained during pause.
+        DateTime? _pauseStartedAtUtc;
         Vector3 _lastMousePosition;
         bool _resolveQueued;
         bool _firstTickLogged;
@@ -87,6 +98,7 @@ namespace CityStoryMod.Systems
             DateTime now = DateTime.UtcNow;
             _lastGenerationUtc = now;
             _lastInputUtc = now;
+            _lastPauseCheckUtc = now;
             _lastMousePosition = Input.mousePosition;
 
             _log.Info("ActiveEventsSystem created.");
@@ -100,6 +112,39 @@ namespace CityStoryMod.Systems
             _resolveQueued = true;
         }
 
+        // True when the autonomous loop is currently frozen (sim paused or
+        // game not in an active session). PromptUISystem polls this and re-
+        // emits a ValueBinding so the UI can freeze the countdown display
+        // and skip its 1Hz tick — no per-frame UI churn while paused.
+        public bool IsActiveEventsPaused => _pauseStartedAtUtc.HasValue;
+
+        // Unix-seconds timestamp of the next eligible /story-driven fire.
+        // 0 when the loop is disabled. PromptUISystem polls this each tick
+        // and re-emits a ValueBinding when the value crosses an observation
+        // threshold, so the UI can render a local countdown without the
+        // mod ticking a binding every frame. The actual fire can be later
+        // than this timestamp if the player is idle / sim is paused / the
+        // open-event cap is hit when the deadline arrives; the UI surfaces
+        // that as a "ready" label when remaining time goes negative.
+        //
+        // Returns int (not long): CS2's ValueWriters layer does not
+        // implement a writer for System.Int64, so a ValueBinding<long>
+        // throws at construction. Unix-seconds-as-int fits until 2038
+        // which is far past this mod's relevant lifetime.
+        public int NextFireUtcSec
+        {
+            get
+            {
+                Settings settings = Mod.Settings;
+                if (settings == null || !settings.ActiveEventsEnabled) return 0;
+                DateTime next = _lastGenerationUtc.AddMinutes(settings.ActiveEventsIntervalMinutes);
+                // _lastGenerationUtc is created via DateTime.UtcNow so Kind=Utc;
+                // the DateTime→DateTimeOffset cast preserves the offset correctly.
+                long sec = ((DateTimeOffset)next).ToUnixTimeSeconds();
+                return sec > int.MaxValue ? int.MaxValue : (int)sec;
+            }
+        }
+
         protected override void OnUpdate()
         {
             if (!_firstTickLogged)
@@ -111,10 +156,70 @@ namespace CityStoryMod.Systems
             UpdateInputActivity();
 
             Settings settings = Mod.Settings;
-            if (settings == null || !settings.ActiveEventsEnabled) return;
+            if (settings == null || !settings.ActiveEventsEnabled)
+            {
+                // Clear any in-progress pause so the next time the loop is
+                // enabled we don't carry forward a stale pause-start that
+                // would over-correct _lastGenerationUtc on the next unpause.
+                _pauseStartedAtUtc = null;
+                return;
+            }
 
             // Gate on the same in-game readiness the rest of the mod uses.
             bool inGame = GameManager.instance != null && GameManager.instance.gameMode == GameMode.Game;
+            DateTime now = DateTime.UtcNow;
+
+            // Pause-state edge detection. Throttled to 4Hz — pause / unpause
+            // doesn't need per-frame responsiveness, and reflecting into
+            // SimulationSystem 60x per second was wasted work.
+            //
+            // On entering paused (sim paused OR game not in active session):
+            // capture the moment.
+            // On leaving paused: advance _lastGenerationUtc by the paused
+            // duration in one step, so the cadence picks up exactly where
+            // it was when pause started instead of having drained.
+            //
+            // Input-idle is intentionally NOT a freeze trigger — if you AFK
+            // for an hour, "ready" should be waiting when you come back.
+            //
+            // IsSimPaused short-circuits behind !inGame, so we don't poke
+            // SimulationSystem during menu / save-load transitions.
+            if ((now - _lastPauseCheckUtc).TotalMilliseconds >= PauseCheckIntervalMs)
+            {
+                _lastPauseCheckUtc = now;
+                bool currentlyFrozen = !inGame || IsSimPaused();
+                bool wasPaused = _pauseStartedAtUtc.HasValue;
+
+                if (currentlyFrozen && !wasPaused)
+                {
+                    _pauseStartedAtUtc = now;
+                }
+                else if (!currentlyFrozen && wasPaused)
+                {
+                    _lastGenerationUtc += now - _pauseStartedAtUtc.Value;
+                    _pauseStartedAtUtc = null;
+                }
+            }
+
+            // While frozen: skip the generation cadence entirely. /events-
+            // resolve via _resolveQueued only fires when inGame; we still
+            // allow it during a sim-pause (the export that queued it
+            // already validated state), but skip it when out of game.
+            if (_pauseStartedAtUtc.HasValue)
+            {
+                if (inGame && _resolveQueued)
+                {
+                    StorytellerDispatcher pausedDispatcher = Mod.Storyteller;
+                    string pausedCityDir = Mod.LastExportedCityDir;
+                    if (pausedDispatcher != null && !pausedDispatcher.IsRunning && !string.IsNullOrEmpty(pausedCityDir))
+                    {
+                        _resolveQueued = false;
+                        TryFireResolve(pausedCityDir, pausedDispatcher);
+                    }
+                }
+                return;
+            }
+
             if (!inGame) return;
 
             StorytellerDispatcher dispatcher = Mod.Storyteller;

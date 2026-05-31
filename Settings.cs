@@ -54,18 +54,23 @@ namespace CityStoryMod
         // doesn't burn tokens into a void. The agent enforces a 3-5 open-
         // event cap at the file level; this system also skips generation
         // when the cap is hit to save a wasted LLM round-trip.
+        //
+        // The on/off control lives in the Ghostwriter UI toolbar, not the
+        // Options sidebar — flipping it during play shouldn't require diving
+        // into game options. The value still persists via this ModSetting;
+        // PromptUISystem exposes it to the React panel via a ValueBinding /
+        // TriggerBinding pair.
+        [SettingsUIHidden]
         public bool ActiveEventsEnabled { get; set; }
 
         // Wall-clock-minute floor between autonomous /story-driven invocations.
         // The actual fire time can be later if the player is idle when the
         // interval elapses — the system waits for activity before generating.
-        // 1-60 minute range; defaults to 10.
+        // 1-60 minute range; defaults to 10. Lives in Options as a set-and-
+        // forget power-user setting; the on/off toggle is in the Ghostwriter
+        // UI for quick access during play.
         [SettingsUISlider(min = 1, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
-        [SettingsUIHideByCondition(typeof(Settings), nameof(IsActiveEventsDisabled))]
         public int ActiveEventsIntervalMinutes { get; set; }
-
-        [SettingsUIHidden]
-        public bool IsActiveEventsDisabled => !ActiveEventsEnabled;
 
         // LLM credentials for the in-game ghostwriter. Key/model are kept generic
         // (not Anthropic-prefixed) so they apply to whichever provider is selected
