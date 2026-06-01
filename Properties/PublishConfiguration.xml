@@ -63,6 +63,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <ChangeLog>
 **0.1.5** &#8212; click a place, fly there.
 
-* **Clickable map coordinates.** When the ghostwriter names a precise spot &#8212; "the interchange (820, 1140)", "the SW flats off Loon Lane" &#8212; the coordinate becomes a 📍 pin in the chat. Click it and the in-game camera smoothly flies to that exact point. Closes the loop between the story and the map: no more mentally translating "the north bank by the highway" into a camera scroll.
+* **Clickable map coordinates.** When the ghostwriter names a precise spot &#8212; "the interchange (820, 1140)", "the SW flats off Loon Lane" &#8212; a clickable pin appears beneath the message (and inside canon files). Click it and the in-game camera smoothly flies straight to that point. Closes the loop between the story and the map: no more mentally translating "the north bank by the highway" into a camera scroll.
+* **In-world dates stay in sync.** The storyteller now tracks the live in-game date second by second, so civic events open, come due, and expire on the date you actually see on the HUD &#8212; deadlines and timelines line up with the calendar instead of drifting.
   </ChangeLog>
 </Publish>
