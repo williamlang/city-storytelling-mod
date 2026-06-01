@@ -22,7 +22,7 @@ If a focus is supplied above (a topic, character, faction, place, or theme — e
   - `city.population`, `city.milestone` — scale band (see CLAUDE.md "Grounded in city state").
   - `city.churn.moved_away_by_reason`, `city.social`, `pollution.by_district`, `land_value.by_district`, `crime.by_district` — pressure signals worth dramatizing.
   - `district_zones` and `diff.*` — what's actually being built / changing right now.
-  - `captured_at_ingame` — the current in-world date, used to compute the deadline.
+- **Current in-world date** — read `clock.json` at the city root (`in_world_date`). This is the live "now," refreshed every few seconds; use it as the event's open date and the base for computing the deadline — not the snapshot's `captured_at_ingame`, which can be in-world weeks stale. Fall back to the snapshot's `captured_at_ingame` only if `clock.json` is missing.
 - `carto/processed/index.md` plus any `districts/<slug>.md` the event will target — for spatial grounding (where the road would actually go, which district the rezoning hits).
 - Open `events/*.md` (`status: open`) — don't propose something that overlaps with an open thread; either pick a different angle or reference / supersede the existing one.
 - Active characters' agendas (load specific files via `Read` based on INDEX hits).
@@ -45,7 +45,7 @@ If a focus is supplied above (a topic, character, faction, place, or theme — e
 
 At least one option must have meaningful opposition (consistent with rule 3's "at least one opposed party"). Options should be genuinely distinct — different in-game moves, different in-fiction winners and losers, not three flavors of the same zoning change. Don't write a "do nothing" option; that's what timeout covers automatically.
 
-**5. Pick a deadline.** Based on the fiction's urgency, pick an in-world date `in_world_deadline = captured_at_ingame + N`:
+**5. Pick a deadline.** Based on the fiction's urgency, pick an in-world date `in_world_deadline = current in-world date + N` (the date from `clock.json`):
 - **Weeks (≤ 1 month):** a fire-department staffing crisis, a strike vote, a council session next Tuesday, a child-welfare scandal hitting the news.
 - **Months (1–6 months):** a developer's purchase option expiring, a tax-policy window, a service-coverage emergency, a rezoning hearing.
 - **Quarters / a year (6–18 months):** a contract negotiation, a faction power play, a re-election cycle, a campus-siting decision.
@@ -53,7 +53,7 @@ At least one option must have meaningful opposition (consistent with rule 3's "a
 
 Don't over-clock — short windows feel artificial unless the fiction genuinely supports them. Most events should land in the months-to-a-year range.
 
-**6. Write the file.** Create `events/<YYYY-MM-DD>-<short-slug>.md` (date = current `captured_at_ingame`). Frontmatter follows the events template in CLAUDE.md exactly: `status: open`, `in_world_deadline:` filled in, all options with their five fields, `resolved_on:` / `resolved_via:` / `consequences:` empty. Body: motivating prose — who's pushing what, why now, what's at stake. Keep it tight (3–6 short paragraphs); the options carry the structure, the body carries the texture.
+**6. Write the file.** Create `events/<YYYY-MM-DD>-<short-slug>.md` (date = current in-world date from `clock.json`). Frontmatter follows the events template in CLAUDE.md exactly: `status: open`, `in_world_deadline:` filled in, all options with their five fields, `resolved_on:` / `resolved_via:` / `consequences:` empty. Body: motivating prose — who's pushing what, why now, what's at stake. Keep it tight (3–6 short paragraphs); the options carry the structure, the body carries the texture.
 
 **7. Don't write setup canon for any option.** None of the options is "the chosen path" — the player picks by acting. Don't create characters / places / companies *for* an option unless they're already established canon being referenced. If the event introduces a *new* major entity (a developer the city's never seen before, a faction just forming), write the new entity file with `status: active` and an `arc:` derived from the playthrough premise — but only for entities whose existence the event itself requires, not entities one specific option would create.
 

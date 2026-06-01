@@ -7,10 +7,11 @@ Walk every open event and decide which ones close, then propagate consequences. 
 
 **1. Find open events.** Read every `events/*.md` file with `status: open` in frontmatter. If there are none, say so in one short line and stop — nothing to do.
 
-**2. Read the snapshot context.** Pull the latest snapshot in `snapshots/`. Hold onto:
-- `captured_at_ingame` — the current in-world date, used for deadline comparison.
-- `city.*`, `pollution.*`, `crime.*`, `land_value.*`, `district_zones`, `diff.*` — the fields acceptance criteria refer to.
-- `carto/processed/index.md`, `roads.md`, `districts/<slug>.md` — for criteria that reference spatial state.
+**2. Read the current date and snapshot context.**
+- **Current in-world date** — read `clock.json` at the city root. Its `in_world_date` is the live "now," refreshed every few seconds; **use this for all deadline comparisons**, not the snapshot's `captured_at_ingame` (which can be minutes stale — i.e. in-world weeks behind, since the sim clock runs fast). If `clock.json` is missing, fall back to the latest snapshot's `captured_at_ingame`.
+- **Snapshot state** — pull the latest snapshot in `snapshots/`. Hold onto:
+  - `city.*`, `pollution.*`, `crime.*`, `land_value.*`, `district_zones`, `diff.*` — the fields acceptance criteria refer to.
+  - `carto/processed/index.md`, `roads.md`, `districts/<slug>.md` — for criteria that reference spatial state.
 
 **3. For each open event, decide one of:**
 
@@ -23,15 +24,15 @@ If a criterion is borderline — the player did something in the general directi
 
 When you do call a match: update the event's frontmatter:
 - `status: resolved-by-player`
-- `resolved_on:` = `captured_at_ingame`
+- `resolved_on:` = the current in-world date (from `clock.json`)
 - `resolved_via:` = the matched option's `id`
 - `consequences:` = 2–4 short bullets capturing what this means in fiction (who won, who lost, what changes downstream)
 
 Then write the consequence canon (step 4 below).
 
-**b) Timeout.** The event is `open`, no option matched, and `in_world_deadline` is past `captured_at_ingame`. The window closed. Update frontmatter:
+**b) Timeout.** The event is `open`, no option matched, and `in_world_deadline` is past the current in-world date (from `clock.json`). The window closed. Update frontmatter:
 - `status: resolved-by-timeout`
-- `resolved_on:` = `captured_at_ingame`
+- `resolved_on:` = the current in-world date (from `clock.json`)
 - `resolved_via: timeout`
 - `consequences:` = 2–4 short bullets capturing what happens *because nothing happened* — the deal collapsed, the rival smelled blood, the offer expired, the political moment passed. The point of timeout is that ignoring an event has weight; don't let it be neutral. Lean the consequences toward whoever was on the losing side of inaction (usually the option-pushers in `pushed_by`; sometimes the opposed parties get a quiet win).
 

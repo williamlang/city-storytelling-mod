@@ -334,6 +334,15 @@ carto/        Spatial geography. Refreshed automatically on first export of a
   GeoTIFF/      Raw Carto raster output (Elevation.tif, Depth.tif). Binary
                 heightmap / depth data. I do not read these directly — the
                 summary stats live in elevation.md and water.md.
+
+clock.json    Live in-world clock, rewritten every few seconds while the game
+              runs: { in_world_date, in_world_datetime, updated_at_utc }. This
+              is the authoritative "now" — the sim date advances fast, so the
+              latest snapshot's captured_at_ingame is usually in-world weeks
+              behind. Read in_world_date for any deadline math (which events
+              have timed out, what date a new event opens / is due). Falls back
+              to nothing if missing — use the latest snapshot's
+              captured_at_ingame then.
 ```
 
 **Which surface for what:**
@@ -349,6 +358,7 @@ carto/        Spatial geography. Refreshed automatically on first export of a
 - "Where is Old Halverson relative to Riverside?" / "What's in this district?" → `carto/processed/index.md` + `districts/<slug>.md`.
 - "What highways pass through?" → `carto/processed/roads.md`.
 - "How many residential buildings does the city have total?" → `city.zones.residential` in the snapshot.
+- "What's today's in-world date?" / "Has this event's deadline passed?" → `clock.json` (`in_world_date`), not the snapshot's `captured_at_ingame`.
 
 **Story-worthy signals in `snapshot.diff`** — the agent should treat these as event candidates and write `events/*.md` entries from them on `/session-end`:
 
@@ -602,7 +612,7 @@ The story drives the city by writing open events the player has to respond to in
 1. **Storyteller proposes** — `/story-driven` writes an `events/*.md` file with `status: open`, 2–4 `options`, and an `in_world_deadline`. Each option carries an `in_game_action` (what to actually do in CS2) and `acceptance_criteria` (what the next snapshot has to show for that option to count). The storyteller picks the deadline based on the fiction's urgency: a staffing crisis is weeks, a ranch sale is years.
 2. **Player acts in-game.** Or doesn't. They don't have to commit verbally — the game state is the commitment.
 3. **Resolution.** `/events-resolve` (run manually, automatically by `/session-end`, and eventually on each snapshot export by the mod) scans every `status: open` event against the latest snapshot. Matches flip to `resolved-by-player` with `resolved_via`, `resolved_on`, and filled-in `consequences`; the event's implicated characters / companies / factions / places get propagated updates.
-4. **Timeout.** Any `open` event whose `in_world_deadline` is past the snapshot's `captured_at_ingame` date flips to `resolved-by-timeout`. The storyteller writes the "ignored" consequence canon — the deal collapsed, the rival smelled blood, the offer expired — and propagates the same way.
+4. **Timeout.** Any `open` event whose `in_world_deadline` is past the current in-world date (from `clock.json` — the live clock, not the possibly-stale snapshot `captured_at_ingame`) flips to `resolved-by-timeout`. The storyteller writes the "ignored" consequence canon — the deal collapsed, the rival smelled blood, the offer expired — and propagates the same way.
 
 **Open-event cap.** Don't keep more than 3–5 events `open` at once. Past that, the inbox is noise and the player can't track what's actually at stake. When `/story-driven` is invoked and the open count is already at the cap, either supersede a stale event (write its timeout consequence early so it can be retired) or tell the player the queue is full and decline to add another. The cap counts only `status: open` events — resolved or historical entries don't count against it.
 

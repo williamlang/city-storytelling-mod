@@ -121,6 +121,15 @@ namespace CityStoryMod.Systems
         DateTime _lastExportUtc;
         bool _firstTickLogged;
 
+        // In-world clock heartbeat. The full snapshot only refreshes every
+        // IntervalMinutes, but the in-world date advances fast (a day passes in
+        // seconds at normal sim speed), so deadline checks against a stale
+        // snapshot.captured_at_ingame drift. We rewrite a tiny clock.json every
+        // ClockWriteIntervalSec while in-game so /events-resolve and /story-driven
+        // read an up-to-date in-world date.
+        const double ClockWriteIntervalSec = 10;
+        DateTime _lastClockWriteUtc;
+
         // Save-load transition detection. Flips true the first tick OnUpdate sees
         // inGame+cityReady; flips back to false on any tick where the gate fails
         // (main menu, loading screen, editor). The false→true edge is what we
@@ -459,18 +468,83 @@ namespace CityStoryMod.Systems
             bool intervalElapsed = settings.IntervalMinutes > 0
                 && (DateTime.UtcNow - _lastExportUtc).TotalMinutes >= settings.IntervalMinutes;
 
-            if (!hotkey && !intervalElapsed && !saveLoadTransition) return;
+            if (hotkey || intervalElapsed || saveLoadTransition)
+            {
+                try
+                {
+                    string trigger = saveLoadTransition ? "save-load"
+                        : (hotkey ? "hotkey" : "interval");
+                    Export(triggeredBy: trigger);
+                    _lastExportUtc = DateTime.UtcNow;
+                }
+                catch (Exception ex)
+                {
+                    _log.Error(ex, "Export failed.");
+                }
+            }
 
+            // In-world clock heartbeat — see ClockWriteIntervalSec. Placed after
+            // the export so a save-load tick has already pointed
+            // Mod.LastExportedCityDir at the current city before we write.
+            if ((DateTime.UtcNow - _lastClockWriteUtc).TotalSeconds >= ClockWriteIntervalSec)
+            {
+                _lastClockWriteUtc = DateTime.UtcNow;
+                WriteClockFile();
+            }
+        }
+
+        // Current in-world calendar date, matching what the player sees on the
+        // CS2 HUD. We can't use TimeSystem.GetCurrentDateTime(): it treats the
+        // in-game "day" as a day-of-month from Jan 1, but that value is actually
+        // a day-of-year over a 12-day game year (daysPerYear = 12), so every
+        // date it returns collapses into the first ~12 days of January (in-game
+        // "day 6" came back as Jan 6). The HUD instead maps the year fraction
+        // onto a 12-month calendar — day 6 of 12 reads as June. We reproduce that
+        // by mapping normalizedDate (fraction of the year elapsed, 0..1) onto a
+        // real 365/366-day calendar, so the month/day matches the HUD;
+        // normalizedTime gives the time of day. Independent of daysPerYear.
+        DateTime CurrentIngameDate()
+        {
+            if (_timeSystem == null) return DateTime.MinValue;
+            int year = Mathf.Clamp(_timeSystem.year, 1, 9999);
+            float toy = Mathf.Clamp(_timeSystem.normalizedDate, 0f, 0.999999f);
+            float tod = Mathf.Repeat(_timeSystem.normalizedTime, 1f);
+            int daysInYear = DateTime.IsLeapYear(year) ? 366 : 365;
+            int dayOfYear = (int)(toy * daysInYear);   // 0-based offset from Jan 1
+            return new DateTime(year, 1, 1)
+                .AddDays(dayOfYear)
+                .AddHours(24.0 * tod);
+        }
+
+        // Writes <cityDir>/clock.json with the current in-world date — a small,
+        // frequently-refreshed heartbeat the storyteller reads to get the
+        // authoritative "now" for event-deadline math, rather than trusting the
+        // possibly-stale snapshot.captured_at_ingame. Best-effort: a transient
+        // write failure (file locked by a viewer, etc.) just skips this tick.
+        //
+        // Lives at the city root, NOT under a canon-managed subdir, so the
+        // PromptUISystem canon FileSystemWatcher ignores it — a 10 s rewrite
+        // cadence would otherwise thrash the canon-tree rescan.
+        void WriteClockFile()
+        {
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir) || _timeSystem == null) return;
             try
             {
-                string trigger = saveLoadTransition ? "save-load"
-                    : (hotkey ? "hotkey" : "interval");
-                Export(triggeredBy: trigger);
-                _lastExportUtc = DateTime.UtcNow;
+                DateTime now = CurrentIngameDate();
+                var payload = new
+                {
+                    in_world_date = now.ToString("yyyy-MM-dd"),
+                    in_world_datetime = now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                    updated_at_utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                };
+                File.WriteAllText(
+                    Path.Combine(cityDir, "clock.json"),
+                    JsonConvert.SerializeObject(payload, Formatting.Indented));
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Export failed.");
+                _log.Warn($"Clock file write failed: {ex.Message}");
             }
         }
 
@@ -501,7 +575,7 @@ namespace CityStoryMod.Systems
 
             int citizensTotal = _citizenQuery.CalculateEntityCount();
             string cityName = string.IsNullOrEmpty(_cityConfig.cityName) ? null : _cityConfig.cityName;
-            string ingameDate = _timeSystem.GetCurrentDateTime().ToString("yyyy-MM-dd");
+            string ingameDate = CurrentIngameDate().ToString("yyyy-MM-dd");
 
             // Map identity. Pulled in a small helper-light style so a single
             // bad property doesn't drop the whole block.
@@ -571,7 +645,7 @@ namespace CityStoryMod.Systems
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
             object budget = ReadBudgetStats();
-            DateTime currentIngameDate = _timeSystem.GetCurrentDateTime();
+            DateTime currentIngameDate = CurrentIngameDate();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string snapshotId = $"snapshot-{unixTs}";
