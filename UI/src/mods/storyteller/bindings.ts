@@ -88,6 +88,16 @@ export function setActiveEventsEnabled(enabled: boolean) {
   trigger(GROUP, "setActiveEventsEnabled", enabled);
 }
 
+// Fly the in-game camera to a coordinate the storyteller mentioned in chat.
+// Coordinates are in the agent's recentered-meters frame (the same pairs that
+// appear in carto/processed/*.md and the agent's prose). Sent as a single
+// "x,y" string — mirrors submitPrompt and sidesteps CS2's multi-arg / Int64
+// binding limitations. PromptUISystem.OnMapGoto parses + translates to world
+// space and hands off to CameraNavSystem.
+export function mapGoto(x: number, y: number) {
+  trigger(GROUP, "mapGoto", `${x},${y}`);
+}
+
 // Pipe a diagnostic message to the C# mod log. Coherent UI has no
 // user-accessible devtools, so console.log goes nowhere a player can
 // reach. This trigger relays to PromptUISystem.OnUILog, which writes

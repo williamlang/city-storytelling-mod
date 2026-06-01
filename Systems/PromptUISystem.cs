@@ -145,6 +145,7 @@ namespace CityStoryMod.Systems
             AddBinding(new TriggerBinding(Group, "refreshGeography", OnRefreshGeography));
             AddBinding(new TriggerBinding<string>(Group, "uiLog", OnUILog));
             AddBinding(new TriggerBinding<bool>(Group, "setActiveEventsEnabled", OnSetActiveEventsEnabled));
+            AddBinding(new TriggerBinding<string>(Group, "mapGoto", OnMapGoto));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -596,6 +597,40 @@ namespace CityStoryMod.Systems
         {
             _log.Info("OnRefreshGeography trigger received from UI.");
             World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
+        }
+
+        // Camera fly-to from a clicked coordinate sigil in the chat. The UI
+        // sends the agent's recentered-meters pair as "x,y" (a single string —
+        // mirrors submitPrompt and dodges multi-arg / Int64 binding quirks).
+        // We translate that frame to CS2 world meters and hand off to
+        // CameraNavSystem, which eases the camera over. See MapCoords for the
+        // frame math and CameraNavSystem for the animation.
+        void OnMapGoto(string coords)
+        {
+            if (string.IsNullOrWhiteSpace(coords)) return;
+            int comma = coords.IndexOf(',');
+            if (comma <= 0)
+            {
+                _log.Warn($"OnMapGoto: malformed coordinate payload '{coords}'.");
+                return;
+            }
+            if (!double.TryParse(coords.Substring(0, comma).Trim(),
+                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double rx)
+                || !double.TryParse(coords.Substring(comma + 1).Trim(),
+                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double ry))
+            {
+                _log.Warn($"OnMapGoto: could not parse coordinate payload '{coords}'.");
+                return;
+            }
+
+            MapCoords.RecenteredToWorld(rx, ry, out double worldX, out double worldZ);
+            CameraNavSystem nav = World.GetExistingSystemManaged<CameraNavSystem>();
+            if (nav == null)
+            {
+                _log.Warn("OnMapGoto: CameraNavSystem unavailable; cannot fly camera.");
+                return;
+            }
+            nav.FlyTo(worldX, worldZ);
         }
 
         // JS-side diagnostic pipe. The UI calls trigger("CityStoryMod",

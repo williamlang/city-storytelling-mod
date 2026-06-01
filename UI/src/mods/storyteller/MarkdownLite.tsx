@@ -135,7 +135,10 @@ export function MarkdownLite({ children }: MarkdownLiteProps) {
 // template/ files don't use it.
 //
 // Links are replaced with their bare text — no element, no class, no
-// click handler. See header comment for rationale.
+// click handler. See header comment for rationale. (Coordinate pairs are
+// likewise left as plain text here; FileModal surfaces them as clickable
+// jump chips out-of-prose — see MapRefChips — because Cohtml can't
+// inline-flow an element inside running text.)
 function renderInline(text: string): React.ReactNode {
   // Combined tokenizer. Capture-group layout:
   //   1: full link    2: link text     3: link href

@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.4" />
+  <ModVersion Value="0.1.5" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,15 +61,8 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.4** &#8212; the storyteller now drives the city.
+**0.1.5** &#8212; click a place, fly there.
 
-* **Active events.** The ghostwriter periodically proposes story events with 2&#8211;4 in-world response options for you to act on in-game. Each event carries an in-world deadline; act in-game and the next snapshot auto-closes the event with consequence canon, or let it expire and the storyteller writes the "ignored" consequence &#8212; rivals smell blood, deals collapse, opportunities pass. Off by default; flip the **Active** button in the Ghostwriter panel footer to opt in. The interval (1&#8211;60 minutes) lives in Options.
-* **Open-events inbox.** A new strip above the chat lists every open event with title and deadline, sorted by urgency. Click a card to read the motivating prose, the response options, and what each option needs the city to look like for it to count as done.
-* **Live countdown.** The Active button shows wall-clock time until the next autonomous run (`Active: on &#183; 4:32`). Freezes when the sim is paused so you can step away without the timer draining.
-* **Idle-aware.** The autonomous loop suspends when the sim is paused or there's been no keyboard / mouse input for several minutes &#8212; the storyteller won't burn provider tokens generating events into a void.
-* **/story-driven rewritten.** Now writes one open event with multiple in-game response options instead of asking you to pick from a list. You pick by acting in-game; the snapshot tells the storyteller which option you took.
-* **/events-resolve.** New command that scans open events against the latest snapshot, closes matches as `resolved-by-player`, and expires past-deadline events with timeout consequence canon. Runs manually, automatically after each snapshot export (when Active events is on), and as the first step of `/session-end`.
-* **Grounded in city state.** Generated events are now scale-appropriate to your city's current funds, population, and milestone level &#8212; no stadium pitches to a 5,000-person town. The storyteller checks `city.money`, `city.population`, and `city.milestone` before proposing options.
-* **Ollama fixes.** Wire-level request/response logging for debugging local-model setups; tolerates leading-slash tool paths some models emit.
+* **Clickable map coordinates.** When the ghostwriter names a precise spot &#8212; "the interchange (820, 1140)", "the SW flats off Loon Lane" &#8212; the coordinate becomes a 📍 pin in the chat. Click it and the in-game camera smoothly flies to that exact point. Closes the loop between the story and the map: no more mentally translating "the north bank by the highway" into a camera scroll.
   </ChangeLog>
 </Publish>

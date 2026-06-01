@@ -40,4 +40,16 @@ describe("MarkdownLite link rendering", () => {
     expect(container.querySelector("em")?.textContent).toBe("quick");
     expect(container.querySelector("code")?.textContent).toBe("yes");
   });
+
+  it("leaves coordinate pairs as plain text (jump chips live in FileModal)", () => {
+    const { container } = render(
+      <MarkdownLite>
+        {"Halverson's founding plaza at (-4000, -3500), on a bench above the SW river bottom."}
+      </MarkdownLite>
+    );
+    // No inline click target — coordinates are surfaced as chips elsewhere.
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("founding plaza at (-4000, -3500), on a bench");
+  });
 });

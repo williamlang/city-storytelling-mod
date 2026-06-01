@@ -92,12 +92,16 @@
 // wrapping flex row of clickable cards on the right. Disappears
 // entirely (component returns null) when the events list is empty so
 // it doesn't claim vertical space.
+// Coherent UI (Cohtml 1.64) silently drops `gap` on flex containers and
+// rejects every scrollbar-styling property — neither ::-webkit-scrollbar
+// pseudos nor scrollbar-color/scrollbar-width work. Everything below
+// uses explicit margins to space flex children, and scrollable regions
+// pair the .chat element with a JS-driven thumb (see ChatScrollIndicator).
 .inbox {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 10rem;
-  padding: 8rem 10rem;
+  align-items: center;
+  padding: 10rem 14rem;
   background: rgba(120, 90, 40, 0.18);
   border: 1px solid rgba(220, 180, 80, 0.32);
   border-radius: 6rem;
@@ -109,15 +113,14 @@
   letter-spacing: 0.5rem;
   font-weight: 600;
   color: rgba(245, 215, 145, 0.85);
-  padding-top: 4rem;
   flex-shrink: 0;
+  margin-right: 14rem;
 }
 
 .inboxList {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  gap: 6rem;
   flex-grow: 1;
   min-width: 0;
 }
@@ -126,9 +129,12 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2rem;
-  padding: 5rem 10rem;
+  padding: 7rem 12rem;
   max-width: 260rem;
+  // Margin (not gap) for between-card spacing — Coherent ignores gap.
+  // Trailing margin on the last card is hidden under the inbox padding.
+  margin-right: 6rem;
+  margin-bottom: 4rem;     // visible only when cards wrap to a new line
   background: rgba(80, 60, 30, 0.45);
   color: #f3e8c8;
   border: 1px solid rgba(220, 180, 80, 0.4);
@@ -151,6 +157,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 240rem;
+  // Explicit margin in lieu of .inboxCard's removed `gap: 3rem`
+  // (Coherent UI ignores flex gap — see project memory).
+  margin-bottom: 3rem;
 }
 
 .inboxCardDeadline {
@@ -615,56 +624,71 @@
   color: rgba(220, 240, 230, 0.9);
 }
 
-.chat {
-  // Fill the leftover vertical space in .main. Explicit flex longhand
-  // because Coherent misparses the `flex: 1` shorthand (leaves flex-basis
-  // at auto).
-  //
-  // min-height: 0 (NOT 80rem) — Coherent's flex layout double-counts
-  // min-height on flex-grow items: chat receives its grown share AND
-  // Coherent reserves a min-height-worth of space elsewhere in the
-  // column, leaving an empty gap below the footer exactly equal to
-  // min-height. The usability floor for "chat shouldn't collapse to
-  // nothing" is enforced upstream via the panel's min-height instead.
+// Wrap around .chat so a custom scroll indicator can be absolutely
+// positioned over the right edge without scrolling with the content.
+// Owns the flex-fill sizing that .chat used to carry — .chat itself
+// now fills its parent.
+//
+// Coherent UI renders no visible scrollbar (it drops every scrollbar
+// styling property — see project memory), so a JS-driven thumb is the
+// only way to show scroll position in-game.
+.chatWrap {
   flex-grow: 1;
   flex-shrink: 1;
   flex-basis: 0;
   min-height: 0;
-  overflow-y: scroll;       // explicit scroll, not auto, so the gutter
-                            // is reserved even when content fits — keeps
-                            // the chat width stable as messages stream
-                            // in and avoids a layout reflow at the moment
-                            // the first overflow happens.
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat {
+  // Was a direct flex child of .main; now inside .chatWrap and just
+  // fills its parent.
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: 0;
+  min-height: 0;
+  overflow-y: scroll;       // scrolling mechanism still works in
+                            // Coherent — only the visible scrollbar
+                            // is missing, which the custom indicator
+                            // replaces.
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4rem;
-  padding: 6rem 8rem;
+  padding: 6rem 14rem 6rem 8rem;  // right padding leaves space for the
+                                  // indicator track without overlap.
   display: flex;
   flex-direction: column;
-  gap: 6rem;
+  // Was `gap: 6rem` for between-row spacing — Coherent ignores flex
+  // gap, so .row carries its own margin-bottom instead.
+}
 
-  // Explicit webkit scrollbar styling. Coherent UI (Chromium-derived)
-  // honors ::-webkit-scrollbar pseudo-elements, but its default
-  // appearance for a scroll viewport inside a dark panel can be
-  // effectively invisible. Style the track and thumb to read as a
-  // standard floating scrollbar against the chat's dark background.
-  &::-webkit-scrollbar {
-    width: 10rem;
-  }
-  &::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 5rem;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.28);
-    border-radius: 5rem;
-    border: 2rem solid transparent;
-    background-clip: padding-box;
-  }
-  &::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.45);
-    background-clip: padding-box;
-  }
+// Custom scroll indicator absolutely positioned over the right edge of
+// .chatWrap. Coherent UI renders no visible scrollbar — neither webkit
+// pseudos nor the standard scrollbar-color/scrollbar-width have any
+// effect — so this JS-driven thumb is the only way to surface scroll
+// position in-game. ChatScrollIndicator (StorytellerToolbar) feeds it
+// via inline style based on chat scrollTop / scrollHeight events.
+.scrollIndicatorTrack {
+  position: absolute;
+  top: 4rem;
+  bottom: 4rem;
+  right: 4rem;
+  width: 6rem;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3rem;
+  pointer-events: none;
+}
+
+.scrollIndicatorThumb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 3rem;
+  min-height: 16rem;
+  // top + height set inline from React based on scroll state.
 }
 
 .empty {
@@ -684,9 +708,21 @@
 
 .row {
   display: flex;
-  gap: 8rem;
   font-size: 12rem;
   align-items: flex-start;
+  // Was `gap: 8rem` (label → text) and `.chat { gap: 6rem }` between
+  // rows — Coherent silently drops flex gap, so margins do the work.
+  margin-bottom: 6rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  // Role label uses margin-right because the flex .row container's
+  // `gap` is ignored under Coherent.
+  > :first-child {
+    margin-right: 8rem;
+  }
 }
 
 .role {
@@ -707,6 +743,38 @@
 .text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+// Clickable jump-to-coordinate chips (GH #29), rendered beneath chat
+// messages and canon-file metadata by MapRefChips. Cohtml can't inline-flow
+// an element inside running text, so these live out-of-prose as a wrap-row
+// of block chips. Flex `gap` is silently dropped by Cohtml (see notes), so
+// chips are spaced with margins.
+.mapChips {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 6rem;
+}
+
+.mapChip {
+  display: flex;
+  align-items: center;
+  margin: 0 4rem 4rem 0;
+  padding: 2rem 7rem;
+  background: rgba(91, 179, 230, 0.1);
+  border: 1rem solid rgba(91, 179, 230, 0.35);
+  border-radius: 4rem;
+  color: rgba(230, 238, 247, 0.9);
+  font-size: 11rem;
+  cursor: pointer;
+  &:hover {
+    background: rgba(91, 179, 230, 0.22);
+    border-color: rgba(91, 179, 230, 0.6);
+  }
+}
+
+.mapChipIcon {
+  margin-right: 4rem;
 }
 
 .toolCalls {

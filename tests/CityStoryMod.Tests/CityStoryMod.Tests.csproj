@@ -22,6 +22,7 @@
     <Compile Include="..\..\TemplateScaffolder.cs" Link="LinkedSources\TemplateScaffolder.cs" />
     <Compile Include="..\..\Storyteller\CartoProcessor.cs" Link="LinkedSources\CartoProcessor.cs" />
     <Compile Include="..\..\Storyteller\GeoTiffReader.cs" Link="LinkedSources\GeoTiffReader.cs" />
+    <Compile Include="..\..\Storyteller\MapCoords.cs" Link="LinkedSources\MapCoords.cs" />
   </ItemGroup>
 
   <ItemGroup>

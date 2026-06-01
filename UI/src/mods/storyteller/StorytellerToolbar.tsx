@@ -45,6 +45,71 @@ import { OpenEventsInbox } from "./OpenEventsInbox";
 // Open modals are tracked at this level (not inside CanonBrowser) so
 // closing the side panel doesn't dismiss them. Whether that's the right
 // UX is debatable — for now they stick around.
+
+// JS-driven scroll thumb for the chat. Coherent UI doesn't render any
+// visible scrollbar — neither ::-webkit-scrollbar pseudos nor the
+// standard scrollbar-color/scrollbar-width have any effect — so we
+// draw our own track/thumb absolutely positioned over .chatWrap's
+// right edge. Live in the dev harness against real Chrome too, where
+// it overlays the native scrollbar harmlessly.
+//
+// Subscribes to scroll + ResizeObserver so the thumb tracks both
+// scrolling and content-size changes (a streaming run that adds rows
+// shrinks scrollHeight ratio; this keeps the thumb size honest).
+function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement> }) {
+  const [state, setState] = useState<{ topPct: number; heightPct: number; visible: boolean }>({
+    topPct: 0,
+    heightPct: 100,
+    visible: false,
+  });
+
+  useEffect(() => {
+    const el = props.scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const sh = el.scrollHeight;
+      const ch = el.clientHeight;
+      if (sh <= ch) {
+        setState({ topPct: 0, heightPct: 100, visible: false });
+        return;
+      }
+      const ratio = ch / sh;
+      const heightPct = ratio * 100;
+      const maxScroll = sh - ch;
+      const scrolled = maxScroll > 0 ? el.scrollTop / maxScroll : 0;
+      const topPct = scrolled * (100 - heightPct);
+      setState({ topPct, heightPct, visible: true });
+    };
+    update();
+    el.addEventListener("scroll", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    // Also re-run when child count changes — ResizeObserver only fires
+    // on size changes, but if rows are added and the chat is already
+    // at max height, scrollHeight grows without a resize event.
+    const mo = new MutationObserver(update);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [props.scrollRef]);
+
+  if (!state.visible) return null;
+  return (
+    <div className={styles.scrollIndicatorTrack}>
+      <div
+        className={styles.scrollIndicatorThumb}
+        style={{
+          top: `${state.topPct}%`,
+          height: `${state.heightPct}%`,
+        }}
+      />
+    </div>
+  );
+}
+
 export function StorytellerToolbar() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -307,6 +372,7 @@ export function StorytellerToolbar() {
 
           <div className={styles.body}>
             <div className={styles.main}>
+              <div className={styles.chatWrap}>
               <div className={styles.chat} ref={scrollRef}>
                 {messages.length === 0 && (
                   <div className={styles.empty}>
@@ -323,6 +389,8 @@ export function StorytellerToolbar() {
                     <span className={styles.text}>{lastError}</span>
                   </div>
                 )}
+              </div>
+              <ChatScrollIndicator scrollRef={scrollRef} />
               </div>
 
               <textarea

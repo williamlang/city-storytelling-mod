@@ -7,6 +7,19 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
+// jsdom doesn't provide ResizeObserver, which ChatScrollIndicator (and
+// any future viewport-aware UI) depends on. A no-op stub is enough —
+// tests don't drive layout-sensitive behavior, and the indicator's
+// scroll/mutation paths still get exercised via direct event dispatch.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  // @ts-expect-error - minimal stub, signature matches what we use.
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // Note: we deliberately do NOT reset the cs2/api mock registry between
 // tests. Production code imports binding references at module load
 // (e.g. `export const canonTreeBinding = bindValue(...)`). Clearing the

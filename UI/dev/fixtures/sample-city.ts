@@ -27,6 +27,15 @@ export function seedSampleCity() {
         "3. Halverson Civil's contract bid for the new transit line\n" +
         "4. The Eastside neighbourhood association's pushback on the new mill",
     },
+    {
+      // Exercises the clickable map-coordinate pins (GH #29) — the parens
+      // become 📍 pins that fly the camera. Includes a negative pair.
+      role: "assistant",
+      text:
+        "Halverson Civil's site office sits on the north bank by the " +
+        "interchange (820, 1140). If the rezoning carries, the first " +
+        "subdivision goes on the SW flats (-430, -1180) off Loon Lane.",
+    },
   ]));
 
   bindValue("CityStoryMod", "isRunning", false);

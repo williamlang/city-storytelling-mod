@@ -3,6 +3,8 @@ import styles from "./storyteller.module.scss";
 import { useDrag } from "./useDrag";
 import { parseFrontmatter, extractMarkdownLinks } from "./frontmatter";
 import { MarkdownLite } from "./MarkdownLite";
+import { MapRefChips } from "./mapRefs";
+import { mapGoto } from "./bindings";
 import type { CanonEntry } from "./bindings";
 
 // Single canon file rendered as a draggable modal. Multiple instances
@@ -137,6 +139,11 @@ function FileContent({
           )}
         </dl>
       )}
+      {/* Coordinate pairs in the canon body, surfaced as clickable
+          camera-jump chips out-of-prose (GH #29) — same rationale as the
+          links list above: Cohtml can't inline-flow an element inside the
+          markdown text, so the jump targets live here as block chips. */}
+      <MapRefChips text={body} onGoto={mapGoto} />
       {body && (
         <div className={styles.fileMarkdownBody}>
           <MarkdownLite>{body}</MarkdownLite>

@@ -45,6 +45,7 @@ namespace CityStoryMod
             updateSystem.UpdateBefore<ExportSystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.UpdateBefore<PromptUISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.UpdateBefore<ActiveEventsSystem>(SystemUpdatePhase.UIUpdate);
+            updateSystem.UpdateBefore<CameraNavSystem>(SystemUpdatePhase.UIUpdate);
 
             Log.Info($"CityStoryMod loaded. session_id={SessionId}");
         }
