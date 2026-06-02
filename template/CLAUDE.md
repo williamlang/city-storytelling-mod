@@ -313,15 +313,24 @@ carto/        Spatial geography. Refreshed automatically on first export of a
                    Named roads colored, highways thicker, unnamed segments
                    gray, intersections marked. Primarily for the player to
                    eyeball; I treat roads.md as the source of truth.
-    map.svg        Combined topographic view: terrain in hypsometric tints
+    map.png        Combined topographic view: terrain in hypsometric tints
                    (green lowland → tan → brown → white peaks), water
-                   bodies in depth-shaded blue, district outlines dashed,
-                   roads/intersections/labels overlaid. Same data as the
-                   surrounding text chunks. The agent reads this as its
-                   visual anchor during /new-city — shape and adjacency
-                   come through faster from the image than from numbers.
-                   The text chunks remain the source of truth for any
-                   number cited in prose.
+                   bodies in depth-shaded blue, district outlines, roads,
+                   zoning fills (building footprints colored by inferred
+                   use — green residential, blue commercial, cyan office,
+                   amber industrial), and service buildings as bright
+                   color-coded markers (red fire, dark-blue police, pink
+                   health, orange education, yellow power, cyan water,
+                   purple transit, green parks). A real raster image — I
+                   Read it and see the map, where the old map.svg came back
+                   as multi-MB XML text. Zoning colors are inferred by the
+                   mod, not authoritative — a strong hint, not gospel.
+                   Road/building names are not drawn on it; those stay in
+                   roads.md / index.md. The agent reads this as its visual
+                   anchor during /new-city — shape and adjacency come
+                   through faster from the image than from numbers. The
+                   text chunks remain the source of truth for any number
+                   cited in prose.
     districts/
       <slug>.md    Per-district detail: centroid, bounding box, area, neighbors
                    with compass directions, Carto's own resident/employee
@@ -556,7 +565,7 @@ It lives in `canon/playthrough-premise.md` as plain prose. **I infer it; the pla
 
 1. The chosen founding-history paragraph in `canon/city.md` — era, original economic engine, 20th-century trajectory (boom / decline / reinvention), region. This is the dominant signal.
 2. **The spatial data the mod collected on first export** — read from `snapshots/snapshot-*.json` (the `map.*` block: name, theme, latitude, longitude, temperature range, cloudiness, precipitation) and `carto/processed/{index, elevation, water, roads}.md`. Latitude + temperature alone pin the climate (boreal vs. Mediterranean vs. temperate); the terrain reading and water reading carry the dominant landform; the named decorations (cairns, ruins, monuments) and bridge / highway names carry implicit history.
-3. The visual read of `carto/processed/map.svg` from `/new-city`'s map-image step — coastline shape, valley orientation, anything the text chunks didn't make obvious. Augments (2); doesn't override it.
+3. The visual read of `carto/processed/map.png` from `/new-city`'s map-image step — coastline shape, valley orientation, anything the text chunks didn't make obvious. Augments (2); doesn't override it.
 4. The chosen city name — sometimes carries tone (a founders' surname implies entrenched-money; a geographic-feature name implies a place-rooted story).
 
 **Inference heuristics** (writerly judgments, not a lookup table):

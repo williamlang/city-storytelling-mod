@@ -741,7 +741,7 @@ namespace CityStoryMod.Tests
             svg.Should().Contain("<svg ");
         }
 
-        // -- Combined map (map.svg) --
+        // -- Combined map (map.png) --
 
         // Synthetic elevation grid for the combined-map tests: 32×32 cells,
         // values ramp from 0 (NW corner) to 1000 (SE corner). NoData = -32768.
@@ -784,19 +784,38 @@ namespace CityStoryMod.Tests
             return grid;
         }
 
-        [Fact]
-        public void RenderCombinedMapSvg_returns_null_when_no_inputs()
+        // Reads the PNG signature + IHDR width/height out of an encoded buffer.
+        // Just enough to assert the renderer produced a valid, correctly-sized
+        // image without pulling in a full PNG decoder.
+        static (int width, int height) ReadPngHeader(byte[] png)
         {
-            string svg = CartoProcessor.RenderCombinedMapSvg(
-                new System.Collections.Generic.List<CartoProcessor.Road>(),
-                new System.Collections.Generic.List<CartoProcessor.District>(),
-                new CartoProcessor.Footprint { HasGeometry = false },
-                null, null, null, null);
-            svg.Should().BeNull();
+            byte[] sig = { 137, 80, 78, 71, 13, 10, 26, 10 };
+            png.Should().HaveCountGreaterThan(24);
+            for (int i = 0; i < 8; i++) png[i].Should().Be(sig[i]);
+            // First chunk after the signature must be IHDR.
+            ((char)png[12]).Should().Be('I');
+            ((char)png[13]).Should().Be('H');
+            ((char)png[14]).Should().Be('D');
+            ((char)png[15]).Should().Be('R');
+            int w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+            int h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+            return (w, h);
         }
 
         [Fact]
-        public void RenderCombinedMapSvg_emits_terrain_layer_when_elevation_present()
+        public void RenderCombinedMapPng_returns_null_when_no_inputs()
+        {
+            byte[] png = CartoProcessor.RenderCombinedMapPng(
+                new System.Collections.Generic.List<CartoProcessor.Road>(),
+                new System.Collections.Generic.List<CartoProcessor.District>(),
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                new CartoProcessor.Footprint { HasGeometry = false },
+                null, null, null, null);
+            png.Should().BeNull();
+        }
+
+        [Fact]
+        public void RenderCombinedMapPng_emits_valid_sized_image_when_elevation_present()
         {
             var elev = BuildSyntheticElevationGrid();
             var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
@@ -806,20 +825,23 @@ namespace CityStoryMod.Tests
                 MinX = 0, MaxX = 3200, MinY = 0, MaxY = 3200,
                 WidthM = 3200, HeightM = 3200,
             };
-            string svg = CartoProcessor.RenderCombinedMapSvg(
+            byte[] png = CartoProcessor.RenderCombinedMapPng(
                 new System.Collections.Generic.List<CartoProcessor.Road>(),
                 new System.Collections.Generic.List<CartoProcessor.District>(),
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
                 fp, elev, null, elevSummary, null);
 
-            svg.Should().NotBeNull();
-            svg.Should().Contain("id=\"terrain\"");
-            svg.Should().Contain("<rect ");
-            svg.Should().Contain("id=\"north\"");
+            png.Should().NotBeNull();
+            // worldW=3200, scale=1200/3200=0.375 → drawW=1200, +2*24 padding = 1248.
+            var (w, h) = ReadPngHeader(png);
+            w.Should().Be(1248);
+            h.Should().Be(1248);
         }
 
         [Fact]
-        public void RenderCombinedMapSvg_layers_water_over_terrain_when_depth_present()
+        public void RenderCombinedMapPng_renders_with_water_and_roads()
         {
+            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
             var elev = BuildSyntheticElevationGrid();
             var depth = BuildSyntheticDepthGrid();
             var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
@@ -827,48 +849,96 @@ namespace CityStoryMod.Tests
             var fp = new CartoProcessor.Footprint
             {
                 HasGeometry = true,
-                MinX = 0, MaxX = 3200, MinY = 0, MaxY = 3200,
-                WidthM = 3200, HeightM = 3200,
-            };
-            string svg = CartoProcessor.RenderCombinedMapSvg(
-                new System.Collections.Generic.List<CartoProcessor.Road>(),
-                new System.Collections.Generic.List<CartoProcessor.District>(),
-                fp, elev, depth, elevSummary, waterSummary);
-
-            svg.Should().NotBeNull();
-            // A water color from the WaterRamp endpoints should appear at
-            // least once (#96c8e6 is the shallow color from the ramp).
-            // Even if the exact value drifts with interpolation, the prefix
-            // #96 / #..a... portion of the ramp will show up somewhere.
-            svg.Should().Contain("id=\"terrain\"");
-            // Confirm at least one fill in the blue end of the spectrum was
-            // emitted. The water cells in the synthetic grid get the
-            // shallow endpoint (#96c8e6).
-            svg.Should().MatchRegex("fill=\"#[0-9a-f]{6}\"");
-        }
-
-        [Fact]
-        public void RenderCombinedMapSvg_includes_named_road_labels_above_terrain()
-        {
-            var roads = CartoProcessor.ParseRoads(SampleNetworkWithIntersection);
-            var elev = BuildSyntheticElevationGrid();
-            var elevSummary = CartoProcessor.ComputeElevationSummary(elev);
-            var fp = new CartoProcessor.Footprint
-            {
-                HasGeometry = true,
                 MinX = -200, MaxX = 300, MinY = -200, MaxY = 300,
                 WidthM = 500, HeightM = 500,
             };
-            string svg = CartoProcessor.RenderCombinedMapSvg(
+            byte[] png = CartoProcessor.RenderCombinedMapPng(
                 roads,
                 new System.Collections.Generic.List<CartoProcessor.District>(),
-                fp, elev, null, elevSummary, null);
+                new System.Collections.Generic.List<CartoProcessor.Building>(),
+                fp, elev, depth, elevSummary, waterSummary);
 
-            svg.Should().NotBeNull();
-            svg.Should().Contain("Riverside Highway");
-            svg.Should().Contain("Bridge Boulevard");
-            svg.Should().Contain("id=\"named-roads\"");
-            svg.Should().Contain("id=\"intersections\"");
+            png.Should().NotBeNull();
+            var (w, h) = ReadPngHeader(png);
+            w.Should().BeGreaterThan(0);
+            h.Should().BeGreaterThan(0);
+        }
+
+        [Fact]
+        public void TerrainCellRgba_shades_water_blue_and_skips_nodata()
+        {
+            // Water cell (positive depth) → blue ramp: B channel dominates.
+            CartoProcessor.TerrainCellRgba(0, 5, 0, 1000, 10, out var water).Should().BeTrue();
+            water.B.Should().BeGreaterThan(water.R);
+            water.B.Should().BeGreaterThan(water.G);
+
+            // NoData land sentinel → skipped.
+            CartoProcessor.TerrainCellRgba(int.MinValue, 0, 0, 1000, 10, out _).Should().BeFalse();
+
+            // High land → light bare-rock end of the ramp (all channels high).
+            CartoProcessor.TerrainCellRgba(1000, 0, 0, 1000, 10, out var peak).Should().BeTrue();
+            peak.R.Should().BeGreaterThan(200);
+            peak.G.Should().BeGreaterThan(200);
+            peak.B.Should().BeGreaterThan(200);
+        }
+
+        [Theory]
+        // Service categories classify straight off "Public, <Type>".
+        [InlineData("Halverson Fire & Rescue", "Public, Fire", "Building", 0, 12, CartoProcessor.BuildingClass.ServiceFire)]
+        [InlineData("Small Police Station", "Public, Police", "Building", 0, 8, CartoProcessor.BuildingClass.ServicePolice)]
+        [InlineData("Medical Clinic", "Public, Health", "Building", 0, 26, CartoProcessor.BuildingClass.ServiceHealth)]
+        [InlineData("High School", "Public, Education", "Building", 0, 90, CartoProcessor.BuildingClass.ServiceEducation)]
+        [InlineData("Wind Turbine", "Public, Power", "Building", 0, 0, CartoProcessor.BuildingClass.ServicePower)]
+        [InlineData("Water Tower", "Public, Water", "Building", 0, 0, CartoProcessor.BuildingClass.ServiceWater)]
+        [InlineData("Sewage Outlet", "Public, Sewage", "Building", 0, 0, CartoProcessor.BuildingClass.ServiceWater)]
+        [InlineData("Tiny City Park", "Public, Park", "Building", 0, 0, CartoProcessor.BuildingClass.ServicePark)]
+        [InlineData("Cargo Terminal", "Public, Transportation", "Building", 0, 32, CartoProcessor.BuildingClass.ServiceTransport)]
+        [InlineData("Radio Mast", "Public, Communication", "Building", 0, 10, CartoProcessor.BuildingClass.ServiceOther)]
+        // Decoration is its own (skipped on the map).
+        [InlineData("Cairn 03", "Decoration", "Building", 0, 0, CartoProcessor.BuildingClass.Decoration)]
+        // Zoned "Property" buildings infer from the name first.
+        [InlineData("NA Low Density Housing", "Property", "Building", 3, 0, CartoProcessor.BuildingClass.Residential)]
+        [InlineData("NA Mixed Housing", "Property", "Building", 36, 13, CartoProcessor.BuildingClass.Residential)]
+        [InlineData("NA Low Density Business", "Property", "Building", 0, 15, CartoProcessor.BuildingClass.Commercial)]
+        [InlineData("Low Density Offices", "Property", "Building", 0, 16, CartoProcessor.BuildingClass.Office)]
+        [InlineData("Crossing Mill 1", "Property", "Building", 0, 9, CartoProcessor.BuildingClass.Industrial)]
+        [InlineData("Cascade Composite Products", "Property", "Building", 0, 112, CartoProcessor.BuildingClass.Industrial)]
+        // No use keyword → occupancy fallback.
+        [InlineData("Hayloft Steakhouse", "Property", "Building", 0, 14, CartoProcessor.BuildingClass.Commercial)]
+        [InlineData("Mystery Renamed Home", "Property", "Building", 5, 0, CartoProcessor.BuildingClass.Residential)]
+        [InlineData("Brennan Antiques", "Property", "Building", 0, 0, CartoProcessor.BuildingClass.Other)]
+        // Extractor objects are landscape-significant industry.
+        [InlineData("Oil Field", "Property", "Extractor", 0, 20, CartoProcessor.BuildingClass.Industrial)]
+        public void ClassifyBuildingForMap_classifies(
+            string name, string category, string objectType, int resident, int employee,
+            CartoProcessor.BuildingClass expected)
+        {
+            CartoProcessor.ClassifyBuildingForMap(name, category, objectType, resident, employee)
+                .Should().Be(expected);
+        }
+
+        [Fact]
+        public void ParseBuildingsForMap_keeps_all_buildings_with_footprints()
+        {
+            // Two buildings: a generic house (Property) and a fire station
+            // (Public, Fire). Coordinates in Carto's degree frame.
+            const string json = @"{
+              ""type"": ""FeatureCollection"",
+              ""features"": [
+                { ""type"": ""Feature"",
+                  ""properties"": { ""Object"": ""Building"", ""Name"": ""NA Low Density Housing"", ""Category"": ""Property"", ""Resident"": 3, ""Employee"": 0 },
+                  ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [[[0.0010,0.0010],[0.0011,0.0010],[0.0011,0.0011],[0.0010,0.0011],[0.0010,0.0010]]] } },
+                { ""type"": ""Feature"",
+                  ""properties"": { ""Object"": ""Building"", ""Name"": ""Halverson Fire & Rescue"", ""Category"": ""Public, Fire"", ""Resident"": 0, ""Employee"": 12 },
+                  ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [[[0.0020,0.0020],[0.0021,0.0020],[0.0021,0.0021],[0.0020,0.0021],[0.0020,0.0020]]] } }
+              ]
+            }";
+
+            var buildings = CartoProcessor.ParseBuildingsForMap(json);
+            buildings.Should().HaveCount(2);
+            buildings.Should().OnlyContain(b => b.Polygon != null && b.Polygon.Length >= 4);
+            buildings.Should().Contain(b => b.MapClass == CartoProcessor.BuildingClass.Residential);
+            buildings.Should().Contain(b => b.MapClass == CartoProcessor.BuildingClass.ServiceFire);
         }
 
         [Fact]

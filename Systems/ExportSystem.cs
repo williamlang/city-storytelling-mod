@@ -119,6 +119,10 @@ namespace CityStoryMod.Systems
         FieldInfo _f_milestone;       // MilestoneLevel.m_AchievedMilestone
         FieldInfo _f_xp;              // XP.m_XP
         DateTime _lastExportUtc;
+        // Separate, slower cadence for the spatial-map (Carto) refresh — see
+        // Settings.MapRefreshMinutes. Held apart from _lastExportUtc so the
+        // heavy Carto regen doesn't ride along with every snapshot export.
+        DateTime _lastMapRefreshUtc;
         bool _firstTickLogged;
 
         // In-world clock heartbeat. The full snapshot only refreshes every
@@ -351,6 +355,7 @@ namespace CityStoryMod.Systems
             _f_xp             = typeof(XP).GetField("m_XP", fieldFlags);
 
             _lastExportUtc = DateTime.UtcNow;
+            _lastMapRefreshUtc = DateTime.UtcNow;
             _log.Info("ExportSystem created.");
         }
 
@@ -439,9 +444,11 @@ namespace CityStoryMod.Systems
             bool cityReady = _citySystem != null && _citySystem.City != Entity.Null;
             if (!inGame || !cityReady)
             {
-                // Hold the interval timer at "now" so the first auto-export after
-                // load fires ~IntervalMinutes later instead of immediately.
+                // Hold the interval timers at "now" so the first auto-export and
+                // first map refresh after load fire ~IntervalMinutes later
+                // instead of immediately.
                 _lastExportUtc = DateTime.UtcNow;
+                _lastMapRefreshUtc = DateTime.UtcNow;
                 _inGameLastTick = false;
                 return;
             }
@@ -490,6 +497,23 @@ namespace CityStoryMod.Systems
             {
                 _lastClockWriteUtc = DateTime.UtcNow;
                 WriteClockFile();
+            }
+
+            // Continual spatial-map refresh on its own slow cadence (separate
+            // from the snapshot interval above). Opt-in via Settings; queues a
+            // Carto export — which regenerates map.png and the processed chunks
+            // — so the map tracks construction and terraforming as the city
+            // grows. RequestCartoExport self-guards on Carto availability, a
+            // known city dir, and an already-pending export, so the worst case
+            // here is a no-op. The timer advances regardless so a transient
+            // skip (e.g. a refresh still pending) doesn't tighten the cadence.
+            if (settings.MapRefreshEnabled
+                && settings.MapRefreshMinutes > 0
+                && (DateTime.UtcNow - _lastMapRefreshUtc).TotalMinutes >= settings.MapRefreshMinutes)
+            {
+                _lastMapRefreshUtc = DateTime.UtcNow;
+                _log.Info($"Map auto-refresh interval elapsed ({settings.MapRefreshMinutes}m); requesting Carto export.");
+                RequestCartoExport();
             }
         }
 

@@ -24,6 +24,14 @@ namespace CityStoryMod
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.IntervalMinutes]"] =
                 "Wall-clock minutes between automatic exports. Set to 0 to disable interval exports; the hotkey still works.",
 
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.MapRefreshEnabled]"] = "Auto-refresh spatial map",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.MapRefreshEnabled]"] =
+                "When on, the mod periodically regenerates the spatial map (terrain, water, roads, zoning, and service buildings) so it tracks the city as you build and terraform. Off by default — the map refresh is heavier than a snapshot and runs on the main thread, so it can briefly hitch on large cities. The Refresh-map button in the Ghostwriter window always works regardless of this setting.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.MapRefreshMinutes]"] = "Spatial map refresh interval (minutes)",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.MapRefreshMinutes]"] =
+                "Wall-clock minutes between automatic spatial-map refreshes. Kept separate from (and usually longer than) the snapshot interval because regenerating the map is more expensive. Hidden when auto-refresh is off.",
+
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.AutoSessionStartOnSaveLoad]"] = "Auto-start session on save load",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.AutoSessionStartOnSaveLoad]"] =
                 "When on, the mod writes an open session stub into the city's sessions folder the moment a save is loaded. The next Claude conversation lands in a live session without needing /session-start. Skipped if a prior session is still open. Off by default — when off, the agent prompts you to run /session-start yourself.",

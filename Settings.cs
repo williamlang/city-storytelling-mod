@@ -36,6 +36,25 @@ namespace CityStoryMod
         [SettingsUISlider(min = 0, max = 60, step = 1, scalarMultiplier = 1, unit = "")]
         public int IntervalMinutes { get; set; }
 
+        // Continual spatial-map refresh. The combined map.png (terrain, water,
+        // roads, zoning, services) only regenerates when Carto runs — on a new
+        // city's first load and on the Refresh-map button. With this on, the
+        // mod also queues a Carto refresh on its own slow cadence so the map
+        // tracks the city as it grows (and as the player terraforms, which the
+        // terrain raster reflects). Off by default: a full Carto export is
+        // synchronous, main-thread, and scales with city size, so it's a
+        // deliberate opt-in. Kept on a SEPARATE, slower interval than the
+        // snapshot cadence so frequent snapshots don't drag the heavy map regen
+        // along with them.
+        public bool MapRefreshEnabled { get; set; }
+
+        [SettingsUISlider(min = 5, max = 120, step = 5, scalarMultiplier = 1, unit = "")]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(MapRefreshDisabled))]
+        public int MapRefreshMinutes { get; set; }
+
+        [SettingsUIHidden]
+        public bool MapRefreshDisabled => !MapRefreshEnabled;
+
         // When on, the mod writes an open `sessions/SXX-YYYY-MM-DD-open.md` stub
         // into the city folder the moment a save is loaded (gate: out-of-game →
         // in-game transition with city ready). The agent's open-session "pid"
@@ -117,6 +136,8 @@ namespace CityStoryMod
         public override void SetDefaults()
         {
             IntervalMinutes = 5;
+            MapRefreshEnabled = false;
+            MapRefreshMinutes = 30;
             AutoSessionStartOnSaveLoad = false;
             ActiveEventsEnabled = false;
             ActiveEventsIntervalMinutes = 10;

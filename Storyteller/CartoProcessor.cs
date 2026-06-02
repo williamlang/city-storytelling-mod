@@ -114,10 +114,13 @@ namespace CityStoryMod.Storyteller
                 // earlier export that didn't request System.Building), we
                 // still produce district chunks without a Buildings section.
                 List<Building> namedBuildings = new List<Building>();
+                List<Building> mapBuildings = new List<Building>();   // all buildings w/ footprints, for map.png zoning/services
                 string buildingFile = Path.Combine(cartoDir, "GeoJSON", "Building_Boundary.json");
                 if (File.Exists(buildingFile))
                 {
-                    namedBuildings = ParseNamedBuildings(File.ReadAllText(buildingFile));
+                    string buildingJson = File.ReadAllText(buildingFile);
+                    namedBuildings = ParseNamedBuildings(buildingJson);
+                    mapBuildings = ParseBuildingsForMap(buildingJson);
                 }
 
                 // Roads are optional too — the Network system was added in a
@@ -136,7 +139,7 @@ namespace CityStoryMod.Storyteller
                 // "(-20,872,758, -1,188)". Carto's projection chain applies
                 // arbitrary-looking offsets we don't control — recentering
                 // makes the chunks self-consistent regardless.
-                RecenterCoordinates(districts, namedBuildings, mapTiles, roads);
+                RecenterCoordinates(districts, namedBuildings, mapTiles, roads, mapBuildings);
 
                 ComputeAdjacency(districts);
                 AssignBuildingsToDistricts(namedBuildings, districts);
@@ -205,19 +208,25 @@ namespace CityStoryMod.Storyteller
                 result.WaterWritten = water != null;
 
                 // Combined map: terrain (hypsometric) + water (depth-shaded) +
-                // districts + roads + labels in one SVG. Renders when there's
-                // at least an elevation grid OR a road network to draw.
-                string combinedMapPath = Path.Combine(processedDir, "map.svg");
+                // districts + roads in one PNG. Renders when there's at least
+                // an elevation grid OR a road network to draw. This is the
+                // agent's visual anchor — a raster it can actually see, unlike
+                // the prior SVG (which came back as multi-MB XML text).
+                string combinedMapPath = Path.Combine(processedDir, "map.png");
+                string staleSvgPath = Path.Combine(processedDir, "map.svg");
                 if (elevGrid != null || roads.Count > 0)
                 {
-                    string combined = RenderCombinedMapSvg(roads, districts, footprint, elevGrid, depthGrid, elevation, water);
-                    if (combined != null) File.WriteAllText(combinedMapPath, combined);
+                    byte[] combined = RenderCombinedMapPng(roads, districts, mapBuildings, footprint, elevGrid, depthGrid, elevation, water);
+                    if (combined != null) File.WriteAllBytes(combinedMapPath, combined);
                     else { try { File.Delete(combinedMapPath); } catch { } }
                 }
                 else
                 {
                     try { File.Delete(combinedMapPath); } catch { }
                 }
+                // Retire the old SVG artifact from earlier exports so the dir
+                // doesn't carry a stale multi-MB map.svg alongside the PNG.
+                try { File.Delete(staleSvgPath); } catch { }
 
                 string indexPath = Path.Combine(processedDir, "index.md");
                 File.WriteAllText(indexPath, RenderIndexMarkdown(districts, namedBuildings, roads, footprint, elevation, water));
@@ -264,6 +273,36 @@ namespace CityStoryMod.Storyteller
             public double CentroidX, CentroidY;
             public string DistrictSlug;        // null if outside every district polygon
             public Dictionary<string, double> CartoProperties = new Dictionary<string, double>();
+
+            // Map-render only (populated by ParseBuildingsForMap, null for the
+            // text-chunk parse): the building's exterior footprint in the
+            // recentered meters frame, plus a coarse class used to color it on
+            // map.png. See ClassifyBuildingForMap / BuildingClass.
+            public double[][] Polygon;
+            public BuildingClass MapClass;
+        }
+
+        // Coarse building classification for the map render. Carto doesn't
+        // expose a clean zone-type, so the zoned classes are *inferred* from the
+        // Name + Resident/Employee counts (see ClassifyBuildingForMap); the
+        // service classes come straight from Carto's "Public, <Type>" category.
+        public enum BuildingClass
+        {
+            Other = 0,
+            Residential,
+            Commercial,
+            Office,
+            Industrial,
+            ServiceFire,
+            ServicePolice,
+            ServiceHealth,
+            ServiceEducation,
+            ServicePower,
+            ServiceWater,
+            ServicePark,
+            ServiceTransport,
+            ServiceOther,
+            Decoration,
         }
 
         internal class MapTile
@@ -485,7 +524,7 @@ namespace CityStoryMod.Storyteller
         internal static void RecenterCoordinates(List<District> districts, List<Building> buildings)
             => RecenterCoordinates(districts, buildings, new List<MapTile>(), new List<Road>());
 
-        internal static void RecenterCoordinates(List<District> districts, List<Building> buildings, List<MapTile> mapTiles, List<Road> roads)
+        internal static void RecenterCoordinates(List<District> districts, List<Building> buildings, List<MapTile> mapTiles, List<Road> roads, List<Building> mapBuildings = null)
         {
             double ox = 0, oy = 0;
             int n = 0;
@@ -518,6 +557,22 @@ namespace CityStoryMod.Storyteller
             {
                 b.CentroidX -= ox;
                 b.CentroidY -= oy;
+            }
+            // Map-render buildings carry footprint polygons; recenter those too.
+            if (mapBuildings != null)
+            {
+                foreach (var b in mapBuildings)
+                {
+                    b.CentroidX -= ox;
+                    b.CentroidY -= oy;
+                    if (b.Polygon == null) continue;
+                    foreach (var v in b.Polygon)
+                    {
+                        if (v == null) continue;
+                        v[0] -= ox;
+                        v[1] -= oy;
+                    }
+                }
             }
             if (mapTiles != null)
             {
@@ -631,6 +686,116 @@ namespace CityStoryMod.Storyteller
             }
 
             return buildings;
+        }
+
+        // Map-render building parse. Unlike ParseNamedBuildings (which keeps
+        // only named/civic buildings for the text chunks), this keeps EVERY
+        // building and retains its exterior footprint polygon, so the combined
+        // map can paint zoning fills and service markers. Coordinates land in
+        // the raw meters frame; RecenterCoordinates shifts them into the shared
+        // recentered frame alongside districts/roads/tiles.
+        internal static List<Building> ParseBuildingsForMap(string geoJson)
+        {
+            var root = JObject.Parse(geoJson);
+            var features = root["features"] as JArray;
+            var buildings = new List<Building>();
+            if (features == null) return buildings;
+
+            foreach (var feat in features)
+            {
+                string objectType = (string)feat["properties"]?["Object"];
+                bool isBuilding = string.Equals(objectType, "Building", StringComparison.Ordinal)
+                    || string.Equals(objectType, "Extractor", StringComparison.Ordinal)
+                    || string.Equals(objectType, "Landfill", StringComparison.Ordinal);
+                if (!isBuilding) continue;
+
+                var coordsArray = feat["geometry"]?["coordinates"] as JArray;
+                if (coordsArray == null || coordsArray.Count == 0) continue;
+                var exterior = coordsArray[0] as JArray;
+                if (exterior == null || exterior.Count < 3) continue;
+
+                var poly = new List<double[]>(exterior.Count);
+                double sumX = 0, sumY = 0;
+                foreach (var v in exterior)
+                {
+                    var pt = v as JArray;
+                    if (pt == null || pt.Count < 2) continue;
+                    double x = (double)pt[0] * DegreesToMetersAtEquator;
+                    double y = (double)pt[1] * DegreesToMetersAtEquator;
+                    poly.Add(new[] { x, y });
+                    sumX += x; sumY += y;
+                }
+                if (poly.Count < 3) continue;
+
+                var props = feat["properties"] as JObject;
+                string name = (string)props?["Name"];
+                string category = (string)props?["Category"];
+                int resident = (int?)props?["Resident"] ?? 0;
+                int employee = (int?)props?["Employee"] ?? 0;
+
+                buildings.Add(new Building
+                {
+                    Name = name,
+                    Category = category,
+                    CentroidX = sumX / poly.Count,
+                    CentroidY = sumY / poly.Count,
+                    Polygon = poly.ToArray(),
+                    MapClass = ClassifyBuildingForMap(name, category, objectType, resident, employee),
+                });
+            }
+            return buildings;
+        }
+
+        // Best-effort building classification for the map render. Service
+        // buildings classify cleanly off Carto's "Public, <Type>" category.
+        // Zoned buildings all arrive as Category "Property" with no zone-type
+        // field, so we infer from the Name (CS2's auto-names encode use:
+        // "...Housing" / "...Business" / "...Offices") and fall back to the
+        // Resident/Employee split. It's a heuristic — player-renamed buildings
+        // with no use keyword fall back to the count split (employee-only →
+        // commercial), which is right more often than not but not guaranteed.
+        internal static BuildingClass ClassifyBuildingForMap(
+            string name, string category, string objectType, int resident, int employee)
+        {
+            string cat = category ?? string.Empty;
+            if (cat.StartsWith("Public", StringComparison.OrdinalIgnoreCase))
+            {
+                if (cat.IndexOf("Fire", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServiceFire;
+                if (cat.IndexOf("Police", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServicePolice;
+                if (cat.IndexOf("Health", StringComparison.OrdinalIgnoreCase) >= 0
+                    || cat.IndexOf("Mortuary", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServiceHealth;
+                if (cat.IndexOf("Education", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServiceEducation;
+                if (cat.IndexOf("Power", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServicePower;
+                if (cat.IndexOf("Water", StringComparison.OrdinalIgnoreCase) >= 0
+                    || cat.IndexOf("Sewage", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServiceWater;
+                if (cat.IndexOf("Park", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServicePark;
+                if (cat.IndexOf("Transport", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.ServiceTransport;
+                return BuildingClass.ServiceOther;
+            }
+            if (cat.IndexOf("Decoration", StringComparison.OrdinalIgnoreCase) >= 0) return BuildingClass.Decoration;
+
+            // Extractor / Landfill objects are landscape-significant industry.
+            if (string.Equals(objectType, "Extractor", StringComparison.Ordinal)
+                || string.Equals(objectType, "Landfill", StringComparison.Ordinal))
+                return BuildingClass.Industrial;
+
+            string n = (name ?? string.Empty).ToLowerInvariant();
+            if (n.Contains("housing") || n.Contains("residential") || n.Contains("rent")
+                || n.Contains("apartment") || n.Contains("dorm")) return BuildingClass.Residential;
+            if (n.Contains("office")) return BuildingClass.Office;
+            if (n.Contains("business") || n.Contains("shop") || n.Contains("store")
+                || n.Contains("retail") || n.Contains("market") || n.Contains("commercial"))
+                return BuildingClass.Commercial;
+            if (n.Contains("industr") || n.Contains("factory") || n.Contains("warehouse")
+                || n.Contains("mill") || n.Contains("plant") || n.Contains("products")
+                || n.Contains("composite") || n.Contains("refinery") || n.Contains("mine")
+                || n.Contains("quarry") || n.Contains("farm") || n.Contains("forestry"))
+                return BuildingClass.Industrial;
+
+            // No use keyword in the name — fall back to the occupancy split.
+            if (resident > 0) return BuildingClass.Residential;
+            if (employee > 0) return BuildingClass.Commercial;
+            return BuildingClass.Other;
         }
 
         internal static void AssignBuildingsToDistricts(List<Building> buildings, List<District> districts)
@@ -1941,32 +2106,40 @@ namespace CityStoryMod.Storyteller
             return s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
         }
 
-        // -- Combined map (carto/processed/map.svg) --
+        // -- Combined map (carto/processed/map.png) --
         //
-        // Single SVG showing terrain (hypsometric tints), water bodies
+        // Single PNG showing terrain (hypsometric tints), water bodies
         // (depth-shaded blue), districts (outlines), roads (colored, by
-        // category), intersections, and labels. Designed as a player-facing
-        // visual; the agent's contract remains the text chunks (roads.md,
-        // index.md, etc.).
+        // category), and intersections. This is the agent's *visual* anchor:
+        // the storyteller Reads it as an actual image, where an SVG would come
+        // back as XML text (and the terrain layer alone ran ~2.4 MB of <rect>
+        // hex soup the model never perceives as a picture). The text chunks
+        // (roads.md, index.md, …) remain the contract for names and numbers;
+        // the image carries shape, adjacency, and zoning at a glance.
+        //
+        // No text labels are baked into the raster — there's no font rasterizer
+        // in this pure-C# path, and road/building names already live in the
+        // text chunks. Shape and color do the work here.
         //
         // Layer order (back to front):
         //   1. Background fill
-        //   2. Terrain raster (downsampled to TerrainResolution, RLE'd rows)
-        //   3. District outlines (no fill — terrain shows through)
-        //   4. Anonymous roads (gray)
-        //   5. Named roads (colored, highways thicker)
-        //   6. Intersection markers
-        //   7. Filtered, de-collided labels
+        //   2. Terrain raster (downsampled to TerrainResolution, one fill/cell)
+        //   3. Zoning fills (building footprints, colored by inferred class)
+        //   4. District outlines (no fill — terrain shows through)
+        //   5. Anonymous roads (gray)
+        //   6. Named roads (colored, highways thicker)
+        //   7. Service buildings (Public,* — colored footprint + centroid dot)
         //   8. North arrow
 
         // Downsampled cells per side. 192 strikes a good balance for a
         // 14 km CS2 map: ~73 m per cell — enough relief structure shows
-        // through, output stays around 600–900 KB after RLE compression.
+        // through while keeping the rasterized PNG well under a few hundred KB.
         const int CombinedMapTerrainResolution = 192;
 
-        internal static string RenderCombinedMapSvg(
+        internal static byte[] RenderCombinedMapPng(
             List<Road> roads,
             List<District> districts,
+            List<Building> buildings,
             Footprint footprint,
             GeoTiffReader.Grid elevation,
             GeoTiffReader.Grid depth,
@@ -2022,25 +2195,22 @@ namespace CityStoryMod.Storyteller
             double scale = targetWidthPx / worldW;
             double drawW = worldW * scale;
             double drawH = worldH * scale;
-            double cssW = drawW + padding * 2;
-            double cssH = drawH + padding * 2;
+            int imgW = (int)Math.Round(drawW + padding * 2);
+            int imgH = (int)Math.Round(drawH + padding * 2);
+            if (imgW <= 0 || imgH <= 0) return null;
 
+            // World → pixel. Flip Y so north stays up, matching the old SVG frame.
             double SX(double wx) => padding + (wx - minX) * scale;
             double SY(double wy) => padding + (maxY - wy) * scale;
 
-            var ci = CultureInfo.InvariantCulture;
-            var sb = new StringBuilder();
-            sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-            sb.AppendLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{cssW.ToString("F0", ci)}\" height=\"{cssH.ToString("F0", ci)}\" viewBox=\"0 0 {cssW.ToString("F0", ci)} {cssH.ToString("F0", ci)}\" font-family=\"sans-serif\">");
+            var canvas = new Raster(imgW, imgH);
 
-            // Plain neutral background — shown only at the corners outside the
-            // terrain raster (rare, but possible when the map's playable area
-            // doesn't span the full footprint).
-            sb.AppendLine("  <rect width=\"100%\" height=\"100%\" fill=\"#1a2330\"/>");
+            // 0. Background — shown only at corners outside the terrain raster.
+            canvas.Clear(new Rgba(0x1a, 0x23, 0x30));
 
-            // 1. Terrain raster. Downsample elevation + depth in lockstep, then
-            // emit row-wise RLE rectangles. Each cell maps to a world rect
-            // whose SVG dimensions are the same across the grid.
+            // 1. Terrain raster. Downsample elevation + depth in lockstep, one
+            // solid fill per cell (no RLE needed — the raster overwrites
+            // identical neighbors at the same cost).
             if (elevation != null)
             {
                 int dstW = CombinedMapTerrainResolution;
@@ -2064,71 +2234,67 @@ namespace CityStoryMod.Storyteller
                     ? waterSummary.Max
                     : 1;
 
-                double cellSvgW = drawW / dstW;
-                double cellSvgH = drawH / dstH;
+                double cellW = drawW / dstW;
+                double cellH = drawH / dstH;
 
-                sb.AppendLine("  <g id=\"terrain\" shape-rendering=\"crispEdges\">");
                 for (int r = 0; r < dstH; r++)
                 {
                     int rowStart = r * dstW;
-                    int c = 0;
-                    while (c < dstW)
+                    for (int c = 0; c < dstW; c++)
                     {
-                        string color = TerrainCellColor(dsElev[rowStart + c], dsDepth?[rowStart + c] ?? 0, elevMin, elevMax, depthMax);
-                        int runStart = c;
-                        c++;
-                        while (c < dstW)
-                        {
-                            string nc = TerrainCellColor(dsElev[rowStart + c], dsDepth?[rowStart + c] ?? 0, elevMin, elevMax, depthMax);
-                            if (!ReferenceEquals(nc, color) && nc != color) break;
-                            c++;
-                        }
-                        if (color == null) continue;
-                        int runLen = c - runStart;
-                        double rx = padding + runStart * cellSvgW;
-                        double ry = padding + r * cellSvgH;
-                        double rw = runLen * cellSvgW + 0.5;   // +0.5 px overdraw so
-                                                                // adjacent rows don't
-                                                                // hairline-gap on
-                                                                // sub-pixel boundaries
-                        double rh = cellSvgH + 0.5;
-                        sb.AppendLine($"    <rect x=\"{rx.ToString("F2", ci)}\" y=\"{ry.ToString("F2", ci)}\" width=\"{rw.ToString("F2", ci)}\" height=\"{rh.ToString("F2", ci)}\" fill=\"{color}\"/>");
+                        if (!TerrainCellRgba(dsElev[rowStart + c], dsDepth?[rowStart + c] ?? 0,
+                                elevMin, elevMax, depthMax, out Rgba cell))
+                            continue;
+                        double rx = padding + c * cellW;
+                        double ry = padding + r * cellH;
+                        // +0.6 px overdraw so adjacent cells don't hairline-gap
+                        // on sub-pixel boundaries.
+                        canvas.FillRect(rx, ry, cellW + 0.6, cellH + 0.6, cell);
                     }
                 }
-                sb.AppendLine("  </g>");
             }
 
-            // 2. District outlines. Stroke only — the terrain raster is the
-            // background, we don't want to obscure it with district fills.
+            // 2. Zoning fills. Every zoned building footprint, colored by its
+            // inferred class (residential / commercial / office / industrial).
+            // Semi-transparent so the terrain still reads underneath. Services
+            // are drawn later, on top of roads, so they stay legible.
+            if (buildings != null)
+            {
+                foreach (var b in buildings)
+                {
+                    if (b.Polygon == null) continue;
+                    if (!TryZoningFill(b.MapClass, out Rgba fill)) continue;   // services + decoration handled elsewhere
+                    FillPolygonPx(canvas, b.Polygon, SX, SY, fill);
+                }
+            }
+
+            // 3. District outlines. Stroke only — the terrain shows through.
             if (districts != null && districts.Count > 0)
             {
-                sb.AppendLine("  <g id=\"districts\" fill=\"none\" stroke=\"rgba(255,255,255,0.55)\" stroke-width=\"1\" stroke-dasharray=\"4 3\">");
+                var outline = new Rgba(255, 255, 255, 140);
                 foreach (var d in districts)
                 {
                     if (d.Polygon == null) continue;
-                    var pts = string.Join(" ", d.Polygon
-                        .Where(v => v != null)
-                        .Select(v => $"{SX(v[0]).ToString("F1", ci)},{SY(v[1]).ToString("F1", ci)}"));
-                    sb.AppendLine($"    <polygon points=\"{pts}\"/>");
+                    StrokePolygonPx(canvas, d.Polygon, SX, SY, 1.0, outline);
                 }
-                sb.AppendLine("  </g>");
             }
 
-            // 3. Anonymous roads — quiet gray over the terrain.
-            sb.AppendLine("  <g id=\"unnamed-roads\" stroke=\"rgba(40,40,40,0.7)\" stroke-width=\"0.7\" fill=\"none\" stroke-linecap=\"round\">");
+            // 5. Anonymous roads — quiet gray over the terrain.
+            var anonRoad = new Rgba(40, 40, 40, 178);
             foreach (var r in roads)
             {
                 if (r.Centerline == null || r.Centerline.Length < 2) continue;
                 if (!string.IsNullOrWhiteSpace(r.Name)) continue;
-                AppendPolyline(sb, r.Centerline, SX, SY, ci);
+                DrawCenterlinePx(canvas, r.Centerline, SX, SY, 1.0, anonRoad);
             }
-            sb.AppendLine("  </g>");
 
-            // 4. Named roads. Same palette / weight rules as roads.svg.
-            string[] palette =
+            // 6. Named roads. Same palette / weight rules as roads.svg.
+            Rgba[] palette =
             {
-                "#d62728", "#1f5fb0", "#0a9655", "#b035a6",
-                "#e6a700", "#1da0c8", "#222222", "#7b3f00"
+                new Rgba(0xd6, 0x27, 0x28), new Rgba(0x1f, 0x5f, 0xb0),
+                new Rgba(0x0a, 0x96, 0x55), new Rgba(0xb0, 0x35, 0xa6),
+                new Rgba(0xe6, 0xa7, 0x00), new Rgba(0x1d, 0xa0, 0xc8),
+                new Rgba(0x22, 0x22, 0x22), new Rgba(0x7b, 0x3f, 0x00),
             };
             var namedGroups = roads
                 .Where(r => !string.IsNullOrWhiteSpace(r.Name))
@@ -2136,92 +2302,140 @@ namespace CityStoryMod.Storyteller
                 .OrderBy(g => g.Key, StringComparer.Ordinal)
                 .ToList();
 
-            sb.AppendLine("  <g id=\"named-roads\" fill=\"none\" stroke-linecap=\"round\">");
             for (int gi = 0; gi < namedGroups.Count; gi++)
             {
                 var group = namedGroups[gi];
-                string color = palette[gi % palette.Length];
+                Rgba color = palette[gi % palette.Length];
                 bool isHighway = group.Any(r => (r.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0);
                 double strokeWidth = isHighway ? 2.6 : 1.6;
-                sb.AppendLine($"    <g stroke=\"{color}\" stroke-width=\"{strokeWidth.ToString("F1", ci)}\">");
                 foreach (var r in group)
                 {
                     if (r.Centerline == null || r.Centerline.Length < 2) continue;
-                    AppendPolyline(sb, r.Centerline, SX, SY, ci);
+                    DrawCenterlinePx(canvas, r.Centerline, SX, SY, strokeWidth, color);
                 }
-                sb.AppendLine("    </g>");
             }
-            sb.AppendLine("  </g>");
 
-            // 5. Intersections — black dots with white halo for legibility.
-            var intersections = ComputeIntersections(roads);
-            if (intersections.Count > 0)
+            // 7. Service buildings. Drawn on top of roads so civic anchors —
+            // schools, fire, police, hospitals, power, water — stay legible.
+            // Footprint filled in the category color, plus a centroid disc so
+            // small footprints don't vanish at this zoom.
+            if (buildings != null)
             {
-                sb.AppendLine("  <g id=\"intersections\" fill=\"#111\" stroke=\"white\" stroke-width=\"1.4\">");
-                foreach (var ix in intersections)
+                foreach (var b in buildings)
                 {
-                    sb.AppendLine($"    <circle cx=\"{SX(ix.X).ToString("F1", ci)}\" cy=\"{SY(ix.Y).ToString("F1", ci)}\" r=\"3.8\"/>");
+                    if (b.Polygon == null) continue;
+                    if (!TryServiceFill(b.MapClass, out Rgba fill)) continue;
+                    FillPolygonPx(canvas, b.Polygon, SX, SY, fill);
+                    double mcx = SX(b.CentroidX), mcy = SY(b.CentroidY);
+                    canvas.FillCircle(mcx, mcy, 3.2, fill);
                 }
-                sb.AppendLine("  </g>");
             }
 
-            // 6. Labels — same filter / de-collision rules as roads.svg.
-            const double minLabelLengthM = 500.0;
-            const int maxLabels = 18;
-            const double fontSize = 11.0;
-            const double approxCharWidth = 6.0;
-            const double lineHeight = 14.0;
-            const double labelPadding = 2.0;
+            // 8. North arrow (top-right). No "N" glyph — no font in this path.
+            double ax = imgW - 36, ay = 24;
+            var white = new Rgba(255, 255, 255);
+            canvas.DrawThickSegment(ax, ay + 6, ax, ay + 24, 2.4, white);
+            canvas.FillPolygon(
+                new[] { ax - 5, ax + 5, ax },
+                new[] { ay + 6, ay + 6, ay - 2 },
+                white);
 
-            var labelCandidates = namedGroups
-                .Select(g => new
-                {
-                    Group = g,
-                    Length = g.Sum(rr => rr.Length),
-                    IsHighway = g.Any(rr => (rr.Category ?? string.Empty).IndexOf("Highway", StringComparison.OrdinalIgnoreCase) >= 0),
-                })
-                .Where(x => x.IsHighway || x.Length >= minLabelLengthM)
-                .OrderByDescending(x => x.IsHighway)
-                .ThenByDescending(x => x.Length)
-                .ToList();
+            return canvas.ToPng();
+        }
 
-            var placed = new List<(double X1, double Y1, double X2, double Y2)>();
-            sb.AppendLine($"  <g id=\"labels\" font-size=\"{fontSize.ToString("F0", ci)}\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"3\" paint-order=\"stroke fill\" text-anchor=\"middle\">");
-            int placedCount = 0;
-            foreach (var cand in labelCandidates)
+        // Stroke a closed polygon's edges in pixel space.
+        static void StrokePolygonPx(Raster canvas, double[][] polygon,
+            Func<double, double> sx, Func<double, double> sy, double width, Rgba color)
+        {
+            var px = new List<double>();
+            var py = new List<double>();
+            foreach (var v in polygon)
             {
-                if (placedCount >= maxLabels) break;
-                var centroid = RoadGroupCentroid(cand.Group);
-                if (!centroid.hasGeometry) continue;
-                double cx = SX(centroid.x);
-                double cy = SY(centroid.y);
-                double halfW = (cand.Group.Key.Length * approxCharWidth) / 2.0 + labelPadding;
-                double halfH = lineHeight / 2.0 + labelPadding;
-                double x1 = cx - halfW, x2 = cx + halfW;
-                double y1 = cy - halfH, y2 = cy + halfH;
-                bool overlaps = false;
-                foreach (var b in placed)
-                {
-                    if (x1 < b.X2 && x2 > b.X1 && y1 < b.Y2 && y2 > b.Y1) { overlaps = true; break; }
-                }
-                if (overlaps) continue;
-                placed.Add((x1, y1, x2, y2));
-                placedCount++;
-                sb.AppendLine($"    <text x=\"{cx.ToString("F1", ci)}\" y=\"{cy.ToString("F1", ci)}\">{EscapeXml(cand.Group.Key)}</text>");
+                if (v == null) continue;
+                px.Add(sx(v[0]));
+                py.Add(sy(v[1]));
             }
-            sb.AppendLine("  </g>");
+            if (px.Count < 2) return;
+            for (int i = 0; i < px.Count; i++)
+            {
+                int j = (i + 1) % px.Count;
+                canvas.DrawThickSegment(px[i], py[i], px[j], py[j], width, color);
+            }
+        }
 
-            // 7. North arrow.
-            double arrowX = cssW - 36;
-            double arrowY = 24;
-            sb.AppendLine($"  <g id=\"north\" transform=\"translate({arrowX.ToString("F0", ci)} {arrowY.ToString("F0", ci)})\" fill=\"#fff\" stroke=\"#fff\" stroke-width=\"1.2\">");
-            sb.AppendLine("    <line x1=\"0\" y1=\"6\" x2=\"0\" y2=\"24\" stroke-linecap=\"round\"/>");
-            sb.AppendLine("    <polygon points=\"-5,6 5,6 0,-2\" stroke=\"none\"/>");
-            sb.AppendLine("    <text x=\"0\" y=\"36\" font-size=\"12\" text-anchor=\"middle\" stroke=\"none\">N</text>");
-            sb.AppendLine("  </g>");
+        // Draw a road centerline (a [n][2] world-meters polyline) in pixel space.
+        static void DrawCenterlinePx(Raster canvas, double[][] line,
+            Func<double, double> sx, Func<double, double> sy, double width, Rgba color)
+        {
+            var px = new List<double>(line.Length);
+            var py = new List<double>(line.Length);
+            foreach (var v in line)
+            {
+                if (v == null) continue;
+                px.Add(sx(v[0]));
+                py.Add(sy(v[1]));
+            }
+            canvas.DrawPolyline(px, py, width, color);
+        }
 
-            sb.AppendLine("</svg>");
-            return sb.ToString();
+        // Fill a closed polygon (world-meters verts) in pixel space.
+        static void FillPolygonPx(Raster canvas, double[][] polygon,
+            Func<double, double> sx, Func<double, double> sy, Rgba color)
+        {
+            var px = new double[polygon.Length];
+            var py = new double[polygon.Length];
+            int k = 0;
+            foreach (var v in polygon)
+            {
+                if (v == null) continue;
+                px[k] = sx(v[0]);
+                py[k] = sy(v[1]);
+                k++;
+            }
+            if (k < 3) return;
+            if (k != polygon.Length)
+            {
+                System.Array.Resize(ref px, k);
+                System.Array.Resize(ref py, k);
+            }
+            canvas.FillPolygon(px, py, color);
+        }
+
+        // Zoning fill color for a zoned building class. Semi-transparent so the
+        // terrain reads underneath. Returns false for service/decoration
+        // classes (handled by TryServiceFill / skipped). The classes are
+        // inferred — see ClassifyBuildingForMap — so these are "best guess"
+        // colors, not authoritative zone paint.
+        static bool TryZoningFill(BuildingClass cls, out Rgba color)
+        {
+            switch (cls)
+            {
+                case BuildingClass.Residential: color = new Rgba(0x33, 0xb8, 0x64, 155); return true; // green
+                case BuildingClass.Commercial:  color = new Rgba(0x2f, 0x80, 0xed, 155); return true; // blue
+                case BuildingClass.Office:       color = new Rgba(0x15, 0xb3, 0xc4, 160); return true; // cyan
+                case BuildingClass.Industrial:   color = new Rgba(0xe0, 0xa0, 0x20, 165); return true; // amber
+                case BuildingClass.Other:        color = new Rgba(0x8a, 0x92, 0x96, 140); return true; // gray
+                default: color = default; return false;
+            }
+        }
+
+        // Service marker color for a "Public, <Type>" building class. More
+        // opaque than zoning — these are the civic anchors and should pop.
+        static bool TryServiceFill(BuildingClass cls, out Rgba color)
+        {
+            switch (cls)
+            {
+                case BuildingClass.ServiceFire:      color = new Rgba(0xe0, 0x39, 0x2b, 235); return true; // red
+                case BuildingClass.ServicePolice:    color = new Rgba(0x1f, 0x3f, 0xb0, 235); return true; // dark blue
+                case BuildingClass.ServiceHealth:    color = new Rgba(0xff, 0x5e, 0xa0, 235); return true; // medical pink
+                case BuildingClass.ServiceEducation: color = new Rgba(0xf5, 0xa6, 0x23, 235); return true; // school orange
+                case BuildingClass.ServicePower:     color = new Rgba(0xf4, 0xd0, 0x11, 235); return true; // yellow
+                case BuildingClass.ServiceWater:     color = new Rgba(0x19, 0xb8, 0xd8, 235); return true; // cyan
+                case BuildingClass.ServicePark:      color = new Rgba(0x27, 0xd3, 0x67, 220); return true; // bright green
+                case BuildingClass.ServiceTransport: color = new Rgba(0x9b, 0x59, 0xb6, 235); return true; // purple
+                case BuildingClass.ServiceOther:     color = new Rgba(0xcf, 0xd3, 0xd8, 225); return true; // light gray
+                default: color = default; return false;
+            }
         }
 
         // Block-average downsample for an int[] raster. NoData cells are
@@ -2275,18 +2489,24 @@ namespace CityStoryMod.Storyteller
         // elevation. Returns null for cells outside the playable map (both
         // sentinels) — the caller skips emission, the background shows
         // through.
-        internal static string TerrainCellColor(int elev, int depth, int elevMin, int elevMax, int depthMax)
+        // Terrain tint for one cell. Returns false (and the caller skips the
+        // cell, letting the background show through) for the NoData sentinel.
+        // Water cells (positive depth) shade blue; land cells shade along the
+        // hypsometric ramp by normalized elevation.
+        internal static bool TerrainCellRgba(int elev, int depth, int elevMin, int elevMax, int depthMax, out Rgba color)
         {
             if (depth > 0)
             {
                 double t = depthMax > 0 ? Math.Min(1.0, (double)depth / depthMax) : 0.0;
-                return InterpolateColors(WaterRamp, t);
+                color = InterpolateRgba(WaterRamp, t);
+                return true;
             }
-            if (elev == int.MinValue) return null;
+            if (elev == int.MinValue) { color = default; return false; }
             double tt = elevMax > elevMin
                 ? (double)(elev - elevMin) / (elevMax - elevMin)
                 : 0.0;
-            return InterpolateColors(LandRamp, tt);
+            color = InterpolateRgba(LandRamp, tt);
+            return true;
         }
 
         // 5-stop hypsometric tint for land. Walks from a low forest green
@@ -2309,14 +2529,13 @@ namespace CityStoryMod.Storyteller
             (1.00, 25, 60, 105),     // deep
         };
 
-        // Linear interpolation along a color-ramp table. Caches the last
-        // returned color string is NOT done here — same colors recur often
-        // enough that callers could intern them, but the per-call cost is
-        // small and the RLE pass collapses runs anyway.
-        static string InterpolateColors((double t, int r, int g, int b)[] ramp, double t)
+        // Linear interpolation along a color-ramp table, returning a packed
+        // Rgba (opaque). Same colors recur often, but the per-call cost is small.
+        static Rgba InterpolateRgba((double t, int r, int g, int b)[] ramp, double t)
         {
-            if (t <= ramp[0].t) return RgbHex(ramp[0].r, ramp[0].g, ramp[0].b);
-            if (t >= ramp[ramp.Length - 1].t) return RgbHex(ramp[ramp.Length - 1].r, ramp[ramp.Length - 1].g, ramp[ramp.Length - 1].b);
+            if (t <= ramp[0].t) return new Rgba((byte)ramp[0].r, (byte)ramp[0].g, (byte)ramp[0].b);
+            var end = ramp[ramp.Length - 1];
+            if (t >= end.t) return new Rgba((byte)end.r, (byte)end.g, (byte)end.b);
             for (int i = 1; i < ramp.Length; i++)
             {
                 if (t <= ramp[i].t)
@@ -2325,16 +2544,10 @@ namespace CityStoryMod.Storyteller
                     int rr = (int)(ramp[i - 1].r + f * (ramp[i].r - ramp[i - 1].r));
                     int gg = (int)(ramp[i - 1].g + f * (ramp[i].g - ramp[i - 1].g));
                     int bb = (int)(ramp[i - 1].b + f * (ramp[i].b - ramp[i - 1].b));
-                    return RgbHex(rr, gg, bb);
+                    return new Rgba((byte)rr, (byte)gg, (byte)bb);
                 }
             }
-            var last = ramp[ramp.Length - 1];
-            return RgbHex(last.r, last.g, last.b);
-        }
-
-        static string RgbHex(int r, int g, int b)
-        {
-            return "#" + ((r & 0xff) << 16 | (g & 0xff) << 8 | (b & 0xff)).ToString("x6", CultureInfo.InvariantCulture);
+            return new Rgba((byte)end.r, (byte)end.g, (byte)end.b);
         }
     }
 }
