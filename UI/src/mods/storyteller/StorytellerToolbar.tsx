@@ -46,22 +46,28 @@ import { OpenEventsInbox } from "./OpenEventsInbox";
 // closing the side panel doesn't dismiss them. Whether that's the right
 // UX is debatable — for now they stick around.
 
-// JS-driven scroll thumb for the chat. Coherent UI doesn't render any
-// visible scrollbar — neither ::-webkit-scrollbar pseudos nor the
-// standard scrollbar-color/scrollbar-width have any effect — so we
-// draw our own track/thumb absolutely positioned over .chatWrap's
-// right edge. Live in the dev harness against real Chrome too, where
-// it overlays the native scrollbar harmlessly.
+// Custom scrollbar for the chat. Coherent UI doesn't render any visible
+// scrollbar — neither ::-webkit-scrollbar pseudos nor the standard
+// scrollbar-color/scrollbar-width have any effect — so we draw our own
+// track/thumb absolutely positioned over .chatWrap's right edge and wire
+// it for drag + track-click. Works in the dev harness against real Chrome
+// too, where it overlays the native scrollbar harmlessly.
 //
-// Subscribes to scroll + ResizeObserver so the thumb tracks both
-// scrolling and content-size changes (a streaming run that adds rows
-// shrinks scrollHeight ratio; this keeps the thumb size honest).
+// Subscribes to scroll + ResizeObserver so the thumb tracks both scrolling
+// and content-size changes (a streaming run that adds rows shrinks the
+// scrollHeight ratio; this keeps the thumb size honest). The thumb is
+// draggable and the track is click-to-jump — both translate a pixel
+// position on the track back into el.scrollTop. We use mouse events (not
+// Pointer Events / setPointerCapture, which Cohtml 1.64 doesn't reliably
+// support) and attach the move/up listeners to window for the drag's
+// lifetime so the grab survives the cursor leaving the thin track.
 function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const [state, setState] = useState<{ topPct: number; heightPct: number; visible: boolean }>({
     topPct: 0,
     heightPct: 100,
     visible: false,
   });
+  const trackRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = props.scrollRef.current;
@@ -96,15 +102,60 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
     };
   }, [props.scrollRef]);
 
+  // Drag the thumb. Pixels moved on the track map to scrollTop via the
+  // ratio of scrollable content to the thumb's travel distance.
+  const onThumbDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // don't let the track's click-to-jump also fire
+    const el = props.scrollRef.current;
+    const track = trackRef.current;
+    if (!el || !track) return;
+    const startY = e.clientY;
+    const startScrollTop = el.scrollTop;
+    const trackH = track.clientHeight;
+    const sh = el.scrollHeight;
+    const ch = el.clientHeight;
+    const thumbH = trackH * (ch / sh);
+    const travel = trackH - thumbH;
+    const scrollPerPx = travel > 0 ? (sh - ch) / travel : 0;
+    const onMove = (ev: MouseEvent) => {
+      el.scrollTop = startScrollTop + (ev.clientY - startY) * scrollPerPx;
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    // document-level listeners (matching useDrag) — proven to fire in Cohtml,
+    // and they keep the grab alive while the cursor leaves the thin track.
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  // Click anywhere on the track (outside the thumb) to jump so the click
+  // point becomes the thumb's new center.
+  const onTrackDown = (e: React.MouseEvent) => {
+    const el = props.scrollRef.current;
+    const track = trackRef.current;
+    if (!el || !track) return;
+    const rect = track.getBoundingClientRect();
+    const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+    el.scrollTop = frac * (el.scrollHeight - el.clientHeight) - el.clientHeight / 2;
+  };
+
   if (!state.visible) return null;
   return (
-    <div className={styles.scrollIndicatorTrack}>
+    <div
+      ref={trackRef}
+      className={styles.scrollIndicatorTrack}
+      onMouseDown={onTrackDown}
+    >
       <div
         className={styles.scrollIndicatorThumb}
         style={{
           top: `${state.topPct}%`,
           height: `${state.heightPct}%`,
         }}
+        onMouseDown={onThumbDown}
       />
     </div>
   );
@@ -210,9 +261,19 @@ export function StorytellerToolbar() {
   }, [openEventsJson]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Pin the chat to the bottom on new messages AND whenever the panel opens
+  // (the player expects to land on the latest turn, not wherever they last
+  // left the scroll). Deferred a frame so Cohtml has laid the rows out and
+  // scrollHeight is final before we jump.
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages.length]);
+    if (!open) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, messages.length]);
 
   // Safety net: if neither the C# binding flip nor the minimum-hold timer
   // clears refreshPending, drop it after 6 s. Catches the rare error path

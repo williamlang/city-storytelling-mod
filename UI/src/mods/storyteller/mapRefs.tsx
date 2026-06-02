@@ -19,10 +19,16 @@ export interface MapRef {
   y: number;
 }
 
-// Matches "(<int>, <int>)" with optional signs. Digits capped at 5 — the
-// recentered frame spans a few thousand meters, so 1–5 digits covers every
-// real coordinate without swallowing huge unrelated number runs.
-const COORD_RE = /\((-?\d{1,5}),\s*(-?\d{1,5})\)/g;
+// Matches "(<int>, <int>)" with optional signs. Each number is either a
+// plain 1–5 digit run OR a thousands-grouped form like "-1,500" / "-2,050" —
+// the storyteller sometimes writes coordinates with a thousands separator,
+// and without handling that the inner comma collides with the x/y delimiter
+// and the pair never matches (the recentered frame spans a few thousand
+// meters, so 1–5 digits / one thousands group covers every real coordinate).
+// The thousands alternative is listed first so it wins when present; commas
+// are stripped before parsing (see extractMapRefs).
+const NUM = String.raw`-?\d{1,3}(?:,\d{3})+|-?\d{1,5}`;
+const COORD_RE = new RegExp(`\\((${NUM}),\\s*(${NUM})\\)`, "g");
 
 // Pulls every coordinate pair out of a block of text, de-duplicated and in
 // first-seen order. Pure + DOM-free so it's unit-testable.
@@ -33,8 +39,9 @@ export function extractMapRefs(text: string): MapRef[] {
   const seen = new Set<string>();
   let match: RegExpExecArray | null;
   while ((match = COORD_RE.exec(text)) !== null) {
-    const x = parseInt(match[1], 10);
-    const y = parseInt(match[2], 10);
+    // Strip thousands separators before parsing — "-1,500" → -1500.
+    const x = parseInt(match[1].replace(/,/g, ""), 10);
+    const y = parseInt(match[2].replace(/,/g, ""), 10);
     const key = `${x},${y}`;
     if (!seen.has(key)) {
       seen.add(key);

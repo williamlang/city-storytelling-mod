@@ -675,10 +675,15 @@
   top: 4rem;
   bottom: 4rem;
   right: 4rem;
-  width: 6rem;
+  width: 10rem;             // wider than purely cosmetic so the thumb is an
+                            // easy grab target; .chat's 14rem right padding
+                            // still clears it.
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 3rem;
-  pointer-events: none;
+  border-radius: 5rem;
+  // Interactive: click-to-jump on the track, drag on the thumb. (Was
+  // pointer-events:none when this was a display-only indicator.)
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .scrollIndicatorThumb {
@@ -686,9 +691,19 @@
   left: 0;
   right: 0;
   background: rgba(255, 255, 255, 0.5);
-  border-radius: 3rem;
-  min-height: 16rem;
+  border-radius: 5rem;
+  min-height: 24rem;        // keep the thumb grabbable even on very long chats
+  pointer-events: auto;
+  cursor: grab;
   // top + height set inline from React based on scroll state.
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.7);
+  }
+  &:active {
+    background: rgba(255, 255, 255, 0.85);
+    cursor: grabbing;
+  }
 }
 
 .empty {

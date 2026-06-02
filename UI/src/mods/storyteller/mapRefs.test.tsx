@@ -28,6 +28,23 @@ describe("extractMapRefs", () => {
     ]);
   });
 
+  it("handles thousands separators inside the numbers", () => {
+    // The storyteller sometimes writes "-1,500" instead of "-1500"; the inner
+    // comma must not be mistaken for the x/y delimiter.
+    expect(extractMapRefs("the old yards at (-1,500, -800)")).toEqual([
+      { x: -1500, y: -800 },
+    ]);
+    expect(extractMapRefs("Pearl & 4th, approximately (-2,050, -1,470)")).toEqual([
+      { x: -2050, y: -1470 },
+    ]);
+  });
+
+  it("matches a pair nested inside other parens / prefixes", () => {
+    expect(extractMapRefs("the mill (~(-2,180, -1,780))")).toEqual([
+      { x: -2180, y: -1780 },
+    ]);
+  });
+
   it("returns an empty list when there are no pairs", () => {
     expect(extractMapRefs("Cheng's master plan is on the north bank.")).toEqual([]);
     expect(extractMapRefs("")).toEqual([]);
