@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.6" />
+  <ModVersion Value="0.1.7" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,10 +61,8 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.6** &#8212; the ghostwriter can see your city.
+**0.1.7** &#8212; places in the story pin to the map.
 
-* **A map the storyteller can actually look at.** Ghostwriter now renders your city to an image &#8212; terrain shaded by elevation, rivers and lakes by depth, the road network, color-coded zoning (where people live vs. work), and civic buildings marked by service (fire, police, schools, hospitals, power, water, parks). The agent reads it as a picture, so its sense of where things are and how the city fits together is grounded in what's really on the map, not guessed from numbers.
-* **The map keeps up as you build.** An optional setting refreshes that map on its own slow cadence, so new neighborhoods and terraforming show up in the story without a manual refresh. Off by default &#8212; turn it on in Options &#8594; Ghostwriter.
-* **Chat panel polish.** The chat scrollbar is now draggable (and click-the-track to jump), the panel opens scrolled to your most recent message, and clickable map pins now work for coordinates written with thousands separators like "(-1,500, -800)".
+* **Located canon gets clickable pins.** When the ghostwriter writes about a place &#8212; a neighborhood, a landmark, a company's premises, where a character lives or works &#8212; it now anchors the entry to the spot's map coordinate. Open that file in the canon browser and a pin appears: click it and the camera flies straight there. The story's geography is navigable, not just described. Coordinates are pulled from the real map data, never invented.
   </ChangeLog>
 </Publish>
