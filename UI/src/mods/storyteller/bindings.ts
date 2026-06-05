@@ -14,6 +14,9 @@ export const availableCommandsBinding = bindValue<string>(GROUP, "availableComma
 export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
 export const cartoExportingBinding = bindValue<boolean>(GROUP, "cartoExporting", false);
 export const cartoAvailableBinding = bindValue<boolean>(GROUP, "cartoAvailable", false);
+// True when no usable LLM provider is configured yet (hosted provider with no
+// API key, or no model id). Drives the first-run "set up a provider" nudge.
+export const setupNeededBinding = bindValue<boolean>(GROUP, "setupNeeded", false);
 export const activeEventsEnabledBinding = bindValue<boolean>(GROUP, "activeEventsEnabled", false);
 // Unix-seconds timestamp of the next eligible autonomous /story-driven
 // fire. 0 when active events is off. UI computes a local countdown

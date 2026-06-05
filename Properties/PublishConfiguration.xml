@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.5" />
+  <ModVersion Value="0.1.6" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,9 +61,10 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.5** &#8212; click a place, fly there.
+**0.1.6** &#8212; the ghostwriter can see your city.
 
-* **Clickable map coordinates.** When the ghostwriter names a precise spot &#8212; "the interchange (820, 1140)", "the SW flats off Loon Lane" &#8212; a clickable pin appears beneath the message (and inside canon files). Click it and the in-game camera smoothly flies straight to that point. Closes the loop between the story and the map: no more mentally translating "the north bank by the highway" into a camera scroll.
-* **In-world dates stay in sync.** The storyteller now tracks the live in-game date second by second, so civic events open, come due, and expire on the date you actually see on the HUD &#8212; deadlines and timelines line up with the calendar instead of drifting.
+* **A map the storyteller can actually look at.** Ghostwriter now renders your city to an image &#8212; terrain shaded by elevation, rivers and lakes by depth, the road network, color-coded zoning (where people live vs. work), and civic buildings marked by service (fire, police, schools, hospitals, power, water, parks). The agent reads it as a picture, so its sense of where things are and how the city fits together is grounded in what's really on the map, not guessed from numbers.
+* **The map keeps up as you build.** An optional setting refreshes that map on its own slow cadence, so new neighborhoods and terraforming show up in the story without a manual refresh. Off by default &#8212; turn it on in Options &#8594; Ghostwriter.
+* **Chat panel polish.** The chat scrollbar is now draggable (and click-the-track to jump), the panel opens scrolled to your most recent message, and clickable map pins now work for coordinates written with thousands separators like "(-1,500, -800)".
   </ChangeLog>
 </Publish>

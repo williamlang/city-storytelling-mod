@@ -14,6 +14,7 @@ import {
   canonTreeBinding,
   cartoExportingBinding,
   cartoAvailableBinding,
+  setupNeededBinding,
   activeEventsEnabledBinding,
   nextEventAtUtcSecBinding,
   activeEventsPausedBinding,
@@ -193,6 +194,7 @@ export function StorytellerToolbar() {
   const openEventsJson = useValue(openEventsBinding);
   const cartoExporting = useValue(cartoExportingBinding);
   const cartoAvailable = useValue(cartoAvailableBinding);
+  const setupNeeded = useValue(setupNeededBinding);
   const activeEventsEnabled = useValue(activeEventsEnabledBinding);
   const nextEventAtUtcSec = useValue(nextEventAtUtcSecBinding);
   const activeEventsPaused = useValue(activeEventsPausedBinding);
@@ -417,6 +419,19 @@ export function StorytellerToolbar() {
               ×
             </button>
           </div>
+
+          {setupNeeded && (
+            <div className={styles.setupBanner}>
+              {/* Block-level lines only — Cohtml can't inline-flow elements
+                  within running text, so no inline <strong>/<em>. */}
+              <div className={styles.setupBannerTitle}>No language model set up yet</div>
+              <div>
+                Open Options → Ghostwriter, choose a provider, and paste an API
+                key (or set up the Claude Code CLI). Prompts won&rsquo;t run until
+                a provider is configured.
+              </div>
+            </div>
+          )}
 
           {(refreshPending || cartoExporting) ? (
             <div className={styles.cartoBanner}>

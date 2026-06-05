@@ -624,6 +624,28 @@
   color: rgba(220, 240, 230, 0.9);
 }
 
+// First-run nudge: shown when no LLM provider is configured (setupNeeded
+// binding). Amber so it reads as "action required" without looking like an
+// error. Stacked block lines — no flex gap (Coherent drops it) and no inline
+// elements inside the body text (Coherent can't inline-flow them).
+.setupBanner {
+  background: rgba(230, 165, 30, 0.16);
+  border: 1px solid rgba(230, 165, 30, 0.5);
+  border-radius: 4rem;
+  color: rgba(245, 238, 225, 0.92);
+  font-size: 11rem;
+  line-height: 1.4;
+  padding: 8rem 10rem;
+  margin-top: 6rem;
+}
+
+.setupBannerTitle {
+  font-weight: 700;
+  font-size: 12rem;
+  color: #f4c430;
+  margin-bottom: 3rem;
+}
+
 // Wrap around .chat so a custom scroll indicator can be absolutely
 // positioned over the right edge without scrolling with the content.
 // Owns the flex-fill sizing that .chat used to carry — .chat itself

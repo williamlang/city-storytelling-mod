@@ -45,6 +45,10 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _canonTreeBinding;
         ValueBinding<bool> _cartoExportingBinding;
         ValueBinding<bool> _cartoAvailableBinding;
+        // True when the current LLM provider isn't configured enough to run
+        // (no API key for a hosted provider, or no model id). Drives the
+        // first-run "set up a provider" nudge in the panel.
+        ValueBinding<bool> _setupNeededBinding;
         ValueBinding<bool> _activeEventsEnabledBinding;
         ValueBinding<bool> _activeEventsPausedBinding;
         ValueBinding<int> _nextEventAtUtcSecBinding;
@@ -101,6 +105,7 @@ namespace CityStoryMod.Systems
             _canonTreeBinding = new ValueBinding<string>(Group, "canonTree", "{}");
             _cartoExportingBinding = new ValueBinding<bool>(Group, "cartoExporting", false);
             _cartoAvailableBinding = new ValueBinding<bool>(Group, "cartoAvailable", false);
+            _setupNeededBinding = new ValueBinding<bool>(Group, "setupNeeded", ComputeSetupNeeded());
             // Initial value reflects the persisted ModSetting. PromptUISystem
             // also re-emits this binding each time setActiveEventsEnabled
             // fires so the React panel sees the new state immediately rather
@@ -134,6 +139,7 @@ namespace CityStoryMod.Systems
             AddBinding(_canonTreeBinding);
             AddBinding(_cartoExportingBinding);
             AddBinding(_cartoAvailableBinding);
+            AddBinding(_setupNeededBinding);
             AddBinding(_activeEventsEnabledBinding);
             AddBinding(_nextEventAtUtcSecBinding);
             AddBinding(_activeEventsPausedBinding);
@@ -456,6 +462,16 @@ namespace CityStoryMod.Systems
             if (cartoAvail != _cartoAvailableBinding.value)
             {
                 _cartoAvailableBinding.Update(cartoAvail);
+            }
+
+            // Reflect provider-setup status so the panel can nudge a tester who
+            // hasn't pasted a key / set a model yet. Recomputed each tick (a
+            // couple of string checks) so it clears the moment they fix it in
+            // Options without needing a panel reopen.
+            bool setupNeeded = ComputeSetupNeeded();
+            if (setupNeeded != _setupNeededBinding.value)
+            {
+                _setupNeededBinding.Update(setupNeeded);
             }
 
             // Active-events countdown anchor + paused flag. ActiveEventsSystem
@@ -951,6 +967,27 @@ namespace CityStoryMod.Systems
             {
                 _log.Warn($"PromptUISystem: failed to parse settings.json at {path}: {ex.Message}");
                 return null;
+            }
+        }
+
+        // Whether the current LLM provider is configured enough to actually
+        // run. Mirrors the empty-key/empty-model guard in the Conversation
+        // implementations so the panel can warn a fresh tester BEFORE they
+        // submit a prompt and hit the failure. CLI uses the external Claude
+        // Code login (unverifiable from here), so it only flags a missing
+        // model; Ollama needs a base URL + model; hosted APIs need key + model.
+        static bool ComputeSetupNeeded()
+        {
+            var s = Mod.Settings;
+            if (s == null) return true;
+            switch (s.Provider)
+            {
+                case LlmProvider.AnthropicCLI:
+                    return string.IsNullOrWhiteSpace(s.Model);
+                case LlmProvider.Ollama:
+                    return string.IsNullOrWhiteSpace(s.OllamaBaseUrl) || string.IsNullOrWhiteSpace(s.Model);
+                default:
+                    return string.IsNullOrWhiteSpace(s.ApiKey) || string.IsNullOrWhiteSpace(s.Model);
             }
         }
 
