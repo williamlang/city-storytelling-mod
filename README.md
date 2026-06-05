@@ -106,9 +106,10 @@ No hot-reload while CS2 is running. The C# dev loop is **edit → quit CS2 → `
 
 In CS2, with the mod enabled:
 
-- **Toolbar icon (top-left)** — opens the in-game ghostwriter panel: chat with the model, pick a slash command from a dropdown, browse the city's canon in a sidebar, click any canon entry to open it in a draggable modal with rendered markdown. This is the primary surface.
+- **Toolbar icon (top-left)** — opens the in-game ghostwriter panel: chat with the model, pick a slash command from a dropdown, browse the city's canon in a sidebar, click any canon entry to open it in a draggable modal with rendered markdown. Coordinates the story mentions (in chat or in a canon file) render as clickable pins that fly the in-game camera to that spot. This is the primary surface.
 - **Ctrl+Shift+E** — trigger a snapshot export immediately.
 - **Auto-export** — fires every N minutes (configurable; default 5, set to 0 to disable).
+- **Auto-refresh spatial map** — opt-in; regenerates the rendered city map (terrain, water, roads, zoning, civic services) on its own slow interval so the agent's visual stays current as you build and terraform. Off by default — a full Carto refresh is heavier than a snapshot.
 - **Auto session-start on save load** — opt-in; when enabled, writes an open `sessions/` stub the moment a save loads so the agent picks up where the player left off.
 
 > **Heads-up on the prompt box.** There's a soft guardrail in `template/CLAUDE.md` that tells the ghostwriter to refuse off-scope prompts in-character (so a stray "write me a python script" doesn't burn your Max subscription or corrupt the canon). It's prompt-level only; a determined prompt-injector can talk the model around it, and someone who actually wanted to torch your canon could just delete files directly. Don't leave the game unlocked in a coffee shop.
@@ -127,7 +128,7 @@ Logs at:
 
 ## Snapshot schema
 
-[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.7**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
+[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.8**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
 
 Currently populated:
 - Metadata header — schema version, snapshot id, session id, wall-clock + in-game timestamps
@@ -135,14 +136,14 @@ Currently populated:
 - `city.*` — population, money, happiness, health, tourists, attractiveness, danger, milestone, XP, zone counts, **`city.churn`** (births / deaths / move-ins / move-aways per day, including a `moved_away_by_reason` breakdown), **`city.social`** (homeless / unemployed / crime counts), **`city.budget`** (income + residential tax)
 - **`pollution`** — air / ground / noise sampled at every building position, binned by `CurrentDistrict`; emits city-wide + per-district averages with sample counts
 - **`land_value`** — same per-building → bin-by-district sampling pattern, reading `LandValueSystem`'s cell grid
-- **`crime`** — per-building `Game.Buildings.CrimeProducer.m_Crime` binned by district (sample population is a subset of buildings)
+- **`crime`** — per-district count of active resident criminals (citizens carrying `Game.Citizens.Criminal`, binned by their home district); the city-wide reported-crime `crime_count` / `crime_rate` totals live under `city.social`. (Replaced the v0.6 per-building `CrimeProducer.m_Crime` accumulator, which saturated everywhere and gave no spatial signal.)
 - **`citizens_sample`** — up to 30 sampled residents per export; always includes every `Followed` citizen, fills the rest with a timestamp-seeded random sample. Per-entry: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags
 - `outside_connections`, `water_sources` — `CustomName` entities Carto doesn't surface
 - `district_zones` — per-district building-type counts (backs the subdivision-growth signal)
 - `demographics` — citizen flag counts, average wellbeing / health, employed count
 - `diff.*` — full change-since-last-snapshot block: zone deltas, district zone deltas, **`building_churn`** (per-district demolition + construction counts), named-building churn, outside-connection / water-source diffs, in-game days elapsed
 
-Still null / empty (next-up targets): per-citizen wealth tier, `trade.imports/exports`, `services.coverage_gaps`. Spatial geometry (district polygons, building positions, roads, terrain, water bodies) lives in `carto/processed/*.md` chunks alongside the JSON.
+Still null / empty (next-up targets): per-citizen wealth tier, `trade.imports/exports`, `services.coverage_gaps`. Spatial geometry (district polygons, building positions, roads, terrain, water bodies) lives in `carto/processed/*.md` chunks alongside the JSON — plus a rendered `carto/processed/map.png` (terrain shaded by elevation, depth-shaded water, the road network, color-coded zoning, and civic-service markers) that a vision-capable agent reads as an actual image, not text.
 
 ## Project layout
 
