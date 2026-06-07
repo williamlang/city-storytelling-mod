@@ -40,16 +40,18 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   </LongDescription>
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
-  <!--
-    Access control — supported as of CS2 1.4.2f1. Values: Public | Unlisted | Private.
-    Closed beta is Private: hidden from search, only Paradox-Mods-username-added
-    testers (max 5) can subscribe. CRITICAL: once a single subscriber exists,
-    Paradox Mods blocks the Public/Unlisted → Private transition — so this MUST
-    stay "Private" on the first publish. Flip to "Public" via the website (or by
-    bumping this and running ModPublisherCommand=Update) only when we're ready
-    to open the gate.
-  -->
-  <AccessLevel Value="Private" />
+  <!-- External links shown on the Paradox Mods page. Attribute names are
+       case-sensitive: Type and Url (the publisher matches them exactly; a
+       lowercase `type` is silently ignored). The Type value is matched
+       case-insensitively against the accepted set: discord, youtube, patreon,
+       github, x, twitch, buymeacoffee, kofi, crowdin, gitlab, paypal, gofundme.
+       The github URL must be a *profile* (github.com/<user>) — Paradox's
+       validator regex rejects repo URLs. External links are managed directly on
+       the Paradox Mods website instead of here: the website accepts richer URLs
+       (full repo, Discord thread) than the toolchain validator, and the
+       publisher would overwrite this file's links on every Update — so we leave
+       <ExternalLink> out to avoid clobbering the website-set links. -->
+  <AccessLevel Value="Unlisted" />
   <ModVersion Value="0.1.9" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
