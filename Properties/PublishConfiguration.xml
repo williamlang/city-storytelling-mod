@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.8" />
+  <ModVersion Value="0.1.9" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,11 +61,9 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.8** &#8212; the ghostwriter reads schools, and writes to the city's true size.
+**0.1.9** &#8212; the ghostwriter names your civic buildings, and they show up in the game.
 
-* **School capacity is part of the city's state now.** Every snapshot records how full each school is &#8212; elementary, secondary, and college/university enrollment against capacity. The ghostwriter can see an overcrowded school and write the fight over building the next one, grounded in real numbers instead of guesswork.
-* **Stories fit the city you actually have.** The ghostwriter reads your population every time it writes and scales the drama to match &#8212; a town of two thousand argues over parcels and water mains in a room, not factional board votes and regional news cycles built for a city of fifty thousand.
-* **It narrates the city, not its own bookkeeping.** When you check in on an open thread, the ghostwriter tells you where the story stands instead of reading back a status report of what did and didn't change.
-* **Map pins stay on dry land.** Coordinates the ghostwriter drops are pulled only from real map features, so a riverside parcel no longer pins out in the water.
+* **Named civic buildings, written into the world.** When a new fire station, school, clinic, or park goes up without a name, the ghostwriter gives it a grounded one and writes it straight onto the building in-game &#8212; the same as if you'd renamed it yourself. Most are flavor; some plant or pay off the story &#8212; a school named for someone who matters, a park the residents fought for.
+* **School counts only count real schools.** Higher education you reach by commuting to neighbouring towns was being tallied as if your city had three 10,000-seat universities, drowning out the real numbers. Now enrollment and capacity reflect only the schools actually standing on your map.
   </ChangeLog>
 </Publish>

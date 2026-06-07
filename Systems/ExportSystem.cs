@@ -36,6 +36,7 @@ namespace CityStoryMod.Systems
         EntityQuery _districtQuery;           // per-district zone tracking
         EntityQuery _namedBuildingQuery;      // CustomName-tagged buildings for churn diff
         EntityQuery _schoolQuery;             // school buildings for education capacity/enrollment
+        EntityQuery _serviceBuildingQuery;    // city-service buildings for the civic-building naming roster (#40)
         bool _cityComponentsLogged;
         bool _citizenFirstDiagged;
         readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
@@ -135,6 +136,22 @@ namespace CityStoryMod.Systems
         const double ClockWriteIntervalSec = 10;
         DateTime _lastClockWriteUtc;
 
+        // #40 naming return channel. The storyteller writes naming-requests.json
+        // (a JSON array of { id, name }) into the city dir; the mod applies each
+        // via NameSystem.SetCustomName, writes naming-results.json, and consumes
+        // the request file. Polled on the clock heartbeat cadence.
+        const string NamingRequestsFile = "naming-requests.json";
+        const string NamingResultsFile = "naming-results.json";
+
+        // Wire shape of one naming-requests.json entry. Public fields so
+        // Newtonsoft binds them; extra keys (category/district the storyteller
+        // may include for readability) are ignored.
+        class NamingRequest
+        {
+            public string id;    // "<index>-<version>", matching civic_buildings[].id
+            public string name;  // desired custom name; blank/whitespace clears it
+        }
+
         // Save-load transition detection. Flips true the first tick OnUpdate sees
         // inGame+cityReady; flips back to false on any tick where the gate fails
         // (main menu, loading screen, editor). The false→true edge is what we
@@ -223,14 +240,46 @@ namespace CityStoryMod.Systems
             // School *building instances* (Game.Buildings.School), excluding
             // deleted/temp and prefab templates. Capacity + tier come from the
             // prefab's SchoolData; enrollment from the building's Student buffer.
+            // Real in-city schools only. The School component + SchoolData also
+            // ride on outside-connection entities (commute-out higher education,
+            // e.g. neighbouring towns at 10k "capacity") — those are not placed
+            // buildings, so require Building and exclude OutsideConnection or the
+            // education rollup counts phantom universities.
             _schoolQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<Game.Buildings.School>() },
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.School>(),
+                    ComponentType.ReadOnly<Building>(),
+                },
                 None = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<PrefabData>(),
+                    ComponentType.ReadOnly<Game.Objects.OutsideConnection>(),
+                },
+            });
+            // Civic buildings the storyteller can name (#40): real in-city
+            // service buildings, identified by CityServiceUpkeep. Excludes
+            // service upgrades/extensions and outside connections (the game tags
+            // commute-out higher-ed access points with Game.Buildings.School +
+            // SchoolData but they are NOT placed buildings); owned sub-buildings
+            // are filtered in the loop.
+            _serviceBuildingQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Building>(),
+                    ComponentType.ReadOnly<Game.City.CityServiceUpkeep>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                    ComponentType.ReadOnly<Game.Buildings.ServiceUpgrade>(),
+                    ComponentType.ReadOnly<Game.Objects.OutsideConnection>(),
                 },
             });
             _customNameQuery = GetEntityQuery(new EntityQueryDesc
@@ -511,6 +560,7 @@ namespace CityStoryMod.Systems
             {
                 _lastClockWriteUtc = DateTime.UtcNow;
                 WriteClockFile();
+                ProcessNamingRequests();
             }
 
             // Continual spatial-map refresh on its own slow cadence (separate
@@ -680,6 +730,7 @@ namespace CityStoryMod.Systems
             object landValue = CollectLandValue(districtNameByEntity);
             object crime = CollectCrimeByDistrict(districtNameByEntity);
             object education = CollectEducation(districtNameByEntity);
+            object civicBuildings = CollectCivicBuildings(districtNameByEntity);
             object citizensSample = CollectCitizensSample(districtNameByEntity, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
@@ -801,11 +852,13 @@ namespace CityStoryMod.Systems
                     exports = new object[0],
                 },
 
-                // v0.9 — service capacity/utilization. Education first: per-school
+                // v0.9 — service capacity/utilization. Education: per-school
                 // enrollment vs. capacity (the "build a new school" signal) plus a
-                // city-wide rollup by tier. Other services (healthcare beds, etc.)
-                // slot in beside `education` as they're added.
-                services = new { education = education },
+                // city-wide rollup by tier. civic_buildings: the namable
+                // city-service roster (#40) — id, label, category, district, and
+                // whether it already carries a custom name. Other services
+                // (healthcare beds, etc.) slot in beside these as they're added.
+                services = new { education = education, civic_buildings = civicBuildings },
             };
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
@@ -1784,6 +1837,190 @@ namespace CityStoryMod.Systems
             2 => "secondary",
             _ => "higher_education",
         };
+
+        // Roster of civic (city-service) buildings — the set the storyteller can
+        // give narrative names to (#40). Each entry carries a stable id, the
+        // current rendered label, a classified category, the raw prefab name, the
+        // district, and whether it already has a custom name (player- or
+        // storyteller-given). Owned sub-buildings/extensions are skipped so each
+        // namable building appears once. The naming write-back
+        // (NameSystem.SetCustomName) consumes the ids emitted here. Returns null
+        // when the city has no service buildings yet.
+        object CollectCivicBuildings(Dictionary<Entity, string> districtNameByEntity)
+        {
+            using var entities = _serviceBuildingQuery.ToEntityArray(Allocator.Temp);
+            if (entities.Length == 0) return null;
+
+            var list = new List<object>();
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var b = entities[i];
+                // Owned sub-buildings/extensions name through their parent — skip
+                // them here so the roster lists each top-level building once.
+                if (EntityManager.HasComponent<Owner>(b)) continue;
+
+                string prefabName = null;
+                if (EntityManager.HasComponent<PrefabRef>(b))
+                {
+                    var prefab = EntityManager.GetComponentData<PrefabRef>(b).m_Prefab;
+                    if (prefab != Entity.Null) prefabName = _prefabSystem.GetPrefabName(prefab);
+                }
+
+                string district = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(b))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out district);
+                }
+
+                list.Add(new
+                {
+                    id = EntityId(b),
+                    name = _nameSystem.GetRenderedLabelName(b),
+                    category = CivicCategory(b, prefabName),
+                    prefab_name = prefabName,
+                    district = district,
+                    has_custom_name = _nameSystem.TryGetCustomName(b, out _),
+                });
+            }
+
+            return list.Count > 0 ? list : null;
+        }
+
+        // Classify a civic building into a coarse category. Component checks are
+        // authoritative for the common services; the rest fall back to prefab-name
+        // substrings. The raw prefab_name is also emitted, so an "other" here is
+        // still identifiable by the agent.
+        string CivicCategory(Entity b, string prefabName)
+        {
+            if (EntityManager.HasComponent<Game.Buildings.School>(b)) return "education";
+            if (EntityManager.HasComponent<Game.Buildings.Hospital>(b)) return "health";
+            if (EntityManager.HasComponent<Game.Buildings.FireStation>(b)) return "fire";
+            if (EntityManager.HasComponent<Game.Buildings.PoliceStation>(b)) return "police";
+            if (EntityManager.HasComponent<Game.Buildings.GarbageFacility>(b)) return "garbage";
+            if (EntityManager.HasComponent<Game.Buildings.Park>(b)) return "park";
+
+            string n = (prefabName ?? "").ToLowerInvariant();
+            if (n.Contains("transformer") || n.Contains("power") || n.Contains("substation") || n.Contains("solar") || n.Contains("windturbine") || n.Contains("battery")) return "power";
+            if (n.Contains("water") || n.Contains("sewage") || n.Contains("pumping")) return "water";
+            if (n.Contains("cemetery") || n.Contains("crematorium") || n.Contains("mortuary") || n.Contains("deathcare")) return "deathcare";
+            if (n.Contains("transit") || n.Contains("transport") || n.Contains("bus") || n.Contains("train") || n.Contains("subway") || n.Contains("metro") || n.Contains("depot") || n.Contains("airport") || n.Contains("harbor") || n.Contains("port")) return "transit";
+            if (n.Contains("admin") || n.Contains("cityhall") || n.Contains("townhall")) return "administration";
+            if (n.Contains("welfare") || n.Contains("shelter")) return "welfare";
+            if (n.Contains("telecom") || n.Contains("cell") || n.Contains("internet")) return "telecom";
+            if (n.Contains("prison") || n.Contains("jail")) return "prison";
+            if (n.Contains("post")) return "postal";
+            if (n.Contains("landmark") || n.Contains("signature")) return "landmark";
+            return "other";
+        }
+
+        // #40 write path: apply storyteller-chosen names. Reads
+        // naming-requests.json (a JSON array of { id, name }) from the city dir,
+        // resolves each id against the LIVE civic-building set (so a stale id from
+        // a prior session simply won't match — entity index+version isn't stable
+        // across save/load), applies the name via the game's own
+        // NameSystem.SetCustomName (same call the player's rename box uses — adds
+        // the serializable CustomName component, so it persists), writes
+        // naming-results.json, and consumes the request file so it isn't
+        // reapplied. Matching against the live set also guarantees we only ever
+        // rename real civic buildings, never arbitrary entities.
+        void ProcessNamingRequests()
+        {
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir)) return;
+            string reqPath = Path.Combine(cityDir, NamingRequestsFile);
+            if (!File.Exists(reqPath)) return;
+
+            List<NamingRequest> requests;
+            try
+            {
+                requests = JsonConvert.DeserializeObject<List<NamingRequest>>(File.ReadAllText(reqPath));
+            }
+            catch (Exception ex)
+            {
+                // Don't reparse a broken file every heartbeat — set it aside.
+                _log.Warn($"Naming: malformed {NamingRequestsFile} ({ex.Message}); setting aside.");
+                TrySetAside(reqPath, cityDir);
+                return;
+            }
+
+            if (requests == null || requests.Count == 0)
+            {
+                TryDeleteFile(reqPath);
+                return;
+            }
+
+            // Live id → entity map for the current civic buildings. EntityId is
+            // index-version, the same string civic_buildings[].id carries, so a
+            // request written from a recent snapshot resolves; a stale one doesn't.
+            var byId = new Dictionary<string, Entity>();
+            using (var ents = _serviceBuildingQuery.ToEntityArray(Allocator.Temp))
+                for (int i = 0; i < ents.Length; i++) byId[EntityId(ents[i])] = ents[i];
+
+            var results = new List<object>();
+            int applied = 0;
+            foreach (var r in requests)
+            {
+                if (r == null || string.IsNullOrEmpty(r.id))
+                {
+                    results.Add(new { id = r?.id, status = "skipped", reason = "missing id" });
+                    continue;
+                }
+                if (!byId.TryGetValue(r.id, out Entity e))
+                {
+                    results.Add(new { id = r.id, status = "skipped", reason = "no live civic building with this id (stale or wrong id)" });
+                    continue;
+                }
+                try
+                {
+                    // Blank name clears the custom name (SetCustomName handles that).
+                    string name = string.IsNullOrWhiteSpace(r.name) ? null : r.name.Trim();
+                    _nameSystem.SetCustomName(e, name);
+                    applied++;
+                    results.Add(new { id = r.id, name = name, status = name == null ? "cleared" : "applied" });
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new { id = r.id, status = "error", reason = ex.Message });
+                }
+            }
+
+            try
+            {
+                File.WriteAllText(
+                    Path.Combine(cityDir, NamingResultsFile),
+                    JsonConvert.SerializeObject(new
+                    {
+                        processed_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        total = requests.Count,
+                        applied = applied,
+                        results = results,
+                    }, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Naming: could not write {NamingResultsFile}: {ex.Message}");
+            }
+
+            TryDeleteFile(reqPath);
+            _log.Info($"Naming: applied {applied}/{requests.Count} request(s) from {NamingRequestsFile}.");
+        }
+
+        static void TryDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        static void TrySetAside(string path, string cityDir)
+        {
+            try
+            {
+                string dest = Path.Combine(cityDir, "naming-requests.invalid.json");
+                if (File.Exists(dest)) File.Delete(dest);
+                File.Move(path, dest);
+            }
+            catch { }
+        }
 
         // Per-citizen sample. Walks every Citizen entity, filters down to
         // residents (skips tourists, commuters, moving-away, dead), then

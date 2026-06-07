@@ -130,6 +130,14 @@ Shape:
 
 **Read `by_tier`, not the city-wide top line, for the "build a school" signal.** Higher-ed assets carry very large capacities (often 10,000), so a city-wide `utilization` mixing them with a near-full elementary reads artificially low. Per-tier utilization is the honest signal — a `secondary` pool at 0.95+ with no other high school is the event. The same `{ enrolled/patients, capacity, utilization }` shape is intended to extend to healthcare and other capacity-bound services beside `education`.
 
+### `services.civic_buildings` + the naming return channel (#40)
+
+`services.civic_buildings` is the roster of namable city-service buildings — each `{ id, name, category, prefab_name, district, has_custom_name }`. It's built from `CityServiceUpkeep` + `Building`, **excluding** `ServiceUpgrade` (upgrades/extensions), owned sub-buildings (`Owner`), and `OutsideConnection`. That last exclusion matters: the game tags commute-out higher-education access points (neighbouring towns, ~10k "capacity") with `Game.Buildings.School` + `SchoolData`, so without it both `education` and the roster would report phantom universities the player never placed. The same `OutsideConnection` guard is on the education school query.
+
+`category` is component-derived for the common services (education/health/fire/police/garbage/park) and prefab-name-derived for the rest (power/water/deathcare/transit/…), with `prefab_name` always included so an `other` is still identifiable.
+
+**Write path — first time the mod mutates game state.** The agent gives the `has_custom_name: false` buildings real names that appear *in-world*. It writes `naming-requests.json` at the city root — a JSON array of `{ "id", "name" }` keyed by `civic_buildings[].id` — and the mod, on its ~10s clock heartbeat, applies each via the game's own `Game.UI.NameSystem.SetCustomName` (adds the serializable `CustomName` component, so it persists across save/load, same as a manual player rename), writes `naming-results.json` (per-id `applied`/`skipped`/`error`), and deletes the request file. Ids are resolved against the *live* civic-building set, so only real civic buildings can be renamed and a stale id (entity index+version isn't stable across save/load) reports `skipped` rather than misfiring. Blank name clears a name.
+
 ## The shape
 
 ```json
@@ -297,7 +305,16 @@ Shape:
     "education": {
       "city": { "schools": 3, "enrolled": 612, "capacity": 700, "utilization": 0.87, "by_tier": { } },
       "schools": [ /* { name, district, tier, education_level, enrolled, capacity, utilization } */ ]
-    }
+    },
+    // v0.9 — roster of namable city-service buildings (#40). null when the city
+    // has none. Real in-city buildings only (CityServiceUpkeep + Building,
+    // excluding service upgrades and outside connections). The storyteller names
+    // the has_custom_name:false ones via the naming-requests.json return channel.
+    "civic_buildings": [
+      // { id, name, category, prefab_name, district, has_custom_name }
+      { "id": "91602-1", "name": "Fire House", "category": "fire",
+        "prefab_name": "FireHouse01", "district": "Sound Strand", "has_custom_name": false }
+    ]
     // future: healthcare (patients vs. beds), coverage_gaps, ...
   },
 

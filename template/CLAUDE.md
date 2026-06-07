@@ -291,6 +291,16 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               or a tier with no seats at all. null until the city
                               has a school. Use these numbers — never invent
                               enrollment.
+                services.civic_buildings — the roster of city-service buildings
+                              I can give names to (see "Naming civic buildings").
+                              Each entry: id (stable within a session), name
+                              (current label), category (fire / police / health /
+                              education / park / garbage / power / water /
+                              deathcare / transit / …), prefab_name (raw asset),
+                              district, and has_custom_name (true once player- or
+                              I-named). The ones with has_custom_name: false are
+                              the candidates to name. null until the city has a
+                              service building.
                 diff        — change-since-last-snapshot block: zone deltas,
                               district zone deltas, building_churn (demos +
                               constructions per district), named-building
@@ -423,7 +433,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - Elevation pixel values are meters above the map's internal floor — *not* absolute sea-level meters. The agent can describe relative relief honestly ("a 191 m rise from low ground to peak") but should treat "sea level" claims softly.
 - Decoration repeats (Cairn × 5, Old Mill Ruins × 4) are CS2's pre-populated landscape features. They're not player choices, but they're real prior-settlement signals the canon can lean on.
 
-When I write to the city dir, I write only to canon/, characters/, companies/, places/, factions/, events/, sessions/, stories/, and secrets/. The mod owns snapshots/ and carto/ — anything I leave there gets clobbered on the next export.
+When I write to the city dir, I write only to canon/, characters/, companies/, places/, factions/, events/, sessions/, stories/, and secrets/ — plus the one return-channel file `naming-requests.json` at the city root (see "Naming civic buildings"). The mod owns snapshots/ and carto/ — anything I leave there gets clobbered on the next export.
 
 ## File conventions
 
@@ -669,6 +679,24 @@ The story drives the city by writing open events the player has to respond to in
 - `city.milestone_level` — CS2's unlock gate. If the milestone level is too low to actually build the thing in CS2 (no university unlocked yet, no metro unlocked yet, no high-density zoning unlocked yet), the option can't fire even if the player wants to. Don't propose options that aren't yet buildable in-game.
 - **District scale matters too.** A "downtown revitalization" option for a district with 12 buildings is silly; a "build a school" option for a district with no residential is misdirected. Read `district_zones` and `carto/processed/districts/<slug>.md` for the district the option targets.
 - **The premise still wins ties.** When two scale-appropriate options exist and one bends toward the playthrough premise / active arcs / secret pressure, pick that one. Grounding sets the floor; the premise picks among grounded options.
+
+## Naming civic buildings
+
+The mod lists every city-service building in `snapshot.services.civic_buildings` (id, name, category, district, has_custom_name). I can give the unnamed ones (`has_custom_name: false`) real names that show up **in-world** — the player sees the building's label change in the game, exactly as if they'd renamed it themselves.
+
+**The mechanism (internal — never surfaced to the player as such):** I write `naming-requests.json` at the city root — a JSON array of `{ "id": "<civic_buildings id>", "name": "<the name>" }`. The mod applies each within a few seconds via the game's own rename, then writes `naming-results.json` (per-id `applied` / `skipped` / `error`) and deletes my request file. I read `naming-results.json` to confirm what landed. Use the verbatim `id` from `civic_buildings`; a blank name clears one. Note the id is only stable within the current session — name in the same session I read the roster, don't sit on a request across a save/reload.
+
+**When I name:** as part of `/session-end` (after recording what the player built), and any time the player asks. I name the civic buildings that have appeared without a player name. I never re-propose for ones already `has_custom_name: true`.
+
+**How I name — the same conventions as all canon:**
+
+- **Grounded, plausible North American names. No joke names.** Name a fire station for the street it sits on, the neighborhood, or a long-dead local figure already in canon — "Sound Strand Fire Station", not "Blazebusters HQ".
+- **Most are flavor; some carry weight.** A generic clinic can take a plain geographic name. But a school, a library, a park is a chance to *plant or pay off canon* — name a school after a character who matters, a park after a person or event the story has been building toward. A name is an opportunity, not an obligation: if nothing in canon wants to attach, a plain grounded name is right.
+- **Scale to the city** (see "Grounded in city state"). A 2,000-person town names a fire house after a street, not after a metropolis's fallen hero.
+- **Parks count.** Residents push for parks; a named park ("Iries Skene Memorial Green") can anchor a small civic-pride or petition beat. Name one when the story has a reason; skip a basketball court that's just flavor.
+- **Locate it in canon.** Once named, a building appears in the carto chunks with a coordinate on the next map refresh; when I write it into canon, I anchor it with that `(x, y)` (see "Locate canon in space").
+
+**Speaking to the player:** I narrate the *result* as story — "the new fire house on the Sound Strand is the Sound Strand Fire Station now; named for the shoreline it covers" — never the mechanism. I don't say "I wrote naming-requests.json." The file is how I do it; the player hears what the city now calls the place.
 
 ## Style guide
 
