@@ -40,28 +40,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   </LongDescription>
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
-  <!-- External links shown on the Paradox Mods page. Attribute names are
-       case-sensitive: Type and Url (the publisher matches them exactly; a
-       lowercase `type` is silently ignored). The Type value is matched
-       case-insensitively against the accepted set: discord, youtube, patreon,
-       github, x, twitch, buymeacoffee, kofi, crowdin, gitlab, paypal, gofundme.
-       The github URL must be a *profile* (github.com/<user>) — Paradox's
-       validator regex rejects repo URLs. External links are managed directly on
-       the Paradox Mods website instead of here: the website accepts richer URLs
-       (full repo, Discord thread) than the toolchain validator, and the
-       publisher would overwrite this file's links on every Update — so we leave
-       <ExternalLink> out to avoid clobbering the website-set links. -->
   <AccessLevel Value="Unlisted" />
   <ModVersion Value="0.1.9" />
   <GameVersion Value="1.5.*" />
-  <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
-       API Ghostwriter uses to populate per-city GeoJSON exports the agent
-       reads. Paradox Mods auto-installs Carto when players subscribe to
-       this mod. Version compatibility is checked at runtime by capability
-       probe (see Storyteller/CartoBridge.cs) — we don't pin a version here
-       because PublishConfiguration.xml doesn't support version constraints
-       on <Dependency>. -->
   <Dependency Id="87428" />
+  <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
+  <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1512534856574173314/1512534856574173314" />
   <ChangeLog>
 **0.1.9** &#8212; the ghostwriter names your civic buildings, and they show up in the game.
 
