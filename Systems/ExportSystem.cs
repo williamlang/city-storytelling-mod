@@ -35,6 +35,7 @@ namespace CityStoryMod.Systems
         EntityQuery _customNameQuery;         // backs outside_connections + water_sources
         EntityQuery _districtQuery;           // per-district zone tracking
         EntityQuery _namedBuildingQuery;      // CustomName-tagged buildings for churn diff
+        EntityQuery _schoolQuery;             // school buildings for education capacity/enrollment
         bool _cityComponentsLogged;
         bool _citizenFirstDiagged;
         readonly HashSet<Type> _fieldDumpsSeen = new HashSet<Type>();
@@ -212,6 +213,19 @@ namespace CityStoryMod.Systems
             _allBuildingsQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Building>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<PrefabData>(),
+                },
+            });
+            // School *building instances* (Game.Buildings.School), excluding
+            // deleted/temp and prefab templates. Capacity + tier come from the
+            // prefab's SchoolData; enrollment from the building's Student buffer.
+            _schoolQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Buildings.School>() },
                 None = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
@@ -580,7 +594,7 @@ namespace CityStoryMod.Systems
         // workplace, school, plus followed/is_criminal flags. Households'
         // wealth tier is deferred — needs a CitizenHappinessParameterData
         // singleton join we don't do yet. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.8";
+        const string SchemaVersion = "0.9";
 
         void Export(string triggeredBy)
         {
@@ -665,6 +679,7 @@ namespace CityStoryMod.Systems
             object pollution = CollectPollution(districtNameByEntity);
             object landValue = CollectLandValue(districtNameByEntity);
             object crime = CollectCrimeByDistrict(districtNameByEntity);
+            object education = CollectEducation(districtNameByEntity);
             object citizensSample = CollectCitizensSample(districtNameByEntity, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
@@ -786,7 +801,11 @@ namespace CityStoryMod.Systems
                     exports = new object[0],
                 },
 
-                services = new { },
+                // v0.9 — service capacity/utilization. Education first: per-school
+                // enrollment vs. capacity (the "build a new school" signal) plus a
+                // city-wide rollup by tier. Other services (healthcare beds, etc.)
+                // slot in beside `education` as they're added.
+                services = new { education = education },
             };
 
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
@@ -1650,6 +1669,121 @@ namespace CityStoryMod.Systems
                 by_district = byDistrict,
             };
         }
+
+        // Per-school enrollment vs. capacity, plus a city-wide rollup by tier.
+        // The "build/expand a school" signal: a school at or over capacity, or a
+        // tier with no seats at all, is a legible event the storyteller can act
+        // on. Returns null when the city has no schools yet.
+        //
+        // Sources (verified against Game.dll):
+        //   - Game.Buildings.School   — marks a school *building instance* (the query).
+        //   - PrefabRef → Game.Prefabs.SchoolData — m_StudentCapacity (max) and
+        //                               m_EducationLevel (tier the school grants).
+        //   - Game.Buildings.Student  — per-building DynamicBuffer of enrolled
+        //                               citizens; its Length is current enrollment.
+        //                               (No citizen scan needed.)
+        object CollectEducation(Dictionary<Entity, string> districtNameByEntity)
+        {
+            using var entities = _schoolQuery.ToEntityArray(Allocator.Temp);
+            if (entities.Length == 0) return null;
+
+            var schools = new List<object>();
+            // tier label → running (schools, enrolled, capacity)
+            var byTier = new Dictionary<string, (int schools, long enrolled, long capacity)>();
+            int totalSchools = 0;
+            long totalEnrolled = 0, totalCapacity = 0;
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var b = entities[i];
+
+                int capacity = 0, level = 0;
+                if (EntityManager.HasComponent<PrefabRef>(b))
+                {
+                    var prefab = EntityManager.GetComponentData<PrefabRef>(b).m_Prefab;
+                    if (prefab != Entity.Null && EntityManager.HasComponent<SchoolData>(prefab))
+                    {
+                        var sd = EntityManager.GetComponentData<SchoolData>(prefab);
+                        capacity = sd.m_StudentCapacity;
+                        level = sd.m_EducationLevel;
+                    }
+                }
+
+                int enrolled = 0;
+                if (EntityManager.HasBuffer<Game.Buildings.Student>(b))
+                    enrolled = EntityManager.GetBuffer<Game.Buildings.Student>(b, isReadOnly: true).Length;
+
+                string districtName = null;
+                if (EntityManager.HasComponent<CurrentDistrict>(b))
+                {
+                    var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
+                    if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
+                }
+
+                string tier = SchoolTierToString(level);
+                double? util = capacity > 0 ? Math.Round((double)enrolled / capacity, 2) : (double?)null;
+
+                schools.Add(new
+                {
+                    name = _nameSystem.GetRenderedLabelName(b),
+                    district = districtName,
+                    tier = tier,
+                    education_level = level,
+                    enrolled = enrolled,
+                    capacity = capacity,
+                    utilization = util,
+                });
+
+                byTier.TryGetValue(tier, out var t);
+                t.schools++; t.enrolled += enrolled; t.capacity += capacity;
+                byTier[tier] = t;
+
+                totalSchools++;
+                totalEnrolled += enrolled;
+                totalCapacity += capacity;
+            }
+
+            var byTierOut = new Dictionary<string, object>();
+            foreach (var kv in byTier)
+            {
+                var t = kv.Value;
+                byTierOut[kv.Key] = new
+                {
+                    schools = t.schools,
+                    enrolled = t.enrolled,
+                    capacity = t.capacity,
+                    utilization = t.capacity > 0 ? Math.Round((double)t.enrolled / t.capacity, 2) : (double?)null,
+                };
+            }
+
+            return new
+            {
+                city = new
+                {
+                    schools = totalSchools,
+                    enrolled = totalEnrolled,
+                    capacity = totalCapacity,
+                    utilization = totalCapacity > 0 ? Math.Round((double)totalEnrolled / totalCapacity, 2) : (double?)null,
+                    by_tier = byTierOut,
+                },
+                schools = schools,
+            };
+        }
+
+        // SchoolData.m_EducationLevel → CS2's three education tiers, matching how
+        // the game pools school capacity: elementary, secondary (high school),
+        // and higher_education (college + university share a pool). Observed
+        // m_EducationLevel values: 1 = elementary, 2 = high school, and
+        // college/university assets report 3+ (vanilla up to 4; some building
+        // packs use 5). So anything ≥ 3 is higher_education. The raw
+        // `education_level` byte is also emitted per school, so this label is a
+        // convenience grouping, not the source of truth.
+        static string SchoolTierToString(int level) => level switch
+        {
+            <= 1 => "elementary",
+            2 => "secondary",
+            _ => "higher_education",
+        };
 
         // Per-citizen sample. Walks every Citizen entity, filters down to
         // residents (skips tourists, commuters, moving-away, dead), then

@@ -13,7 +13,7 @@ Walk every open event and decide which ones close, then propagate consequences. 
   - `city.*`, `pollution.*`, `crime.*`, `land_value.*`, `district_zones`, `diff.*` — the fields acceptance criteria refer to.
   - `carto/processed/index.md`, `roads.md`, `districts/<slug>.md` — for criteria that reference spatial state.
 
-**3. For each open event, decide one of:**
+**3. For each open event, decide one of (this whole step is internal — the criteria-matching never reaches the player; only its narrative outcome does, in step 6):**
 
 **a) Match.** One of the event's options' `acceptance_criteria` is satisfied by current snapshot state (or by the diff between this snapshot and the one when the event opened). Be honest about what counts:
 - A criterion saying "tax_industrial drops by 2+" requires actually seeing the drop in `snapshot.city.budget.tax_industrial`. Compare against either the snapshot closest to the event's `date:` or, if that's not available, against a reasonable read of the value at open time stated in the body.
@@ -52,9 +52,10 @@ Keep propagation tight. Don't rewrite every character's full file because one ev
 
 **5. Optional narrative pieces.** For the most consequential resolutions (a major character's reversal, a faction's collapse, a secret breaking), draft a short `stories/*.md` entry — news clipping, council transcript, developer memo. Skip for routine closures. The session-end pass will pick up anything missed.
 
-**6. Tell the player.** One short in-character summary, in plain prose, no file references:
-- What closed and how ("The Highway 17 fight closed — Cascade got their road, and Pine Quarter is now organizing a noise lawsuit.").
-- What expired ("The Conklin ranch sale died in committee; the family's split now.").
-- What's still open, with the in-world deadline ("The riverfront rezoning is still live through October.").
+**6. Tell the player — as story, never as a status report.** This is the only part the player sees, and it's the easy place to slip into secretary voice. Everything from step 3 — the criteria, the field comparisons, the "matched / didn't match" verdicts — stays internal. What surfaces is the fiction. Plain in-character prose, no file references, no field names, no audit of whether each option's conditions were met (see CLAUDE.md "I tell story, never status").
 
-If nothing changed (everything is still open, no deadlines hit), say that in one line.
+- **What closed** — narrate the resolution as something that happened in the city, not as a criterion being satisfied. "The Highway 17 fight closed — Cascade got their road, and Pine Quarter's already organizing a noise lawsuit," *not* "the road-extension criteria matched."
+- **What expired** — narrate the cost of inaction. "The Conklin ranch sale died in committee; the family's split now, and the land's still sitting there."
+- **What's still live** — this is the case that most often collapses into a status dump, because nothing changed and the instinct is to report that nothing changed. Don't. Don't walk the options and mark each one unmet. Give a short in-world recap of the standing tension: who's waiting on the player, what's at stake, what the deadline means dramatically. A "where things stand" beat in the ongoing story — one or two tight paragraphs at most, in the city's voice.
+
+If nothing closed and nothing expired, I still never say "nothing happened." I remind the player what's pressing, as story, and leave the clock visible in-world ("Halina's got until mid-October before the board forces a vote") — exactly the ✅ example in CLAUDE.md "I tell story, never status."

@@ -50,7 +50,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
     to open the gate.
   -->
   <AccessLevel Value="Private" />
-  <ModVersion Value="0.1.7" />
+  <ModVersion Value="0.1.8" />
   <GameVersion Value="1.5.*" />
   <!-- Hard dependency on Carto (ModId 87428) — provides the spatial-data peer
        API Ghostwriter uses to populate per-city GeoJSON exports the agent
@@ -61,8 +61,11 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
        on <Dependency>. -->
   <Dependency Id="87428" />
   <ChangeLog>
-**0.1.7** &#8212; places in the story pin to the map.
+**0.1.8** &#8212; the ghostwriter reads schools, and writes to the city's true size.
 
-* **Located canon gets clickable pins.** When the ghostwriter writes about a place &#8212; a neighborhood, a landmark, a company's premises, where a character lives or works &#8212; it now anchors the entry to the spot's map coordinate. Open that file in the canon browser and a pin appears: click it and the camera flies straight there. The story's geography is navigable, not just described. Coordinates are pulled from the real map data, never invented.
+* **School capacity is part of the city's state now.** Every snapshot records how full each school is &#8212; elementary, secondary, and college/university enrollment against capacity. The ghostwriter can see an overcrowded school and write the fight over building the next one, grounded in real numbers instead of guesswork.
+* **Stories fit the city you actually have.** The ghostwriter reads your population every time it writes and scales the drama to match &#8212; a town of two thousand argues over parcels and water mains in a room, not factional board votes and regional news cycles built for a city of fifty thousand.
+* **It narrates the city, not its own bookkeeping.** When you check in on an open thread, the ghostwriter tells you where the story stands instead of reading back a status report of what did and didn't change.
+* **Map pins stay on dry land.** Coordinates the ghostwriter drops are pulled only from real map features, so a riverside parcel no longer pins out in the water.
   </ChangeLog>
 </Publish>

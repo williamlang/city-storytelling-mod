@@ -1,4 +1,4 @@
-# Snapshot schema (v0.8)
+# Snapshot schema (v0.9)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -99,6 +99,36 @@ Replaces the v0.6 building-side `CrimeProducer.m_Crime` averaging with an active
 The new `crime` block walks the citizen query, finds residents carrying `Game.Citizens.Criminal`, applies the same resident filter as `citizens_sample` (skips tourists, commuters, moving-away, dead), and bins by the home building's `CurrentDistrict`. The city-wide field stays an unfiltered count of active resident criminals — distinct from `city.social.crime_count` (CS2's `CrimeCount` statistic), which tracks reported crime over the stats window.
 
 Shape changed from `{ city: { average }, samples, by_district: { name: { average, samples }}}` to `{ city: { active_criminals }, by_district: { name: { active_criminals }}}`. The agent reading old snapshots will see the field name unchanged but the inner key shift — the `schema_version` bump from 0.7 → 0.8 gates this.
+
+## v0.9 — service capacity (education)
+
+Populates the previously-empty `services` block with the first capacity/utilization sensor: **`services.education`**. Per-school enrollment vs. capacity is the single most legible "build/expand a service" signal — a school at or over capacity, or a tier with no seats at all, is an event the storyteller can act on without inventing numbers (which it had been doing, since nothing in the snapshot carried capacity).
+
+Sources, verified against `Game.dll`:
+- **`Game.Buildings.School`** marks a school *building instance* (the query).
+- **`PrefabRef` → `Game.Prefabs.SchoolData`** carries `m_StudentCapacity` (max) and `m_EducationLevel` (the tier the school grants, 1–4 on the same scale as `CitizenEducationLevel`).
+- **`Game.Buildings.Student`** is a per-building `DynamicBuffer` of enrolled citizens; its `Length` is current enrollment — no citizen scan needed.
+
+Shape:
+```jsonc
+"education": {
+  "city": {
+    "schools": 3, "enrolled": 612, "capacity": 700, "utilization": 0.87,
+    "by_tier": {
+      "elementary": { "schools": 1, "enrolled": 139, "capacity": 650, "utilization": 0.21 },
+      "secondary": { "schools": 1, "enrolled": 514, "capacity": 1750, "utilization": 0.29 },
+      "higher_education": { "schools": 1, "enrolled": 94, "capacity": 10000, "utilization": 0.01 }
+    }
+  },
+  "schools": [
+    { "name": "Iries Skene Elementary School", "district": null, "tier": "elementary",
+      "education_level": 1, "enrolled": 139, "capacity": 650, "utilization": 0.21 }
+  ]
+}
+```
+`tier` collapses CS2's school types into the three capacity pools the game itself uses — `elementary`, `secondary` (high school), and `higher_education` (college + university). The mapping is `education_level` 1 → elementary, 2 → secondary, ≥3 → higher_education. The raw `education_level` byte is also emitted per school and is authoritative. `utilization` is `enrolled / capacity` (null when capacity is 0). `services.education` itself is `null` when the city has no schools yet.
+
+**Read `by_tier`, not the city-wide top line, for the "build a school" signal.** Higher-ed assets carry very large capacities (often 10,000), so a city-wide `utilization` mixing them with a near-full elementary reads artificially low. Per-tier utilization is the honest signal — a `secondary` pool at 0.95+ with no other high school is the event. The same `{ enrolled/patients, capacity, utilization }` shape is intended to extend to healthcare and other capacity-bound services beside `education`.
 
 ## The shape
 
@@ -262,7 +292,13 @@ Shape changed from `{ city: { average }, samples, by_district: { name: { average
   },
 
   "services": {
-    // "coverage_gaps": [ { "service": "fire", "district_id": "..." } ]
+    // v0.9 — per-school enrollment vs. capacity + city rollup by tier.
+    // null when the city has no schools yet. See "v0.9" above for the full shape.
+    "education": {
+      "city": { "schools": 3, "enrolled": 612, "capacity": 700, "utilization": 0.87, "by_tier": { } },
+      "schools": [ /* { name, district, tier, education_level, enrolled, capacity, utilization } */ ]
+    }
+    // future: healthcare (patients vs. beds), coverage_gaps, ...
   },
 
   "diff": {
@@ -345,7 +381,7 @@ Shape changed from `{ city: { average }, samples, by_district: { name: { average
 - **`session_id`** = `"session-<unix-ts>"`. Set once when the mod loads (CS2 launch). Every snapshot in the same play session carries the same `session_id`. Changes only when the user fully restarts CS2.
 - **Cross-references** (e.g. `building.district_id`) always use the referenced entity's `id`. Never embed copies.
 
-## What's emitted today (v0.8)
+## What's emitted today (v0.9)
 
 - Metadata header: `schema_version`, `snapshot_id`, `session_id`, timestamps — populated.
 - `city.*` — name, money, happiness, health, tourists, attractiveness, danger, milestone, xp, zones, `churn` (incl. `moved_away_by_reason`), `social`, `budget` (income + residential tax only — see [#28](https://github.com/williamlang/city-storytelling-mod/issues/28)).
@@ -355,7 +391,8 @@ Shape changed from `{ city: { average }, samples, by_district: { name: { average
 - `outside_connections[]`, `water_sources[]` — populated from `CustomName` entities.
 - `district_zones` — per-district building-type counts.
 - `diff.*` — `zones_delta`, `district_zone_deltas`, `building_churn`, `named_buildings`, `outside_connections`, `water_sources`, `ingame_days_elapsed` — populated from second snapshot onward.
-- `demographics`, `trade`, `services` — still null / empty.
+- `services.education` — per-school enrollment vs. capacity + city rollup by tier (v0.9). `null` until the city has a school.
+- `demographics`, `trade`, rest of `services` — still null / empty.
 
 Spatial data (districts, buildings, adjacency) lives in `carto/processed/` chunks — see [the Carto integration issue (#17)](https://github.com/williamlang/city-storytelling-mod/issues/17).
 
