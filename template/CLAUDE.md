@@ -551,14 +551,16 @@ consequences:                           # short bullets, filled in when the even
 ---
 
 > **The ask — <one line of what's at stake>.** Respond in-game by one of:
-> 1. **<option label>** — <the concrete in-game action, plainly>
-> 2. **<option label>** — <the concrete in-game action, plainly>
+> 1. **<option label>** — <the concrete in-game action, plainly> at (x, y)
+> 2. **<option label>** — <the concrete in-game action, plainly> at (x, y)
 > _Decide by <in_world_deadline>; do nothing and it resolves on its own._
 
-Motivating prose: who's pushing what, why now, what's at stake.
+Motivating prose: who's pushing what, why now, what's at stake — and the spot it turns on, written as a clickable (x, y) pin.
 ```
 
 Every open/proposal event leads with that **summary blockquote** so the player can see *what to actually do* at a glance, before the prose. It restates each option's `in_game_action` in one plain line (no mechanism/field talk), plus the deadline. The long prose stays exactly as it is below — the summary is a scannable header on top of it, not a replacement. `historical` events (no options) don't need it.
+
+**Pin the event's site(s) in the body.** A clickable map pin renders only from a `(x, y)` in the body prose (the summary line or the motivating prose) — never from a coordinate sitting in `anchor:` / `in_game_action` frontmatter. So drop each location the event turns on into the body as an `(x, y)`, anchored to a real nearby feature per "Locate canon in space." Default to pinning; most events reference an existing district/road/building that already has a coordinate.
 
 Lifecycle for an `events/*.md` file:
 

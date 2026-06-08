@@ -167,6 +167,10 @@ export function StorytellerToolbar() {
   const [draft, setDraft] = useState("");
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [openModals, setOpenModals] = useState<string[]>([]);
+  // Flash the toolbar icon when a response arrives while the panel is closed,
+  // so the player notices the ghostwriter replied (or an autonomous event
+  // fired) without the window open. Cleared the moment they open it.
+  const [hasUnseen, setHasUnseen] = useState(false);
 
   // Local "pending" state for the Refresh map button. The C# cartoExporting
   // binding round-trips through Coherent UI, but the main thread blocks
@@ -265,17 +269,47 @@ export function StorytellerToolbar() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Pin the chat to the bottom on new messages AND whenever the panel opens
   // (the player expects to land on the latest turn, not wherever they last
-  // left the scroll). Deferred a frame so Cohtml has laid the rows out and
-  // scrollHeight is final before we jump.
+  // left the scroll). A single requestAnimationFrame isn't enough: Cohtml lays
+  // the freshly-mounted rows out over several frames, so the first frame reads
+  // a stale (short) scrollHeight and the jump lands mid-history. Instead we
+  // re-pin every frame until scrollHeight stops growing (layout settled) or we
+  // hit a frame cap — robust to Cohtml's deferred layout.
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
     if (!el) return;
-    const raf = requestAnimationFrame(() => {
+    let raf = 0;
+    let tries = 0;
+    let lastH = -1;
+    const pin = () => {
       el.scrollTop = el.scrollHeight;
-    });
+      tries++;
+      if (el.scrollHeight !== lastH && tries < 30) {
+        lastH = el.scrollHeight;
+        raf = requestAnimationFrame(pin);
+      }
+    };
+    raf = requestAnimationFrame(pin);
     return () => cancelAnimationFrame(raf);
   }, [open, messages.length]);
+
+  // Mark an unseen response when the message count grows with an assistant turn
+  // while the panel is closed. Tracks the prior count so a clear (count drops)
+  // or our own open doesn't trip it.
+  const prevMsgLenRef = useRef(messages.length);
+  useEffect(() => {
+    const prev = prevMsgLenRef.current;
+    prevMsgLenRef.current = messages.length;
+    if (!open && messages.length > prev) {
+      const last = messages[messages.length - 1];
+      if (last && last.role === "assistant") setHasUnseen(true);
+    }
+  }, [messages, open]);
+
+  // Opening the panel clears the unseen flag (they've now seen it).
+  useEffect(() => {
+    if (open) setHasUnseen(false);
+  }, [open]);
 
   // Safety net: if neither the C# binding flip nor the minimum-hold timer
   // clears refreshPending, drop it after 6 s. Catches the rare error path
@@ -399,7 +433,11 @@ export function StorytellerToolbar() {
         onClick={() => setOpen((v) => !v)}
         aria-label="Ghostwriter"
       >
-        <img src={storytellerIcon} className={styles.toolbarIcon} alt="" />
+        <img
+          src={storytellerIcon}
+          className={`${styles.toolbarIcon} ${hasUnseen ? styles.toolbarIconFlash : ""}`}
+          alt=""
+        />
       </Button>
 
       {open && (

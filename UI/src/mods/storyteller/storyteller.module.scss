@@ -5,6 +5,18 @@
   height: 40rem;
 }
 
+// Flashes the toolbar icon when a response arrived while the panel was closed
+// (driven by `hasUnseen` in StorytellerToolbar). Opacity pulse — Cohtml
+// animates opacity reliably, same pattern as the carto/refresh pulses below.
+.toolbarIconFlash {
+  animation: ghostUnseenPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes ghostUnseenPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .panel {
   // Drops below the toolbar icon row. Fixed position so it floats above the
   // game world; the exact top offset matches the toolbar row height plus a gap.

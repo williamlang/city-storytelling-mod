@@ -41,15 +41,16 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.2.0" />
+  <ModVersion Value="0.2.1" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.2.0** &#8212; clearer events, and honest noise complaints.
+**0.2.1** &#8212; small fixes you'll feel.
 
-* **Every event opens with the ask.** Story events now lead with a short summary &#8212; what's at stake and the concrete in-game moves you can make &#8212; right above the full write-up, so you can see what to do at a glance without reading the whole thing first. The prose is still all there underneath.
-* **Noise stories stop blaming the wrong building.** The ghostwriter now reads the noise your *homes* actually experience, separately from how loud a factory is at the factory, and only ties a noise complaint to a source that's genuinely near the affected houses. No more "the mill across town is tormenting residents" when it isn't.
+* **The toolbar icon flashes when a reply is waiting.** If the ghostwriter answers &#8212; or an automatic event fires &#8212; while the panel is closed, the icon pulses until you open it.
+* **The chat lands on the latest message when you open the panel,** instead of dropping you into the middle of an old conversation.
+* **Events pin their locations again.** Story events had stopped dropping clickable map pins; they're back, so you can click straight to where something's happening.
   </ChangeLog>
 </Publish>
