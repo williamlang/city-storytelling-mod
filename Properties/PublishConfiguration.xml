@@ -40,12 +40,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   </LongDescription>
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
-  <AccessLevel Value="Unlisted" />
+  <AccessLevel Value="Public" />
   <ModVersion Value="0.1.9" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
-  <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1512534856574173314/1512534856574173314" />
+  <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
 **0.1.9** &#8212; the ghostwriter names your civic buildings, and they show up in the game.
 
