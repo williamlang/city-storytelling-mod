@@ -138,6 +138,16 @@ Shape:
 
 **Write path — first time the mod mutates game state.** The agent gives the `has_custom_name: false` buildings real names that appear *in-world*. It writes `naming-requests.json` at the city root — a JSON array of `{ "id", "name" }` keyed by `civic_buildings[].id` — and the mod, on its ~10s clock heartbeat, applies each via the game's own `Game.UI.NameSystem.SetCustomName` (adds the serializable `CustomName` component, so it persists across save/load, same as a manual player rename), writes `naming-results.json` (per-id `applied`/`skipped`/`error`), and deletes the request file. Ids are resolved against the *live* civic-building set, so only real civic buildings can be renamed and a stale id (entity index+version isn't stable across save/load) reports `skipped` rather than misfiring. Blank name clears a name.
 
+### `pollution` — residential split + located noise (v0.9)
+
+The original per-district pollution average sampled the grid value *at every building*, which is the ambient level **at that building** — so an industrial district read enormous because the plant is loud at the plant, and the storyteller mistook source self-noise for resident suffering and blamed distant buildings. v0.9 makes attribution honest, additively (existing flat `air/ground/noise` keys unchanged):
+
+- **`residential` sub-block** on `city` and each `by_district[d]` — the same averages over `ResidentialProperty` buildings only, i.e. what homes actually experience. `null` where no residential was sampled. This is the real NIMBY signal; the top-level average is not.
+- **`noise_hotspots`** — top-8 residential buildings by experienced noise (the affected homes), each with name, district, and recentered `(x, y)`.
+- **`noise_sources`** — top-8 *non-residential* buildings by ambient noise (the likely producers), each with name, `type`, district, and `(x, y)`.
+
+Coordinates are converted game-world → recentered frame (`MapCoords` inverse) so they pin like carto-chunk coordinates. The agent is instructed to write a noise story only when a source's `(x, y)` is near a hotspot's — proximity is checkable, so it stops blaming a loud building that's nowhere near housing.
+
 ## The shape
 
 ```json
@@ -211,13 +221,22 @@ Shape:
     }
   },
 
-  "pollution": {                     // v0.4 — sampled at every building position, binned by district
-    "city": { "air": 12.3, "ground": 4.1, "noise": 21.7 },
+  "pollution": {                     // v0.4 sampled at every building; v0.9 added residential split + located noise hotspots/sources
+    // top-level air/ground/noise = average over ALL buildings (includes the
+    // polluters' own footprints — an industrial district reads huge because the
+    // plant is loud AT the plant). `residential` = same averages over residential
+    // buildings only = what homes actually experience (the real NIMBY signal;
+    // null if no residential sampled).
+    "city": { "air": 12.3, "ground": 4.1, "noise": 21.7, "residential": { "air": 6.0, "ground": 1.2, "noise": 14.0, "samples": 180 } },
     "samples": 247,                  // total buildings sampled across the city
     "by_district": {
-      "Pine Quarter": { "air": 8.2, "ground": 2.4, "noise": 18.1, "samples": 89 },
-      "The North Yards": { "air": 31.4, "ground": 18.6, "noise": 42.0, "samples": 56 }
-    }
+      "Pine Quarter": { "air": 8.2, "ground": 2.4, "noise": 18.1, "samples": 89, "residential": { "air": 7.1, "ground": 2.0, "noise": 16.5, "samples": 71 } },
+      "The North Yards": { "air": 31.4, "ground": 18.6, "noise": 42.0, "samples": 56, "residential": null }
+    },
+    // v0.9 — worst-affected homes and loudest producers, each with recentered
+    // (x, y) so the agent can proximity-check before blaming a source.
+    "noise_hotspots": [ { "name": "...", "district": "Pine Quarter", "noise": 220, "x": -3894, "y": -2034 } ],
+    "noise_sources":  [ { "name": "Inkster Mass Timber Ltd.", "type": "industrial", "district": "...", "noise": 13361, "x": 1100, "y": -3050 } ]
   },
 
   "land_value": {                    // v0.6 — LandValueCell sampled at building positions, binned by district

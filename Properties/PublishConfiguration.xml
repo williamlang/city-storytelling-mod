@@ -41,15 +41,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.1.9" />
+  <ModVersion Value="0.2.0" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.1.9** &#8212; the ghostwriter names your civic buildings, and they show up in the game.
+**0.2.0** &#8212; clearer events, and honest noise complaints.
 
-* **Named civic buildings, written into the world.** When a new fire station, school, clinic, or park goes up without a name, the ghostwriter gives it a grounded one and writes it straight onto the building in-game &#8212; the same as if you'd renamed it yourself. Most are flavor; some plant or pay off the story &#8212; a school named for someone who matters, a park the residents fought for.
-* **School counts only count real schools.** Higher education you reach by commuting to neighbouring towns was being tallied as if your city had three 10,000-seat universities, drowning out the real numbers. Now enrollment and capacity reflect only the schools actually standing on your map.
+* **Every event opens with the ask.** Story events now lead with a short summary &#8212; what's at stake and the concrete in-game moves you can make &#8212; right above the full write-up, so you can see what to do at a glance without reading the whole thing first. The prose is still all there underneath.
+* **Noise stories stop blaming the wrong building.** The ghostwriter now reads the noise your *homes* actually experience, separately from how loud a factory is at the factory, and only ties a noise complaint to a source that's genuinely near the affected houses. No more "the mill across town is tormenting residents" when it isn't.
   </ChangeLog>
 </Publish>

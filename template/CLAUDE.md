@@ -246,9 +246,18 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               city.money across snapshots to compute net
                               flow per period.
                 pollution   — per-district + city-wide air / ground / noise
-                              averages, sampled at every building. NIMBY
-                              fights, health scandals, "the Yards smell
-                              like a refinery" all anchor here.
+                              averages, sampled at every building. Each district
+                              (and the city) also carries a `residential` sub-
+                              block: the same averages over RESIDENTIAL buildings
+                              only — what homes actually experience, vs. the
+                              top-level number which includes the polluters' own
+                              loud/dirty footprints. Plus `noise_hotspots` (worst-
+                              affected homes, with x/y) and `noise_sources`
+                              (loudest non-residential buildings, with x/y + type).
+                              NIMBY fights, health scandals, "the Yards smell
+                              like a refinery" anchor here — but on the
+                              `residential` numbers and a source-near-hotspot
+                              proximity check, not the raw district average.
                 land_value  — per-district + city-wide LandValue averages.
                               The spatial expression of money: pair with
                               pollution to write "the bottom fell out of
@@ -396,7 +405,8 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - "What's the city's current state?" → latest `snapshots/*.json` (`city.*`, `demographics`).
 - "What changed since last play?" → `diff` block in the latest snapshot.
 - "Why are people leaving?" → `city.churn.moved_away_by_reason`.
-- "How rough is this neighborhood?" → `pollution.by_district[<name>]` + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
+- "How rough is this neighborhood?" → `pollution.by_district[<name>].residential` (what homes feel, not the raw district avg) + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
+- "Is anyone actually suffering from noise / who's making it?" → `pollution.noise_hotspots` (affected homes, x/y) + `pollution.noise_sources` (loudest producers, x/y); only a story when a source sits near a hotspot.
 - "Give me a named resident in <district>" → `citizens_sample.citizens` filtered by `home_district`.
 - "Is the school overcrowded? / does the city need another school?" → `services.education` (per-school `utilization`, and `city.by_tier` for whole tiers with no seats). Never invent enrollment — if `services.education` is null, the city has no school yet.
 - "What does the terrain look like?" → `carto/processed/elevation.md`.
@@ -420,7 +430,8 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - `city.churn.moved_away_by_reason` — *why* people are leaving (no_money / not_happy / no_suitable_property / no_adults, plus tourist variants). High `not_happy` is a "the city is hostile" story; high `no_money` is a "can't afford to live here" story; high `no_suitable_property` is a housing-shortage story. Each maps to a different character agenda.
 - `city.social` — homeless_count, unemployed_count, crime_count, crime_rate. The headline social-pressure dashboard. Cross-reference against `pollution.by_district` and `crime.by_district` to localize the pressure to a place worth writing about.
 - `city.budget` — income_daily, tax_residential. Combine with `city.money` across two snapshots to compute net cash flow per in-world period; a city running deficits or hoarding surplus is a different political climate.
-- `pollution.by_district` — per-district air / ground / noise. The agent's NIMBY-fight engine. A district with `noise: 400+` next to one with `noise: <50` is a story about a highway, an industrial neighbor, or a flight path — name the friction and write the residents complaining about it.
+- `pollution.by_district` — per-district air / ground / noise. The agent's NIMBY-fight engine — but read it correctly: the top-level `air`/`ground`/`noise` is the average *at every building in the district, including the polluters themselves*. An industrial district reads enormous because the plant is loud/dirty **at the plant** — that is the source's own level, NOT what anyone hears at home. **For a NIMBY story, read `by_district[d].residential`** — the average at *residential* buildings only, i.e. what homes actually experience. A noise complaint is real only when `residential.noise` is elevated; a loud industrial district with no nearby homes is not a story about suffering residents.
+  - **Don't blame a building you haven't proximity-checked.** `pollution.noise_hotspots` lists the worst-affected *homes* (residential, with `(x, y)`); `pollution.noise_sources` lists the loudest *non-residential* buildings (the likely producers, with `(x, y)` and `type`). Only write "the mill's noise is hurting the homes on X" when a source's coordinate is genuinely **near** a hotspot's coordinate. If the loudest source is far from every hotspot, there is no victim — don't invent one. Pin both the source and the affected homes from these coordinates.
 - `land_value.by_district` — per-district averages. "This is where the money lives" + "the bottom fell out of this district" both live here. Cross-reference against pollution (pollution drags land value down — the engine's own update job subtracts pollution penalties).
 - `crime.by_district` — per-district active-criminal counts. Districts with no active criminals are omitted; districts with elevated counts vs. their population are the "rough neighborhoods" the storyteller should be writing about. Pair with `pollution.by_district` and low `land_value.by_district` to spot the classic neglected-quarter triple.
 - `citizens_sample.citizens` — the candidate-character pool. When the story needs a named face (a homeowner objecting to a rezoning, a small-business owner in a struggling district, a teenager about to leave town), pluck one whose attributes fit: matching home_district, matching workplace, matching age band, matching education. Always-included `followed: true` citizens are the player's explicit picks — anchor canon around them first.
@@ -539,8 +550,15 @@ consequences:                           # short bullets, filled in when the even
   - ...
 ---
 
+> **The ask — <one line of what's at stake>.** Respond in-game by one of:
+> 1. **<option label>** — <the concrete in-game action, plainly>
+> 2. **<option label>** — <the concrete in-game action, plainly>
+> _Decide by <in_world_deadline>; do nothing and it resolves on its own._
+
 Motivating prose: who's pushing what, why now, what's at stake.
 ```
+
+Every open/proposal event leads with that **summary blockquote** so the player can see *what to actually do* at a glance, before the prose. It restates each option's `in_game_action` in one plain line (no mechanism/field talk), plus the deadline. The long prose stays exactly as it is below — the summary is a scannable header on top of it, not a replacement. `historical` events (no options) don't need it.
 
 Lifecycle for an `events/*.md` file:
 

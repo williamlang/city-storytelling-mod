@@ -1490,18 +1490,29 @@ namespace CityStoryMod.Systems
             return (added, removed, changed);
         }
 
-        // Samples pollution at every building position and bins by district.
+        // How many located noise hotspots / sources to emit.
+        const int PollutionTopN = 8;
+
+        // Samples pollution at every building position and bins by district,
+        // split residential-vs-all, plus located noise hotspots/sources.
         // Returns null if pollution systems weren't resolved or their grids
         // haven't been allocated yet (fresh save before sim has run any
-        // pollution updates). City-wide averages are computed across every
-        // sampled building (including ones with no district). Per-district
-        // averages cover only buildings whose CurrentDistrict resolved.
+        // pollution updates).
         //
-        // Why sample at buildings: pollution lives on an Nx N cell grid in
-        // CS2's coordinate system. Mapping cells to districts directly would
-        // need spatial polygon containment against district shapes — the
-        // building-position proxy is much cheaper and aligns sampling weight
-        // with where people actually live and work.
+        // Why sample at buildings: pollution lives on an N×N cell grid in CS2's
+        // coordinate system. Mapping cells to districts directly would need
+        // spatial polygon containment against district shapes — the building-
+        // position proxy is much cheaper and aligns sampling weight with where
+        // people actually live and work.
+        //
+        // The residential split matters for noise especially: the grid value AT
+        // a building is the ambient noise there, so an industrial district reads
+        // huge because the plant is loud *at the plant* — not because anyone
+        // hears it at home. `residential` isolates what homes actually
+        // experience (the real NIMBY signal); `noise_sources` lists the loudest
+        // non-residential buildings with coordinates so the agent can check
+        // whether a source is genuinely near the affected homes (`noise_hotspots`)
+        // before pinning the blame on it.
         object CollectPollution(Dictionary<Entity, string> districtNameByEntity)
         {
             if (_airPollutionSystem == null || _groundPollutionSystem == null || _noisePollutionSystem == null
@@ -1525,9 +1536,18 @@ namespace CityStoryMod.Systems
             if (!airMap.IsCreated || !groundMap.IsCreated || !noiseMap.IsCreated) return null;
             if (airMap.Length == 0 || groundMap.Length == 0 || noiseMap.Length == 0) return null;
 
-            long airCitySum = 0, groundCitySum = 0, noiseCitySum = 0;
-            int  citySamples = 0;
-            var districtSums = new Dictionary<string, (long air, long ground, long noise, int samples)>();
+            long cityAirAll = 0, cityGroundAll = 0, cityNoiseAll = 0; int cityAll = 0;
+            long cityAirRes = 0, cityGroundRes = 0, cityNoiseRes = 0; int cityRes = 0;
+            var distAll = new Dictionary<string, (long air, long ground, long noise, int n)>();
+            var distRes = new Dictionary<string, (long air, long ground, long noise, int n)>();
+            // Per-building noise records for located hotspots (residential
+            // receivers — the homes that actually hear it) and sources (loudest
+            // non-residential — the likely producers). Coordinates are converted
+            // from game-world to the storyteller's recentered frame (MapCoords
+            // inverse: recentered = world * scale) so they drop as clickable pins
+            // like the carto chunks, letting the agent verify source↔home
+            // proximity instead of blaming a distant loud building.
+            var recs = new List<(Entity e, int noise, bool res, int x, int y, string district)>();
 
             using var entities = _allBuildingsQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < entities.Length; i++)
@@ -1539,11 +1559,10 @@ namespace CityStoryMod.Systems
                 int air    = AirPollutionSystem.GetPollution(pos, airMap).m_Pollution;
                 int ground = GroundPollutionSystem.GetPollution(pos, groundMap).m_Pollution;
                 int noise  = NoisePollutionSystem.GetPollution(pos, noiseMap).m_Pollution;
+                bool res   = EntityManager.HasComponent<ResidentialProperty>(b);
 
-                airCitySum += air;
-                groundCitySum += ground;
-                noiseCitySum += noise;
-                citySamples++;
+                cityAirAll += air; cityGroundAll += ground; cityNoiseAll += noise; cityAll++;
+                if (res) { cityAirRes += air; cityGroundRes += ground; cityNoiseRes += noise; cityRes++; }
 
                 string districtName = null;
                 if (EntityManager.HasComponent<CurrentDistrict>(b))
@@ -1551,38 +1570,76 @@ namespace CityStoryMod.Systems
                     var d = EntityManager.GetComponentData<CurrentDistrict>(b).m_District;
                     if (d != Entity.Null) districtNameByEntity.TryGetValue(d, out districtName);
                 }
-                if (districtName == null) continue;
 
-                districtSums.TryGetValue(districtName, out var s);
-                s.air += air; s.ground += ground; s.noise += noise; s.samples++;
-                districtSums[districtName] = s;
+                int rx = (int)Math.Round(pos.x * MapCoords.XScale);
+                int ry = (int)Math.Round(pos.z * MapCoords.ZScale);
+                recs.Add((b, noise, res, rx, ry, districtName));
+
+                if (districtName == null) continue;
+                distAll.TryGetValue(districtName, out var sa);
+                sa.air += air; sa.ground += ground; sa.noise += noise; sa.n++;
+                distAll[districtName] = sa;
+                if (res)
+                {
+                    distRes.TryGetValue(districtName, out var sr);
+                    sr.air += air; sr.ground += ground; sr.noise += noise; sr.n++;
+                    distRes[districtName] = sr;
+                }
             }
 
-            if (citySamples == 0) return null;
+            if (cityAll == 0) return null;
+
+            // Local helper: average a sum-triple over n samples into a JSON block.
+            object Avg3(long air, long ground, long noise, int n) => new
+            {
+                air = Math.Round((double)air / n, 2),
+                ground = Math.Round((double)ground / n, 2),
+                noise = Math.Round((double)noise / n, 2),
+                samples = n,
+            };
 
             var byDistrict = new Dictionary<string, object>();
-            foreach (var kv in districtSums)
+            foreach (var kv in distAll)
             {
-                var s = kv.Value;
+                var a = kv.Value;
+                object resBlock = (distRes.TryGetValue(kv.Key, out var r) && r.n > 0)
+                    ? Avg3(r.air, r.ground, r.noise, r.n)
+                    : null;
                 byDistrict[kv.Key] = new
                 {
-                    air = Math.Round((double)s.air / s.samples, 2),
-                    ground = Math.Round((double)s.ground / s.samples, 2),
-                    noise = Math.Round((double)s.noise / s.samples, 2),
-                    samples = s.samples,
+                    air = Math.Round((double)a.air / a.n, 2),
+                    ground = Math.Round((double)a.ground / a.n, 2),
+                    noise = Math.Round((double)a.noise / a.n, 2),
+                    samples = a.n,
+                    residential = resBlock,   // what homes here actually experience; null if no residential
                 };
             }
+
+            // Located noise hotspots (residential receivers) and sources (loudest
+            // non-residential). The agent writes a noise NIMBY story only when a
+            // source sits near a hotspot — checkable from these coordinates.
+            var noiseHotspots = recs.Where(r => r.res)
+                .OrderByDescending(r => r.noise).Take(PollutionTopN)
+                .Select(r => new { name = _nameSystem.GetRenderedLabelName(r.e), district = r.district, noise = r.noise, x = r.x, y = r.y })
+                .ToList();
+            var noiseSources = recs.Where(r => !r.res)
+                .OrderByDescending(r => r.noise).Take(PollutionTopN)
+                .Select(r => new { name = _nameSystem.GetRenderedLabelName(r.e), type = BuildingTypeFromMarkers(r.e) ?? "other", district = r.district, noise = r.noise, x = r.x, y = r.y })
+                .ToList();
 
             return new
             {
                 city = new
                 {
-                    air = Math.Round((double)airCitySum / citySamples, 2),
-                    ground = Math.Round((double)groundCitySum / citySamples, 2),
-                    noise = Math.Round((double)noiseCitySum / citySamples, 2),
+                    air = Math.Round((double)cityAirAll / cityAll, 2),
+                    ground = Math.Round((double)cityGroundAll / cityAll, 2),
+                    noise = Math.Round((double)cityNoiseAll / cityAll, 2),
+                    residential = cityRes > 0 ? Avg3(cityAirRes, cityGroundRes, cityNoiseRes, cityRes) : null,
                 },
-                samples = citySamples,
+                samples = cityAll,
                 by_district = byDistrict,
+                noise_hotspots = noiseHotspots,
+                noise_sources = noiseSources,
             };
         }
 
