@@ -148,6 +148,12 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
     <div
       ref={trackRef}
       className={styles.scrollIndicatorTrack}
+      // Background set inline, not via the SCSS class: Cohtml drops the
+      // `background` declaration on these two elements specifically (verified via
+      // CDP — it computes transparent, while the same shorthand renders fine
+      // elsewhere), leaving the scrollbar invisible. An inline style is honored
+      // reliably.
+      style={{ backgroundColor: "rgba(255, 255, 255, 0.08)" }}
       onMouseDown={onTrackDown}
     >
       <div
@@ -155,6 +161,7 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
         style={{
           top: `${state.topPct}%`,
           height: `${state.heightPct}%`,
+          backgroundColor: "rgba(255, 255, 255, 0.5)",
         }}
         onMouseDown={onThumbDown}
       />
@@ -279,15 +286,19 @@ export function StorytellerToolbar() {
     const el = scrollRef.current;
     if (!el) return;
     let raf = 0;
-    let tries = 0;
-    let lastH = -1;
+    let frames = 0;
     const pin = () => {
-      el.scrollTop = el.scrollHeight;
-      tries++;
-      if (el.scrollHeight !== lastH && tries < 30) {
-        lastH = el.scrollHeight;
-        raf = requestAnimationFrame(pin);
-      }
+      // Two Cohtml quirks, both verified via CDP:
+      //  1. scrollTop is NOT clamped to the max, so `= scrollHeight` overshoots
+      //     a full viewport (lands clientHeight px past the last row). The real
+      //     bottom is scrollHeight - clientHeight.
+      //  2. Rows lay out over several frames AND scrollHeight sits at its
+      //     pre-layout value for a frame or two first — so a "stop when
+      //     scrollHeight stops changing" loop concludes "settled" at the top
+      //     before the rows ever get their height. Instead just re-pin every
+      //     frame for a fixed window so we catch the layout once it lands.
+      el.scrollTop = el.scrollHeight - el.clientHeight;
+      if (++frames < 40) raf = requestAnimationFrame(pin);
     };
     raf = requestAnimationFrame(pin);
     return () => cancelAnimationFrame(raf);
