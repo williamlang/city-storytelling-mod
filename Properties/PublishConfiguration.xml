@@ -41,16 +41,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.2.1" />
+  <ModVersion Value="0.2.2" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.2.1** &#8212; small fixes you'll feel.
+**0.2.2** &#8212; the chat window behaves.
 
-* **The toolbar icon flashes when a reply is waiting.** If the ghostwriter answers &#8212; or an automatic event fires &#8212; while the panel is closed, the icon pulses until you open it.
-* **The chat lands on the latest message when you open the panel,** instead of dropping you into the middle of an old conversation.
-* **Events pin their locations again.** Story events had stopped dropping clickable map pins; they're back, so you can click straight to where something's happening.
+* **Opening the panel lands on the latest message.** The previous attempt at this didn't fully take &#8212; it does now, so you no longer open into the middle of an old conversation.
+* **The chat scrollbar is visible.** A draggable thumb shows on the right edge of the chat, so you can see where you are and scroll back through the history.
   </ChangeLog>
 </Publish>
