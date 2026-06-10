@@ -42,6 +42,23 @@ export function seedSampleCity() {
   bindValue("CityStoryMod", "tokenSummary", "in 4823 • out 1102 • cache r12300/w800");
   bindValue("CityStoryMod", "lastError", "");
 
+  // Quickstart wizard preview. `quickstartAvailable: true` shows the warm-
+  // amber banner inside the panel + flashes the toolbar icon; click "Start"
+  // to open the founding modal. Set false for a normal (bootstrapped) city.
+  //
+  // To preview the wizard's non-form phases, edit these and reload:
+  //   isRunning: true            → the "founding your city…" progress state
+  //   setupNeeded: true          → the provider prerequisite gate
+  //   cartoExporting: true       → the "mapping your terrain…" gate
+  //   wizardDone: '{...}'        → the result card (see shape below)
+  bindValue("CityStoryMod", "quickstartAvailable", true);
+  bindValue("CityStoryMod", "wizardDone", "");
+  // Example result-card payload:
+  // bindValue("CityStoryMod", "wizardDone", JSON.stringify({
+  //   city_name: "Selkirk Falls", region: "North America",
+  //   founded: "1887", premise: "A timber port reinventing itself after the mills closed.",
+  // }));
+
   // Carto-bridge state. Seed `cartoAvailable=true` so the Refresh map button
   // renders in the harness; toggle `cartoExporting` here to preview the
   // disabled/Updating state.

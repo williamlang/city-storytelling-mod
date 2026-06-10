@@ -19,10 +19,13 @@ import {
   nextEventAtUtcSecBinding,
   activeEventsPausedBinding,
   openEventsBinding,
+  quickstartAvailableBinding,
   submitPrompt,
   cancelRun,
   refreshGeography,
   setActiveEventsEnabled,
+  startQuickstart,
+  dismissQuickstart,
 } from "./bindings";
 import type { ChatMessage, SlashCommand, CanonTree, CanonEntry, OpenEvent } from "./bindings";
 import { ChatRow } from "./ChatRow";
@@ -30,6 +33,7 @@ import { CommandMenu } from "./CommandMenu";
 import { CanonBrowser } from "./CanonBrowser";
 import { FileModal } from "./FileModal";
 import { OpenEventsInbox } from "./OpenEventsInbox";
+import { QuickstartWizard } from "./QuickstartWizard";
 
 // Top-level Storyteller entry. The toolbar icon (floating variant matches
 // CS2's other top-left tool mods) toggles a draggable panel with:
@@ -178,6 +182,10 @@ export function StorytellerToolbar() {
   // so the player notices the ghostwriter replied (or an autonomous event
   // fired) without the window open. Cleared the moment they open it.
   const [hasUnseen, setHasUnseen] = useState(false);
+  // Whether the quickstart founding modal is open. Driven by the banner's
+  // "Start" button; the warm-amber icon flash + banner appear whenever the
+  // city is fresh (quickstartAvailable binding).
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Local "pending" state for the Refresh map button. The C# cartoExporting
   // binding round-trips through Coherent UI, but the main thread blocks
@@ -209,6 +217,7 @@ export function StorytellerToolbar() {
   const activeEventsEnabled = useValue(activeEventsEnabledBinding);
   const nextEventAtUtcSec = useValue(nextEventAtUtcSecBinding);
   const activeEventsPaused = useValue(activeEventsPausedBinding);
+  const quickstartAvailable = useValue(quickstartAvailableBinding);
 
   // 1Hz tick so the countdown re-renders without the C# side thrashing
   // the binding. nextEventAtUtcSec only changes when the deadline
@@ -446,7 +455,9 @@ export function StorytellerToolbar() {
       >
         <img
           src={storytellerIcon}
-          className={`${styles.toolbarIcon} ${hasUnseen ? styles.toolbarIconFlash : ""}`}
+          className={`${styles.toolbarIcon} ${hasUnseen ? styles.toolbarIconFlash : ""} ${
+            quickstartAvailable && !hasUnseen ? styles.toolbarIconQuickstart : ""
+          }`}
           alt=""
         />
       </Button>
@@ -478,6 +489,28 @@ export function StorytellerToolbar() {
                 Open Options → Ghostwriter, choose a provider, and paste an API
                 key (or set up the Claude Code CLI). Prompts won&rsquo;t run until
                 a provider is configured.
+              </div>
+            </div>
+          )}
+
+          {quickstartAvailable && !setupNeeded && !wizardOpen && (
+            <div className={styles.quickstartBanner}>
+              <div className={styles.quickstartBannerTitle}>New city — found its story</div>
+              <div className={styles.quickstartBannerRow}>
+                <button
+                  type="button"
+                  className={styles.quickstartStart}
+                  onClick={() => { startQuickstart(); setWizardOpen(true); }}
+                >
+                  Start
+                </button>
+                <button
+                  type="button"
+                  className={styles.quickstartLater}
+                  onClick={() => dismissQuickstart()}
+                >
+                  Later
+                </button>
               </div>
             </div>
           )}
@@ -618,6 +651,8 @@ export function StorytellerToolbar() {
           onOpenFile={openFile}
         />
       ))}
+
+      {wizardOpen && <QuickstartWizard onClose={() => setWizardOpen(false)} />}
     </>
   );
 }

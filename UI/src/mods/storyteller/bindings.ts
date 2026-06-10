@@ -28,6 +28,25 @@ export const nextEventAtUtcSecBinding = bindValue<number>(GROUP, "nextEventAtUtc
 // "remaining" was at the pause→true edge, and skips its 1Hz tick.
 export const activeEventsPausedBinding = bindValue<boolean>(GROUP, "activeEventsPaused", false);
 
+// True on a fresh, un-bootstrapped city detected on a save-load edge (no
+// canon yet). Drives the quickstart banner inside the panel and the warm
+// gold/amber toolbar-icon flash. Cleared when founding completes
+// (bootstrapped flips) or the player dismisses for the session.
+export const quickstartAvailableBinding = bindValue<boolean>(GROUP, "quickstartAvailable", false);
+
+// JSON of the founding summary the agent reports via the wizard_done tool at
+// the end of a one-shot quickstart founding: { city_name, region, founded,
+// premise }. Empty string until founding completes; drives the wizard's
+// result card.
+export const wizardDoneBinding = bindValue<string>(GROUP, "wizardDone", "");
+
+export interface WizardDone {
+  city_name: string;
+  region: string;
+  founded?: string;
+  premise: string;
+}
+
 // JSON-serialized list of currently-open story events (status: open in
 // frontmatter), sorted by deadline ascending. Drives the inbox strip
 // rendered above the chat/canon body. Refreshes on the same canon-
@@ -99,6 +118,25 @@ export function setActiveEventsEnabled(enabled: boolean) {
 // space and hands off to CameraNavSystem.
 export function mapGoto(x: number, y: number) {
   trigger(GROUP, "mapGoto", `${x},${y}`);
+}
+
+// Quickstart wizard triggers. startQuickstart signals C# the player opened
+// the founding flow (a hook point for ensuring a fresh snapshot/Carto is
+// ready); dismissQuickstart hides the banner/flash for this session.
+export function startQuickstart() {
+  trigger(GROUP, "startQuickstart");
+}
+
+export function dismissQuickstart() {
+  trigger(GROUP, "dismissQuickstart");
+}
+
+// Submit the founding config as JSON. C# wraps it into a <<QUICKSTART_CONFIG>>
+// block and runs /new-city in a single non-interactive pass (see
+// docs/quickstart-wizard.md §4). Sent as one JSON string — mirrors
+// submitPrompt and sidesteps CS2's multi-arg binding limits.
+export function foundCity(configJson: string) {
+  trigger(GROUP, "foundCity", configJson);
 }
 
 // Pipe a diagnostic message to the C# mod log. Coherent UI has no
