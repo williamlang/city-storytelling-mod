@@ -247,7 +247,7 @@ Form details:
 - **Founding questions** (§7.1) — each renders as a radio group / dropdown with a recommended default pre-selected, so the player can one-click through. Layout follows §7.1's grouping: **Core** (region, name, tone, focus) always visible; **Story** and **Settings/behavior** tucked behind an **Advanced / optional** expander, collapsed by default. Narrative focus is two checkboxes (Citizens & families · Civic & political), both pre-checked, with a guard that keeps at least one checked. "Named character" reveals a conditional name field.
 - One primary **Found my city** button submits everything (Core + whatever's in Advanced) in a single call.
 
-No stepped Back/Next, no per-step thinking states — it's one form and one wait. The default path is: accept the Core defaults → *Found my city*; power users open Advanced to tune the rest.
+No stepped Back/Next, no per-step thinking states — it's one form and one wait. The default path is: accept the Core defaults → *Found my city*; power users open Advanced to tune the rest. The same form is reused post-founding as a **Story Settings editor** to change any of these choices later (§11).
 
 ### 7.1 Founding question set (being decided)
 
@@ -376,12 +376,47 @@ States: `Idle → Signaled → (PrereqProvider | PrereqSpatial) → ConfigForm �
 2. **Config protocol.** `wizard_done` schema/executor + `wizardDone` binding; `new-city.md` `<<QUICKSTART_CONFIG>>` branch. Testable by submitting `/new-city` with a hand-written config block and watching it generate non-interactively + the binding payload.
 3. **Native form + result.** `QuickstartWizard.tsx` config form, `foundCity` trigger, result card. Full one-click founding.
 4. **Signal layer.** Fresh-city C# binding, warm gold/amber flash, banner, dismiss guard.
+5. **Story Settings editor (in v1, §11).** Reuse the form in edit mode — per-city `settings.json` writer, gear button / `/settings` entry, read-current-state, Save (no generation), and the storyteller-reconcile turn for canon-field changes.
 
 Each phase is independently testable in-game.
 
 ---
 
-## 11. Open questions for William
+## 11. Changing founding choices after the fact
+
+Founding choices are not one-way. Every field set in the wizard can be changed later, and where it's changed depends on which of the two homes the value lives in:
+
+- **`settings.json` (behavior / disclosure):** content maturity, secrets visibility, level-up storylines, cast density, storyteller proactivity, git versioning, integrations. These are preferences — freely changeable any time, take effect on the next snapshot/scan, **no LLM call**.
+- **`canon/*.md` (story-shaping):** region (`city.md`), narrative tone / focus / player's-place / real-world-refs (`tone.md`), era (`era.md`). Changing these has narrative consequences, so they're changeable but **storyteller-aware** — the city is not re-founded (`bootstrapped` stays true) and existing canon is **not** retconned; the storyteller reconciles *forward*.
+
+### Three surfaces
+
+1. **Story Settings editor — recommended primary surface.** The wizard's config form (§7), reused in a post-bootstrap **edit mode**: opened from a gear affordance in the Ghostwriter panel (or a `/settings` command), pre-populated from the current `settings.json` + canon frontmatter, with **Save** as the primary action instead of "Found my city" and **no generation call**.
+   - `settings.json` fields are written directly on Save — instant.
+   - canon story-shaping fields: on Save the frontmatter is written directly, and a short storyteller turn is queued to *acknowledge and adjust going forward* (it does not rewrite history). The editor's copy flags region/tone changes as significant.
+   - This reuses the exact component already built — the difference is the data source (read current state vs. defaults), the button label, and skipping the one-shot generation.
+
+2. **Chat — always available, no new code.** The natural-language path: "switch the tone to noir," "make secrets visible," "stop proposing events on your own," "lean more civic but keep the family thread." The storyteller edits the right file. Best for nuanced changes the form can't express.
+
+3. **Direct file edit — always available.** It's the player's folder; editing `settings.json` or a canon file's frontmatter by hand always works. The mod re-reads on the next snapshot/scan.
+
+### Distinctions worth preserving
+
+- **Content maturity** is purely a disclosure preference — flip it any time, canon is untouched, the storyteller just narrates with more/less explicit detail (§7.1).
+- **Region and tone** are foundational — the editor treats changing them as a deliberate act (confirm copy), and the storyteller adapts forward rather than re-founding.
+- **Era** is derived from the in-game date **once at founding**; after that it's an ordinary canon field the player/storyteller owns (a manual edit sticks). It is not silently re-derived on later snapshots.
+
+### Impl deltas (beyond the wizard itself)
+
+- A per-city `settings.json` writer (the wizard already needs this for founding) — reused for Save.
+- A way to open the form in edit mode: a gear button in the panel header and/or a `/settings` command.
+- The storyteller-reconcile turn for canon-field changes. No new generation pipeline.
+
+**Decision (locked): the Story Settings editor ships in v1.** The form-as-editor is part of the initial scope, not a fast follow — opened from a gear button in the panel header (and/or `/settings`), reading current state, Save-not-Found. Chat + direct-edit remain available as the other two surfaces, but the native editor is the primary, supported path from day one.
+
+---
+
+## 12. Open questions for William
 
 **Locked:** UI = native config form; LLM strategy = one-shot generate; flash = warm gold/amber; region scope = metadata first.
 
@@ -398,7 +433,7 @@ Each phase is independently testable in-game.
 
 ---
 
-## 12. Testing
+## 13. Testing
 
 Per the repo's posture (`CLAUDE.md` — Unity-coupled code verified in-game, pure helpers in `CityStoryMod.Tests`):
 
