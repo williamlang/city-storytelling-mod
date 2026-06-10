@@ -128,7 +128,7 @@ Logs at:
 
 ## Snapshot schema
 
-[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.8**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
+[`docs/snapshot-schema.md`](docs/snapshot-schema.md) is the current contract — **v0.10**. The narrative-leverage-ranked wishlist for what to add next lives on the [snapshot fields wishlist issue](https://github.com/williamlang/city-storytelling-mod/issues/18).
 
 Currently populated:
 - Metadata header — schema version, snapshot id, session id, wall-clock + in-game timestamps
@@ -137,6 +137,8 @@ Currently populated:
 - **`pollution`** — air / ground / noise sampled at every building position, binned by `CurrentDistrict`; emits city-wide + per-district averages with sample counts
 - **`land_value`** — same per-building → bin-by-district sampling pattern, reading `LandValueSystem`'s cell grid
 - **`crime`** — per-district count of active resident criminals (citizens carrying `Game.Citizens.Criminal`, binned by their home district); the city-wide reported-crime `crime_count` / `crime_rate` totals live under `city.social`. (Replaced the v0.6 per-building `CrimeProducer.m_Crime` accumulator, which saturated everywhere and gave no spatial signal.)
+- **`tourists`** — per-district visitor counts + a city total (v0.10), walking `CitizenFlags.Tourist` citizens and binning each by the district of its `CurrentBuilding`. The only spatial signal on visitors, who are filtered out of `citizens_sample`. Hotel occupancy + top attractions are tracked follow-ups ([#34](https://github.com/williamlang/city-storytelling-mod/issues/34))
+- **`services.education`**, **`services.civic_buildings`** — per-school enrollment vs. capacity + city rollup by tier, and the namable city-service roster with its `naming-requests.json` write-back channel (v0.9)
 - **`citizens_sample`** — up to 30 sampled residents per export; always includes every `Followed` citizen, fills the rest with a timestamp-seeded random sample. Per-entry: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags
 - `outside_connections`, `water_sources` — `CustomName` entities Carto doesn't surface
 - `district_zones` — per-district building-type counts (backs the subdivision-growth signal)

@@ -1,4 +1,4 @@
-# Snapshot schema (v0.9)
+# Snapshot schema (v0.10)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -148,11 +148,35 @@ The original per-district pollution average sampled the grid value *at every bui
 
 Coordinates are converted game-world → recentered frame (`MapCoords` inverse) so they pin like carto-chunk coordinates. The agent is instructed to write a noise story only when a source's `(x, y)` is near a hotspot's — proximity is checkable, so it stops blaming a loud building that's nowhere near housing.
 
+## v0.10 — per-district tourist density (#34)
+
+Adds a top-level **`tourists`** block. Until now the snapshot carried only city-wide tourist totals (`city.tourists_current`, `tourists_average`, `attractiveness`) and the `moved_away_by_reason` breakdown — and tourists are deliberately filtered *out* of `citizens_sample` (residents only). So spatially, visitors were invisible: "312 tourists this season" with no signal on *where*. That's a real gap for tourism-driven cities (a ski town in winter, a coastal resort in summer, a convention district).
+
+Sources, verified against `Game.dll`:
+- **`CitizenFlags.Tourist`** on `Citizen.m_State` selects the visitor set (same flag the resident filters exclude).
+- **`Game.Citizens.CurrentBuilding`** → `m_CurrentBuilding` is the building the tourist is currently in; binned by that building's `CurrentDistrict`. Same per-entity → bin-by-district pattern as `pollution` / `land_value` / `crime`.
+
+Shape:
+```jsonc
+"tourists": {
+  "city": { "total": 312 },          // walked count of live CitizenFlags.Tourist citizens
+  "by_district": {
+    "Old Town":         { "count": 187 },
+    "Pine Quarter":     { "count":  78 },
+    "The North Yards":  { "count":   0 }
+  }
+}
+```
+
+`city.total` is the citizen-walk count and can differ from `city.tourists_current` (the game's own `TouristSystem` metric, kept as the headline number); this block is the spatial breakdown, not a replacement. A tourist in transit (no resolvable `CurrentBuilding`, or one outside any district) counts toward `total` but lands in no district, so the `by_district` counts can sum to less than `total`. Drives stories like "Old Town is overrun this season" or "the riverfront can't pull any traffic."
+
+Hotel occupancy and top-attraction visitor counts (issue #34 parts 2–3) build on the same tourist walk and are tracked as follow-ups.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.8",
+  "schema_version": "0.10",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
@@ -253,6 +277,15 @@ Coordinates are converted game-world → recentered frame (`MapCoords` inverse) 
     "by_district": {
       "Pine Quarter":    { "active_criminals": 3 },
       "The North Yards": { "active_criminals": 9 }
+    }
+  },
+
+  "tourists": {                      // v0.10 — visitors binned by the district they're currently in
+    "city": { "total": 312 },        // walked CitizenFlags.Tourist count (cf. city.tourists_current)
+    "by_district": {
+      "Old Town":        { "count": 187 },
+      "Pine Quarter":    { "count":  78 },
+      "The North Yards": { "count":   0 }
     }
   },
 
@@ -417,12 +450,13 @@ Coordinates are converted game-world → recentered frame (`MapCoords` inverse) 
 - **`session_id`** = `"session-<unix-ts>"`. Set once when the mod loads (CS2 launch). Every snapshot in the same play session carries the same `session_id`. Changes only when the user fully restarts CS2.
 - **Cross-references** (e.g. `building.district_id`) always use the referenced entity's `id`. Never embed copies.
 
-## What's emitted today (v0.9)
+## What's emitted today (v0.10)
 
 - Metadata header: `schema_version`, `snapshot_id`, `session_id`, timestamps — populated.
 - `city.*` — name, money, happiness, health, tourists, attractiveness, danger, milestone, xp, zones, `churn` (incl. `moved_away_by_reason`), `social`, `budget` (income + residential tax only — see [#28](https://github.com/williamlang/city-storytelling-mod/issues/28)).
 - `pollution`, `land_value` — per-district + city-wide cell-grid averages sampled at building positions.
 - `crime` — per-district active-criminal counts (v0.8; reworked from v0.6's per-building accumulator).
+- `tourists` — per-district visitor counts + city total (v0.10), via `CitizenFlags.Tourist` + `CurrentBuilding`.
 - `citizens_sample` — up to 30 residents, all `Followed` plus a timestamp-seeded random fill.
 - `outside_connections[]`, `water_sources[]` — populated from `CustomName` entities.
 - `district_zones` — per-district building-type counts.
@@ -454,6 +488,8 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 - `0.5` — Added `city.social` (homeless / unemployed / crime), `city.budget` (income + residential tax — non-residential tax + expense dropped pending parameter-shape investigation), and `city.churn.moved_away_by_reason` (Game.Agents.MoveAwayReason breakdown). All city-wide rolls via CityStatisticsSystem.
 - `0.6` — Added top-level `land_value` and `crime` blocks: per-district + city-wide averages, same per-building → bin-by-district pattern as v0.4 pollution. `land_value` reads `LandValueSystem`'s cell grid; `crime` reads the per-building `Game.Buildings.CrimeProducer` component (so its sample population is a subset of buildings, distinct from pollution's).
 - `0.7` — `citizens_sample` is now a real per-citizen array (up to 30 entries) instead of an empty placeholder. Every `Followed` citizen is always included; remaining slots filled with a timestamp-seeded uniform random sample of residents. Per-entry fields: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags. Wealth tier deferred.
-- `0.8` — current. `crime` reworked from a building-side `CrimeProducer.m_Crime` average (saturated everywhere — first real-data check on Halverson Crossing showed every district reading ~the same) to a count of active resident criminals binned by home district. Shape changed from `{ average, samples }` per scope to `{ active_criminals }` per scope.
+- `0.8` — `crime` reworked from a building-side `CrimeProducer.m_Crime` average (saturated everywhere — first real-data check on Halverson Crossing showed every district reading ~the same) to a count of active resident criminals binned by home district. Shape changed from `{ average, samples }` per scope to `{ active_criminals }` per scope.
+- `0.9` — Populated the `services` block: `services.education` (per-school enrollment vs. capacity + city rollup by tier) and `services.civic_buildings` (the namable city-service roster + the `naming-requests.json` write-back channel, #40). `pollution` gained a residential split + located `noise_hotspots` / `noise_sources` so source self-noise stops being mistaken for resident suffering.
+- `0.10` — current. Added top-level `tourists` block: per-district visitor counts + a city total, via `CitizenFlags.Tourist` + `CurrentBuilding.m_CurrentBuilding`, binned by `CurrentDistrict` (#34 part 1). First spatial signal on visitors, who are filtered out of `citizens_sample`. Hotel occupancy + top attractions (parts 2–3) are follow-ups on the same walk.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

@@ -98,9 +98,53 @@ namespace CityStoryMod
         // description label spells this out.
         public LlmProvider Provider { get; set; }
 
-        [SettingsUITextInput]
+        // Streamer / screenshot safety. The key is masked by default — the panel
+        // shows ApiKeyStatus (last 4 chars only) instead of the full secret, so
+        // it can't be caught on a stream or screen-share. Flip this to swap in
+        // the editable field. Force-reset to false on every mod load (see
+        // Mod.OnLoad) so a revealed key never survives into the next session:
+        // reopen Options and it's masked again. CS2's declarative Options UI has
+        // no focus/blur hook, so this per-session reset is the closest we get to
+        // "re-hide on losing focus."
         [SettingsUIHideByCondition(typeof(Settings), nameof(IsCliProvider))]
+        public bool RevealApiKey { get; set; }
+
+        // Read-only masked preview shown in place of the real field while it's
+        // hidden. Lets the player confirm a key is set (and which one, by its
+        // last 4 chars — the industry-standard safe reveal) without the full
+        // secret on screen. Disabled so it's display-only; the setter ignores
+        // write-back from the UI.
+        [SettingsUITextInput]
+        [SettingsUIDisableByCondition(typeof(Settings), nameof(AlwaysTrue))]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(ApiKeyStatusHidden))]
+        public string ApiKeyStatus
+        {
+            get
+            {
+                string k = ApiKey?.Trim() ?? "";
+                if (k.Length == 0) return "(no key set)";
+                string last4 = k.Length <= 4 ? k : k.Substring(k.Length - 4);
+                return new string('*', 8) + " " + last4;
+            }
+            set { /* display-only; ignore UI write-back */ }
+        }
+
+        [SettingsUITextInput]
+        [SettingsUIHideByCondition(typeof(Settings), nameof(ApiKeyEditorHidden))]
         public string ApiKey { get; set; }
+
+        // CLI providers never show the key field at all (they carry their own
+        // credentials). Otherwise the editable field shows only when revealed,
+        // and the masked preview shows only when it isn't — the two are mutually
+        // exclusive so exactly one occupies the slot.
+        [SettingsUIHidden]
+        public bool ApiKeyEditorHidden => IsCliProvider || !RevealApiKey;
+
+        [SettingsUIHidden]
+        public bool ApiKeyStatusHidden => IsCliProvider || RevealApiKey;
+
+        [SettingsUIHidden]
+        public bool AlwaysTrue => true;
 
         [SettingsUITextInput]
         public string Model { get; set; }
@@ -143,6 +187,7 @@ namespace CityStoryMod
             ActiveEventsIntervalMinutes = 10;
             Provider = LlmProvider.AnthropicAPI;
             ApiKey = "";
+            RevealApiKey = false;
             Model = "claude-opus-4-7";
             OllamaBaseUrl = "http://localhost:11434";
             ShowToolCalls = false;

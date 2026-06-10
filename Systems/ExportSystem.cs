@@ -644,7 +644,7 @@ namespace CityStoryMod.Systems
         // workplace, school, plus followed/is_criminal flags. Households'
         // wealth tier is deferred — needs a CitizenHappinessParameterData
         // singleton join we don't do yet. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.9";
+        const string SchemaVersion = "0.10";
 
         void Export(string triggeredBy)
         {
@@ -729,6 +729,7 @@ namespace CityStoryMod.Systems
             object pollution = CollectPollution(districtNameByEntity);
             object landValue = CollectLandValue(districtNameByEntity);
             object crime = CollectCrimeByDistrict(districtNameByEntity);
+            object tourists = CollectTourists(districtNameByEntity);
             object education = CollectEducation(districtNameByEntity);
             object civicBuildings = CollectCivicBuildings(districtNameByEntity);
             object citizensSample = CollectCitizensSample(districtNameByEntity, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -822,6 +823,14 @@ namespace CityStoryMod.Systems
                 // of active resident criminals binned by home district.
                 land_value = landValue,
                 crime = crime,
+
+                // v0.10 — per-district tourist density (#34). Where the city's
+                // visitors actually are, binned by CurrentDistrict. Tourists are
+                // filtered out of citizens_sample, so this is the only spatial
+                // signal on them. `city.total` is the walked tourist count (may
+                // differ from city.tourists_current, a separate TouristSystem
+                // metric).
+                tourists = tourists,
 
                 // v0.2: districts[], buildings[], roads[], other_named[] are
                 // no longer emitted — they live in carto/processed/ as
@@ -1776,6 +1785,62 @@ namespace CityStoryMod.Systems
             return new
             {
                 city = new { active_criminals = cityCount },
+                by_district = byDistrict,
+            };
+        }
+
+        // Per-district tourist density (#34 part 1). Walks every citizen
+        // carrying CitizenFlags.Tourist, resolves where they currently are via
+        // CurrentBuilding.m_CurrentBuilding, and bins that building by
+        // CurrentDistrict — the same per-entity → bin-by-district pattern as
+        // CollectPollution / CollectLandValue / CollectCrimeByDistrict.
+        //
+        // Tourists are explicitly filtered *out* of citizens_sample (residents
+        // only), so spatially they were invisible: the city knew "312 visitors"
+        // but not where they were. This is the where.
+        //
+        // `total` is the walked count of every live tourist. It can differ from
+        // city.tourists_current, which comes from the game's own TouristSystem
+        // metric rather than a citizen walk — this block is the spatial
+        // breakdown, not a replacement for that headline number. Tourists with
+        // no resolvable current building (in transit between places, leaving the
+        // city) count toward `total` but land in no district, so the by_district
+        // counts can sum to less than `total`.
+        object CollectTourists(Dictionary<Entity, string> districtNameByEntity)
+        {
+            int cityTotal = 0;
+            var byDistrictCounts = new Dictionary<string, int>();
+
+            using var entities = _citizenQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var c = entities[i];
+                if (!TryGet<Citizen>(c, out var citizen)) continue;
+                if ((citizen.m_State & CitizenFlags.Tourist) == 0) continue;
+                if (TryGet<HealthProblem>(c, out var hp)
+                    && (hp.m_Flags & HealthProblemFlags.Dead) != 0) continue;
+
+                cityTotal++;
+
+                if (!TryGet<CurrentBuilding>(c, out var cb)) continue;
+                Entity building = cb.m_CurrentBuilding;
+                if (building == Entity.Null || !EntityManager.Exists(building)) continue;
+                if (!EntityManager.HasComponent<CurrentDistrict>(building)) continue;
+                var d = EntityManager.GetComponentData<CurrentDistrict>(building).m_District;
+                if (d != Entity.Null && districtNameByEntity.TryGetValue(d, out var districtName))
+                {
+                    byDistrictCounts.TryGetValue(districtName, out int n);
+                    byDistrictCounts[districtName] = n + 1;
+                }
+            }
+
+            var byDistrict = new Dictionary<string, object>();
+            foreach (var kv in byDistrictCounts)
+                byDistrict[kv.Key] = new { count = kv.Value };
+
+            return new
+            {
+                city = new { total = cityTotal },
                 by_district = byDistrict,
             };
         }

@@ -272,6 +272,19 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               reported-crime stat; this adds the spatial
                               dimension and the "who's actively criminal
                               right now" headcount.
+                tourists    — per-district visitor counts + a city total.
+                              Where the city's visitors actually are, binned
+                              by the district they're currently in. Tourists
+                              are filtered OUT of citizens_sample (residents
+                              only), so this is the only spatial signal on
+                              them. city.total is the walked tourist count
+                              (may differ from city.tourists_current, a
+                              separate headline metric); by_district can sum
+                              to less than total (visitors in transit land in
+                              no district). The "Old Town is overrun this
+                              season" / "the riverfront pulls no traffic"
+                              signal — pair with attractiveness and the
+                              tourist move-away reasons.
                 citizens_sample — up to 30 sampled residents per snapshot
                               with name, gender, age band, education,
                               happiness, home district, workplace, school,
@@ -409,6 +422,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - "Is anyone actually suffering from noise / who's making it?" → `pollution.noise_hotspots` (affected homes, x/y) + `pollution.noise_sources` (loudest producers, x/y); only a story when a source sits near a hotspot.
 - "Give me a named resident in <district>" → `citizens_sample.citizens` filtered by `home_district`.
 - "Is the school overcrowded? / does the city need another school?" → `services.education` (per-school `utilization`, and `city.by_tier` for whole tiers with no seats). Never invent enrollment — if `services.education` is null, the city has no school yet.
+- "Where do the tourists go? / is the city's tourism working?" → `tourists.by_district` for the spatial spread (which district is the visitor face), `tourists.city.total` + `attractiveness` for scale, and the tourist `moved_away_by_reason` variants for whether visitors are leaving unsatisfied.
 - "What does the terrain look like?" → `carto/processed/elevation.md`.
 - "How much water is there and what shape?" → `carto/processed/water.md`.
 - "Where is Old Halverson relative to Riverside?" / "What's in this district?" → `carto/processed/index.md` + `districts/<slug>.md`.
@@ -434,6 +448,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
   - **Don't blame a building you haven't proximity-checked.** `pollution.noise_hotspots` lists the worst-affected *homes* (residential, with `(x, y)`); `pollution.noise_sources` lists the loudest *non-residential* buildings (the likely producers, with `(x, y)` and `type`). Only write "the mill's noise is hurting the homes on X" when a source's coordinate is genuinely **near** a hotspot's coordinate. If the loudest source is far from every hotspot, there is no victim — don't invent one. Pin both the source and the affected homes from these coordinates.
 - `land_value.by_district` — per-district averages. "This is where the money lives" + "the bottom fell out of this district" both live here. Cross-reference against pollution (pollution drags land value down — the engine's own update job subtracts pollution penalties).
 - `crime.by_district` — per-district active-criminal counts. Districts with no active criminals are omitted; districts with elevated counts vs. their population are the "rough neighborhoods" the storyteller should be writing about. Pair with `pollution.by_district` and low `land_value.by_district` to spot the classic neglected-quarter triple.
+- `tourists.by_district` — where the city's visitors are right now. A district carrying most of the tourist count is the city's tourist face (its businesses, its character, its locals' relationship to outsiders); a marquee district pulling none is a story about why. Cross-reference `attractiveness` and `city.churn.moved_away_by_reason` tourist variants (`tourist_no_hotel`, `tourist_no_target`) to write about a tourism economy that's straining or failing to land.
 - `citizens_sample.citizens` — the candidate-character pool. When the story needs a named face (a homeowner objecting to a rezoning, a small-business owner in a struggling district, a teenager about to leave town), pluck one whose attributes fit: matching home_district, matching workplace, matching age band, matching education. Always-included `followed: true` citizens are the player's explicit picks — anchor canon around them first.
 
 **Reading the spatial chunks — what to take literally vs. softly:**

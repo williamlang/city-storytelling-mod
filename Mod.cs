@@ -37,6 +37,10 @@ namespace CityStoryMod
             Settings = new Settings(this);
             Settings.RegisterInOptionsUI();
             AssetDatabase.global.LoadSettings(nameof(CityStoryMod), Settings, new Settings(this));
+            // Never start a session with the API key revealed — masked is the
+            // safe default for streams/screenshots. The player re-reveals per
+            // session via the Options toggle. See Settings.RevealApiKey.
+            Settings.RevealApiKey = false;
 
             Storyteller = new StorytellerDispatcher(Log);
 

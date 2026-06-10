@@ -58,6 +58,14 @@ namespace CityStoryMod
             ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[Gemini]"] = "Google Gemini",
             ["Options.CityStoryMod.CityStoryMod.Mod.LLMPROVIDER[Ollama]"] = "Ollama (local)",
 
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.RevealApiKey]"] = "Show / edit API key",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.RevealApiKey]"] =
+                "Reveal the editable API key field. Off by default — the key shows masked (last 4 characters only) so it can't be caught on a stream or screenshot. Turn this on to paste or change the key, then off again to re-hide it. Always resets to off the next time the mod loads, so a revealed key never carries into a new session.",
+
+            ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKeyStatus]"] = "API key",
+            ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKeyStatus]"] =
+                "Masked view of the configured API key — only the last 4 characters are shown. Turn on \"Show / edit API key\" above to reveal and edit the full value.",
+
             ["Options.OPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] = "API key",
             ["Options.OPTION_DESCRIPTION[CityStoryMod.CityStoryMod.Mod.Settings.ApiKey]"] =
                 "API key for the LLM provider selected above. Stored in this mod's settings file in plain text — anyone with access to your AppData can read it. Get a key from your provider's console (e.g. console.anthropic.com for Claude). Not required when Provider is Anthropic (Claude Code CLI) — the CLI carries its own credentials.",
