@@ -15,6 +15,20 @@ namespace CityStoryMod.Storyteller
 
         public int FilesWritten { get; private set; }
 
+        // Quickstart founding result, stashed by a wizard_done tool call and
+        // drained by PromptUISystem on the next OnUpdate into the wizardDone
+        // value binding. Static because the executor is per-run and the UI
+        // system holds no reference to it — this carries the payload across the
+        // run boundary the same way _pendingMessages carries chat turns. The
+        // dispatcher gates runs to one at a time, so a single slot is enough.
+        static string _pendingWizardDone;
+
+        // Pops the pending wizard_done payload (or null if none). Thread-safe:
+        // the tool fires on the run's worker thread, the drain runs on the main
+        // thread in OnUpdate.
+        public static string TakePendingWizardDone()
+            => System.Threading.Interlocked.Exchange(ref _pendingWizardDone, null);
+
         public ToolExecutor(string cityDir)
         {
             _cityDirFull = Path.GetFullPath(cityDir);
@@ -65,6 +79,12 @@ namespace CityStoryMod.Storyteller
                         sb.AppendLine(rel.Replace(Path.DirectorySeparatorChar, '/'));
                     }
                     return sb.Length == 0 ? "(no matches)" : sb.ToString();
+                }
+                case "wizard_done":
+                {
+                    string payload = QuickstartConfig.NormalizeWizardDone(input);
+                    System.Threading.Interlocked.Exchange(ref _pendingWizardDone, payload);
+                    return "Founding summary recorded; the player's result card will show it.";
                 }
                 default:
                     throw new Exception($"Unknown tool: {toolName}");

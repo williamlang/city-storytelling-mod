@@ -1,6 +1,9 @@
 ---
-in_world_start_date: TBD
-real_world_anchor: 2026
+# Derived at /new-city from the in-game date (snapshot.captured_at_ingame), never
+# asked. After founding it's an ordinary canon field you own — a manual edit
+# sticks; it is not silently re-derived on later snapshots.
+in_world_start_date: TBD                # set to the in-game date at founding
+real_world_anchor: 2026                 # the in-game year
 time_per_session: 2-6 months
 ---
 

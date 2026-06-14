@@ -529,6 +529,11 @@ namespace CityStoryMod.Systems
             if (saveLoadTransition)
             {
                 _promptUI?.ClearChatHistory("save-load edge");
+                // Re-arm the quickstart signal: a still-un-bootstrapped city
+                // loaded this edge gets its flash/banner back even if dismissed
+                // last session. The recompute reads settings.json after Export
+                // sets LastExportedCityDir below.
+                _promptUI?.NotifySaveLoadEdge();
             }
 
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);

@@ -2,5 +2,10 @@
   "cs2_mod_output_dir": "C:/path/to/your/cs2/mod/output",
   "secrets_visibility": "hidden",
   "levelup_storylines": true,
+  "cast_density": "balanced",
+  "content_maturity": "pg-13",
+  "storyteller_proactivity": "on-request",
+  "git_versioning": false,
+  "integrations": [],
   "bootstrapped": false
 }

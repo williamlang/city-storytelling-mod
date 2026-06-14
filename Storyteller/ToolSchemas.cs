@@ -66,6 +66,28 @@ namespace CityStoryMod.Storyteller
                     ["required"] = new JArray { "pattern" },
                 },
             },
+            // Quickstart founding callback. Called once at the end of a
+            // <<QUICKSTART_CONFIG>>-driven /new-city run so the native wizard's
+            // result card can show the founding without re-parsing canon. The
+            // payload is also derivable from canon/city.md, and settings.json's
+            // bootstrapped:true is the authoritative completion signal — this
+            // tool is the fast path, not the source of truth.
+            new ToolSchema
+            {
+                Name = "wizard_done",
+                Description = "Call once at the end of a quickstart founding to report the result to the native UI. Only call this when a <<QUICKSTART_CONFIG>> block was present in the prompt.",
+                InputSchema = new JObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JObject {
+                        ["city_name"] = new JObject { ["type"] = "string", ["description"] = "The founded city's name." },
+                        ["region"] = new JObject { ["type"] = "string", ["description"] = "The pinned region (one of the canon region enum values)." },
+                        ["founded"] = new JObject { ["type"] = "string", ["description"] = "Founding year or era phrase, if one was written." },
+                        ["premise"] = new JObject { ["type"] = "string", ["description"] = "One-sentence playthrough premise." },
+                    },
+                    ["required"] = new JArray { "city_name", "region", "premise" },
+                },
+            },
         };
     }
 }

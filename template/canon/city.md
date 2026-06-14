@@ -1,6 +1,6 @@
 ---
 name: TBD
-region: TBD
+region: TBD          # enum: North America | Europe | Asia | Latin America | Africa | Oceania | Middle East
 founded: TBD
 population_at_start: TBD
 geography: TBD
@@ -17,7 +17,7 @@ TBD.
 
 ## Where it is
 
-Region of North America, geographic features (coast / river / mountain / plains), nearest big city.
+Region (the pinned `region:` enum value above), geographic features (coast / river / mountain / plains), nearest big city.
 
 ## How it got here
 

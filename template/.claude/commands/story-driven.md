@@ -16,6 +16,7 @@ If a focus is supplied above (a topic, character, faction, place, or theme — e
 
 **2. Survey state silently.** Pull these without narrating each file load:
 - `canon/INDEX.md` first — that's the navigation surface. From it I know what entities exist without loading every file. Pull full entity files only for the ones the proposal will touch.
+- `canon/city.md` `region:` — read it as a hard constraint on naming and cultural grounding (don't re-derive region from latitude); `canon/tone.md` for the active narrative focus lenses, which bias what *kind* of objective to propose (citizens → human-scale, neighborhood goals tied to named residents; civic → systems/economy/politics goals).
 - `canon/playthrough-premise.md` — the event must serve, test, or complicate this premise.
 - The latest snapshot in `snapshots/` — required for grounding:
   - `city.money`, `city.budget.income_daily`, `city.budget.tax_*` — what the city can afford and how it's funded.

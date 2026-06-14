@@ -57,6 +57,22 @@ namespace CityStoryMod.Systems
         ValueBinding<string> _openEventsBinding;
         string _openEventsScannedCityDir;
 
+        // Quickstart wizard (docs/quickstart-wizard.md §6, §4.2):
+        //   quickstartAvailable — true on a fresh, un-bootstrapped city until
+        //                         founding completes or the player dismisses.
+        //   wizardDone          — JSON founding summary drained from a
+        //                         wizard_done tool call.
+        ValueBinding<bool> _quickstartAvailableBinding;
+        ValueBinding<string> _wizardDoneBinding;
+        // Session-scoped: "Later" sets this so the flash/banner stay down for
+        // this load. Reset on the next save-load edge of a still-fresh city.
+        bool _quickstartDismissed;
+        // Forces a quickstart-available recompute on the next OnUpdate. Set on
+        // construction, on the save-load edge, when a run finishes (founding
+        // may have flipped bootstrapped), and when a wizard_done lands.
+        bool _quickstartDirty = true;
+        string _quickstartScannedCityDir;
+
         // Caches the city dir we last scanned for slash commands / canon
         // tree. OnUpdate rescans when LastExportedCityDir changes, when a
         // run finishes, or when the canon-dir FileSystemWatcher reports a
@@ -131,6 +147,8 @@ namespace CityStoryMod.Systems
             // canon-watcher debounce as canonTree — /events-resolve closing
             // events triggers a rescan automatically.
             _openEventsBinding = new ValueBinding<string>(Group, "openEvents", "[]");
+            _quickstartAvailableBinding = new ValueBinding<bool>(Group, "quickstartAvailable", false);
+            _wizardDoneBinding = new ValueBinding<string>(Group, "wizardDone", "");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
@@ -144,6 +162,8 @@ namespace CityStoryMod.Systems
             AddBinding(_nextEventAtUtcSecBinding);
             AddBinding(_activeEventsPausedBinding);
             AddBinding(_openEventsBinding);
+            AddBinding(_quickstartAvailableBinding);
+            AddBinding(_wizardDoneBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
@@ -152,6 +172,9 @@ namespace CityStoryMod.Systems
             AddBinding(new TriggerBinding<string>(Group, "uiLog", OnUILog));
             AddBinding(new TriggerBinding<bool>(Group, "setActiveEventsEnabled", OnSetActiveEventsEnabled));
             AddBinding(new TriggerBinding<string>(Group, "mapGoto", OnMapGoto));
+            AddBinding(new TriggerBinding(Group, "startQuickstart", OnStartQuickstart));
+            AddBinding(new TriggerBinding(Group, "dismissQuickstart", OnDismissQuickstart));
+            AddBinding(new TriggerBinding<string>(Group, "foundCity", OnFoundCity));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -390,6 +413,9 @@ namespace CityStoryMod.Systems
             // Invalidate both scan caches so the next OnUpdate tick re-walks.
             _commandsScannedCityDir = null;
             _canonScannedCityDir = null;
+            // A finished /new-city run may have flipped settings.bootstrapped;
+            // re-evaluate the fresh-city signal so the flash/banner clear.
+            _quickstartDirty = true;
         }
 
         // ---- Drain (main thread) ----
@@ -416,6 +442,28 @@ namespace CityStoryMod.Systems
             {
                 _commandsScannedCityDir = cityDir;
                 _availableCommandsBinding.Update(ScanAvailableCommands(cityDir));
+            }
+
+            // Fresh-city signal. Recompute only when something that could change
+            // it happened (city switch, run finish, save-load edge, dismiss) —
+            // reads settings.json, so we don't want it every frame.
+            if (_quickstartDirty || cityDir != _quickstartScannedCityDir)
+            {
+                _quickstartDirty = false;
+                _quickstartScannedCityDir = cityDir;
+                RecomputeQuickstartAvailable(cityDir);
+            }
+
+            // Drain a wizard_done founding summary stashed by the tool executor
+            // on the run's worker thread into the binding the result card reads.
+            string wizardDone = ToolExecutor.TakePendingWizardDone();
+            if (!string.IsNullOrEmpty(wizardDone))
+            {
+                _wizardDoneBinding.Update(wizardDone);
+                // Founding reported — the city is no longer fresh. (The
+                // bootstrapped flip from the same run also clears it, but this
+                // is the immediate signal.)
+                _quickstartDirty = true;
             }
 
             // Manage the canon watcher's lifecycle — rebuild whenever the
@@ -532,10 +580,19 @@ namespace CityStoryMod.Systems
             "session-end",
         };
 
-        void OnSubmitPrompt(string prompt)
+        void OnSubmitPrompt(string prompt) => SubmitPrompt(prompt, prompt);
+
+        // Core submit path. `prompt` is what the agent receives; `displayText`
+        // is what shows in the chat as the user turn. They differ only for the
+        // quickstart founding, where the agent gets a verbose
+        // <<QUICKSTART_CONFIG>> block but the chat shows a clean "/new-city"
+        // (see OnFoundCity). Carto-refresh gating and CLI continuity key off
+        // `prompt`, so routing the wizard through here keeps both unchanged.
+        void SubmitPrompt(string prompt, string displayText)
         {
             if (string.IsNullOrWhiteSpace(prompt)) return;
-            _pendingMessages.Enqueue(new ChatMessage { role = "user", text = prompt });
+            if (!string.IsNullOrWhiteSpace(displayText))
+                _pendingMessages.Enqueue(new ChatMessage { role = "user", text = displayText });
 
             StorytellerDispatcher dispatcher = Mod.Storyteller;
             if (dispatcher == null)
@@ -670,6 +727,87 @@ namespace CityStoryMod.Systems
             Mod.Settings.ActiveEventsEnabled = enabled;
             _activeEventsEnabledBinding.Update(enabled);
             _log.Info($"Active events toggled {(enabled ? "on" : "off")} via UI.");
+        }
+
+        // ---- Quickstart wizard (docs/quickstart-wizard.md) ----
+
+        // The player opened the founding flow. Hook point for making sure the
+        // spatial data the founding generation reads is on its way: if Carto is
+        // installed but hasn't run for this city yet, kick off an export so the
+        // wizard's spatial-prereq gate (cartoExporting) clears. Guarded +
+        // idempotent — RequestCartoExport no-ops when unavailable or already
+        // pending. No LLM call here; founding only fires on Found my city.
+        void OnStartQuickstart()
+        {
+            _log.Info("Quickstart wizard opened.");
+            string cityDir = Mod.LastExportedCityDir;
+            if (!string.IsNullOrEmpty(cityDir)
+                && !Directory.Exists(Path.Combine(cityDir, "carto", "processed"))
+                && CartoBridge.IsAvailable)
+            {
+                World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
+            }
+        }
+
+        // "Later" — hide the flash/banner for this load. Reset on the next
+        // save-load edge of a still-un-bootstrapped city (NotifySaveLoadEdge).
+        void OnDismissQuickstart()
+        {
+            _quickstartDismissed = true;
+            if (_quickstartAvailableBinding.value) _quickstartAvailableBinding.Update(false);
+            _log.Info("Quickstart wizard dismissed for this session.");
+        }
+
+        // "Found my city" — the one and only generation call. Wrap the UI's
+        // founding-config JSON into a <<QUICKSTART_CONFIG>> block, append it to
+        // /new-city, and run it through the normal submit path so Carto-refresh
+        // gating and CLI continuity are identical to a chat-typed /new-city. The
+        // chat shows a clean "/new-city"; the agent receives the full block.
+        void OnFoundCity(string configJson)
+        {
+            if (string.IsNullOrWhiteSpace(configJson))
+            {
+                _log.Warn("OnFoundCity: empty config payload; ignoring.");
+                return;
+            }
+            // Clear any stale founding result so the wizard shows the
+            // generating state, not a previous run's result card.
+            _wizardDoneBinding.Update("");
+            string block = QuickstartConfig.BuildConfigBlock(configJson);
+            string prompt = "/new-city\n\n" + block;
+            _log.Info("Quickstart: founding city via /new-city with config block.");
+            SubmitPrompt(prompt, "/new-city");
+        }
+
+        // Called by ExportSystem on the save-load edge. Re-arms the quickstart
+        // signal for a still-fresh city (clears a prior in-session dismiss),
+        // clears any stale founding result, and flags a recompute for the next
+        // OnUpdate (which reads the by-then-current city dir's settings.json).
+        public void NotifySaveLoadEdge()
+        {
+            _quickstartDismissed = false;
+            _quickstartDirty = true;
+            if (!string.IsNullOrEmpty(_wizardDoneBinding?.value))
+                _wizardDoneBinding.Update("");
+        }
+
+        // Sets quickstartAvailable = (city is fresh/un-bootstrapped) && (not
+        // dismissed this session). Reuses the bootstrapped read from
+        // IsCommandApplicable("new-city", …) — a missing settings.json or a
+        // bootstrapped flag that isn't true both count as fresh.
+        void RecomputeQuickstartAvailable(string cityDir)
+        {
+            bool fresh = IsCityUnbootstrapped(cityDir);
+            bool available = fresh && !_quickstartDismissed;
+            if (_quickstartAvailableBinding.value != available)
+                _quickstartAvailableBinding.Update(available);
+        }
+
+        static bool IsCityUnbootstrapped(string cityDir)
+        {
+            if (string.IsNullOrEmpty(cityDir)) return false;
+            JObject settings = ReadCitySettings(cityDir);
+            return !(settings?["bootstrapped"]?.Value<bool?>() ?? false);
         }
 
         static string FormatTokens(TokenUsage u)

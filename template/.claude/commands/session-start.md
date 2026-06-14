@@ -19,7 +19,7 @@ The mod's auto-start-on-save-load setting may have already written the stub for 
 
 **1. Quick state scan** (brief, internal — don't dump to the player yet):
 - Read `canon/INDEX.md` first — that's the navigation surface; from it you know what entities exist without loading every file.
-- Read `canon/city.md`, `canon/era.md`, `canon/tone.md` if present (small, always-load world canon).
+- Read `canon/city.md`, `canon/era.md`, `canon/tone.md` if present (small, always-load world canon). Treat `city.md`'s `region:` as a hard constraint on naming and cultural grounding, and `tone.md`'s narrative focus lenses as the bias for what *kind* of opening objectives to propose (citizens → human-scale/neighborhood; civic → systems/economy/politics).
 - Most recent file in `sessions/` (recent ones only — older sessions live compressed in `sessions/archive/`; skim that index lazily, only pulling specific months if relevant).
 - Latest snapshot in `snapshots/` for the current in-game state.
 - Unpopulated scaffold features:

@@ -1,3 +1,15 @@
+---
+# Story-shaping choices, set at /new-city (from the quickstart config or in prose).
+# These are narrative levers — changing them later adapts the story forward, it
+# doesn't re-found the city. content_maturity is NOT here; it's a settings.json
+# disclosure field.
+narrative_tone: grounded-realist        # grounded-realist | dramatic | noir | hopeful | satirical
+narrative_focus: [citizens, civic]      # active lenses — citizens (& families), civic (& political); >=1 required
+player_role: chronicler                 # chronicler (unseen) | character (named, seeds a characters/ entry)
+player_character_name:                  # only when player_role: character
+real_world_references: fictional        # fictional | real
+---
+
 # Tone & Style Guide
 
 The reference point is **grounded civic realism** — *The Wire*, long-form local journalism, Robert Caro on Robert Moses. Not soap opera. Not satire. Not utopia.
