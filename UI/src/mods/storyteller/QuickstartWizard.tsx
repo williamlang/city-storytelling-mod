@@ -70,6 +70,45 @@ function PillRow(props: {
 
 const pills = (ids: string[]) => ids.map((id) => ({ id, label: id }));
 
+// A click-to-open dropdown built from div/button only. We can't use a native
+// <select>: Cohtml doesn't implement HTMLSelectElement.options, so React's
+// controlled-<select> mount path throws on `node.options.length` and takes the
+// whole UI down with it. This renders the chosen value as a button and expands
+// an inline list of options below it on click.
+function Dropdown(props: {
+  value: string;
+  options: string[];
+  onPick: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={styles.wizDropdown}>
+      <button
+        type="button"
+        className={styles.wizDropdownHead}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span>{props.value}</span>
+        <span className={styles.wizDropdownCaret}>{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className={styles.wizDropdownList}>
+          {props.options.map((o) => (
+            <button
+              key={o}
+              type="button"
+              className={`${styles.wizDropdownItem} ${o === props.value ? styles.wizDropdownItemOn : ""}`}
+              onClick={() => { props.onPick(o); setOpen(false); }}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const setupNeeded = useValue(setupNeededBinding);
   const cartoExporting = useValue(cartoExportingBinding);
@@ -225,13 +264,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
               {/* -- Core -- */}
               <div className={styles.wizField}>
                 <label className={styles.wizLabel}>Region</label>
-                <select
-                  className={styles.wizSelect}
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                >
-                  {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
+                <Dropdown value={region} options={REGIONS} onPick={setRegion} />
               </div>
 
               <div className={styles.wizField}>

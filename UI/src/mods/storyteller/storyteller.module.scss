@@ -1328,8 +1328,7 @@
   line-height: 1.35;
 }
 
-.wizInput,
-.wizSelect {
+.wizInput {
   width: 100%;
   // Include padding + border in the 100% so the field doesn't overflow the
   // modal (default content-box adds them on top of the width).
@@ -1341,6 +1340,66 @@
   font-size: 12rem;
   padding: 6rem 8rem;
   margin-top: 4rem;
+}
+
+// Custom dropdown (div/button only — native <select> crashes Cohtml; see
+// QuickstartWizard.Dropdown). The head looks like the old .wizSelect; the
+// list expands inline below it.
+.wizDropdown {
+  width: 100%;
+  margin-top: 4rem;
+}
+
+.wizDropdownHead {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  color: #e6eef7;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4rem;
+  font-size: 12rem;
+  padding: 6rem 8rem;
+  cursor: pointer;
+  &:hover { background: rgba(0, 0, 0, 0.4); }
+}
+
+.wizDropdownCaret {
+  color: rgba(230, 238, 247, 0.5);
+  font-size: 10rem;
+  margin-left: 8rem;
+}
+
+.wizDropdownList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4rem;
+  overflow: hidden;
+}
+
+.wizDropdownItem {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(230, 238, 247, 0.8);
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12rem;
+  padding: 6rem 8rem;
+  cursor: pointer;
+  &:hover { background: rgba(91, 179, 230, 0.18); }
+  &:last-child { border-bottom: none; }
+}
+
+.wizDropdownItemOn {
+  background: rgba(91, 179, 230, 0.28);
+  color: #fff;
 }
 
 // Pill "radio" rows --------------------------------------------------------
