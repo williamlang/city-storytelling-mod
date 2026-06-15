@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import styles from "./storyteller.module.scss";
 import { useDrag } from "./useDrag";
@@ -7,6 +7,8 @@ import {
   cartoExportingBinding,
   isRunningBinding,
   wizardDoneBinding,
+  quickstartAvailableBinding,
+  lastErrorBinding,
   foundCity,
   dismissQuickstart,
   submitPrompt,
@@ -113,11 +115,32 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const setupNeeded = useValue(setupNeededBinding);
   const cartoExporting = useValue(cartoExportingBinding);
   const isRunning = useValue(isRunningBinding);
+  const quickstartAvailable = useValue(quickstartAvailableBinding);
+  const lastError = useValue(lastErrorBinding);
   const doneJson = useValue(wizardDoneBinding);
   const done = useMemo<WizardDone | null>(() => {
     if (!doneJson) return null;
     try { return JSON.parse(doneJson) as WizardDone; } catch { return null; }
   }, [doneJson]);
+
+  // Founding lifecycle. The wizard_done tool gives us a rich summary, but the
+  // Claude Code CLI provider can't call it (and the model may skip it on the
+  // API path too). The provider-agnostic completion signal is
+  // quickstartAvailable flipping false — C# drives that off settings.json's
+  // bootstrapped:true once /new-city finishes. We track that the player
+  // submitted and that a run actually started, so we only treat "no longer
+  // available" as success after our own founding run, not on first open.
+  const [submitted, setSubmitted] = useState(false);
+  const sawRunning = useRef(false);
+  useEffect(() => {
+    if (isRunning) sawRunning.current = true;
+  }, [isRunning]);
+  const runFinished = submitted && sawRunning.current && !isRunning;
+  // Success: a wizard_done summary arrived, OR founding completed (the city is
+  // no longer flagged fresh). Failure: the run ended, the city is still fresh,
+  // and an error surfaced.
+  const succeeded = !!done || (submitted && !quickstartAvailable);
+  const failed = runFinished && quickstartAvailable && !done && !!lastError;
 
   // Draggable floating window (same pattern as FileModal / the panel). Header
   // is the drag handle; initial position is roughly centered on the 1920×1080
@@ -178,6 +201,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
       integrations: [], // placeholder — none supported yet
     };
     foundCity(JSON.stringify(config));
+    setSubmitted(true);
   };
 
   const later = () => {
@@ -190,9 +214,15 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const phase: "result" | "generating" | "provider" | "spatial" | "form" =
-    done ? "result"
-    : isRunning ? "generating"
+  const retry = () => {
+    setSubmitted(false);
+    sawRunning.current = false;
+  };
+
+  const phase: "result" | "error" | "generating" | "provider" | "spatial" | "form" =
+    succeeded ? "result"
+    : failed ? "error"
+    : (submitted || isRunning) ? "generating"
     : setupNeeded ? "provider"
     : cartoExporting ? "spatial"
     : "form";
@@ -239,20 +269,59 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {phase === "result" && done && (
+        {phase === "result" && (
           <div className={styles.wizResult}>
-            <div className={styles.wizResultName}>{done.city_name}</div>
-            <div className={styles.wizResultMeta}>
-              {done.region}{done.founded ? ` · founded ${done.founded}` : ""}
-            </div>
-            <div className={styles.wizResultPremise}>{done.premise}</div>
-            <div className={styles.wizReminder}>
-              Rename your CS2 save to <strong>{done.city_name}</strong> so future
-              exports land in the right folder.
-            </div>
+            {done ? (
+              <>
+                <div className={styles.wizResultName}>{done.city_name}</div>
+                <div className={styles.wizResultMeta}>
+                  {done.region}{done.founded ? ` · founded ${done.founded}` : ""}
+                </div>
+                <div className={styles.wizResultPremise}>{done.premise}</div>
+                <div className={styles.wizReminder}>
+                  Rename your CS2 save to <strong>{done.city_name}</strong> so future
+                  exports land in the right folder.
+                </div>
+              </>
+            ) : (
+              <>
+                {/* No wizard_done summary (CLI provider, or the model skipped
+                    the tool) — the founding still completed (bootstrapped). Show
+                    a generic result; the full story is in the chat / canon. */}
+                <div className={styles.wizResultName}>
+                  {name.trim() || "Your city"} is founded
+                </div>
+                <div className={styles.wizResultPremise}>
+                  The founding history and premise are written. See the chat for
+                  the details.
+                </div>
+                <div className={styles.wizReminder}>
+                  Rename your CS2 save to your city&rsquo;s name so future exports
+                  land in the right folder.
+                </div>
+              </>
+            )}
             <div className={styles.wizFooter}>
               <button type="button" className={styles.wizFound} onClick={startSession}>
                 Start session 1
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "error" && (
+          <div className={styles.wizResult}>
+            <div className={styles.wizResultName}>Founding didn&rsquo;t finish</div>
+            <div className={styles.wizResultPremise}>
+              Something went wrong while founding the city
+              {lastError ? `: ${lastError}` : "."}
+            </div>
+            <div className={styles.wizFooter}>
+              <button type="button" className={styles.wizLater} onClick={onClose}>
+                Close
+              </button>
+              <button type="button" className={styles.wizFound} onClick={retry}>
+                Back to form
               </button>
             </div>
           </div>

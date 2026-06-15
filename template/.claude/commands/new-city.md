@@ -164,7 +164,7 @@ Write `settings.json` at the city-folder root using `settings.sample.json` as th
 
 **12. Hand off.**
 
-- **One-shot (config) mode:** call the **`wizard_done`** tool once with `{ city_name, region, founded, premise }` — the native result card reads it. Keep `premise` to one sentence. (The result is also derivable from `canon/city.md`; `bootstrapped: true` is the authoritative completion signal — `wizard_done` is the fast path for the UI.) Don't also print a long prose hand-off; the result card carries it.
+- **One-shot (config) mode:** if a **`wizard_done`** tool is available, call it once with `{ city_name, region, founded, premise }` (premise one sentence) — the native result card reads it for a richer summary. **If no such tool is exposed (e.g. the Claude Code CLI provider doesn't surface it), skip it — do not search for it or treat its absence as an error.** Either way, `settings.json` with `bootstrapped: true` (step 11) is the authoritative completion signal, and the native wizard detects founding completion from that and closes itself with a result card. Don't print a long prose hand-off in this mode; the card carries it.
 - **Chat mode:** tell the player concretely, in prose:
   - **The inferred premise** — quote the one-sentence premise verbatim and note they can ask you to revise it before session 1.
   - **Rename their CS2 save to "`<City Name>`"** so the mod's future exports keep landing in this city folder. Until that rename, exports may land under the placeholder slug.

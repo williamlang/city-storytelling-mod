@@ -201,7 +201,7 @@ The native Quickstart wizard lets the player found a city from one form with no 
 
 ### The `wizard_done` tool
 
-Available only to report a quickstart founding. Call it **once, at the very end** of a config-driven `/new-city` run, with `{ city_name, region, founded, premise }` (premise one sentence) — the native result card reads it. Don't call it for a chat-mode `/new-city` (no config block). The founding is also fully derivable from `canon/city.md`, and `settings.json`'s `bootstrapped: true` is the authoritative completion signal — `wizard_done` is the fast path for the UI, not the source of truth.
+Reports a quickstart founding to the native result card. **It only exists on the API providers** — the Claude Code CLI provider does not expose it. So treat it as optional: if it's in your tool list, call it **once, at the very end** of a config-driven `/new-city` run, with `{ city_name, region, founded, premise }` (premise one sentence). If it isn't available, **skip it silently** — don't search for it, don't retry, don't flag its absence. Never call it for a chat-mode `/new-city` (no config block). Founding completion does **not** depend on it: `settings.json`'s `bootstrapped: true` is the authoritative signal, and the wizard detects that and shows its result card regardless. `wizard_done` only enriches that card with the summary.
 
 ## Scaffold arrival
 
