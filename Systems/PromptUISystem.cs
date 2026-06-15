@@ -580,35 +580,37 @@ namespace CityStoryMod.Systems
             "session-end",
         };
 
-        void OnSubmitPrompt(string prompt) => SubmitPrompt(prompt, prompt);
-
-        // Core submit path. `prompt` is what the agent receives; `displayText`
-        // is what shows in the chat as the user turn. They differ only for the
-        // quickstart founding, where the agent gets a verbose
-        // <<QUICKSTART_CONFIG>> block but the chat shows a clean "/new-city"
-        // (see OnFoundCity). Carto-refresh gating and CLI continuity key off
-        // `prompt`, so routing the wizard through here keeps both unchanged.
-        void SubmitPrompt(string prompt, string displayText)
+        void OnSubmitPrompt(string prompt)
         {
             if (string.IsNullOrWhiteSpace(prompt)) return;
+            StartRun("ui-prompt", StorytellerRun.BuildFreeForm(prompt, _log), prompt, ExtractSlashCommand(prompt));
+        }
+
+        // Shared run-launch bookkeeping: show the chat user turn, gate a Carto
+        // refresh on carto-sensitive commands, then hand the RunFunc to the
+        // dispatcher. `displayText` is what the chat shows (the wizard shows a
+        // clean "/new-city" while its run carries the verbose config block);
+        // `cartoCommand` is the slash-command name to gate Carto on (null to
+        // skip). Returns false if the dispatcher isn't ready or a run is in
+        // flight.
+        bool StartRun(string runName, StorytellerDispatcher.RunFunc runFunc, string displayText, string cartoCommand)
+        {
             if (!string.IsNullOrWhiteSpace(displayText))
                 _pendingMessages.Enqueue(new ChatMessage { role = "user", text = displayText });
 
             StorytellerDispatcher dispatcher = Mod.Storyteller;
             if (dispatcher == null)
             {
-                _log.Warn("PromptUISystem: dispatcher not initialized — prompt dropped.");
-                return;
+                _log.Warn("PromptUISystem: dispatcher not initialized — run dropped.");
+                return false;
             }
 
-            string command = ExtractSlashCommand(prompt);
-            if (command != null && _cartoRefreshingCommands.Contains(command))
+            if (cartoCommand != null && _cartoRefreshingCommands.Contains(cartoCommand))
             {
-                _log.Info($"OnSubmitPrompt: /{command} triggers a Carto refresh.");
+                _log.Info($"Run '{runName}': /{cartoCommand} triggers a Carto refresh.");
                 World.GetExistingSystemManaged<ExportSystem>()?.RequestCartoExport();
             }
-            StorytellerDispatcher.RunFunc runFunc = StorytellerRun.BuildFreeForm(prompt, _log);
-            dispatcher.Start("ui-prompt", runFunc);
+            return dispatcher.Start(runName, runFunc);
         }
 
         // Returns the command name (without leading "/") if the prompt starts
@@ -759,10 +761,13 @@ namespace CityStoryMod.Systems
         }
 
         // "Found my city" — the one and only generation call. Wrap the UI's
-        // founding-config JSON into a <<QUICKSTART_CONFIG>> block, append it to
-        // /new-city, and run it through the normal submit path so Carto-refresh
-        // gating and CLI continuity are identical to a chat-typed /new-city. The
-        // chat shows a clean "/new-city"; the agent receives the full block.
+        // founding-config JSON into a <<QUICKSTART_CONFIG>> block and run
+        // /new-city with it appended. BuildCommandWithSuffix inlines the command
+        // file on the API path (no native slash expansion there) and uses native
+        // /new-city expansion on the CLI path — so the config is honored on every
+        // provider, not just ones whose model thinks to read the command file.
+        // Carto-refresh gating matches a chat-typed /new-city; the chat shows a
+        // clean "/new-city" while the run carries the full block.
         void OnFoundCity(string configJson)
         {
             if (string.IsNullOrWhiteSpace(configJson))
@@ -774,9 +779,12 @@ namespace CityStoryMod.Systems
             // generating state, not a previous run's result card.
             _wizardDoneBinding.Update("");
             string block = QuickstartConfig.BuildConfigBlock(configJson);
-            string prompt = "/new-city\n\n" + block;
             _log.Info("Quickstart: founding city via /new-city with config block.");
-            SubmitPrompt(prompt, "/new-city");
+            StartRun(
+                "quickstart-found",
+                StorytellerRun.BuildCommandWithSuffix("new-city", block, _log),
+                "/new-city",
+                "new-city");
         }
 
         // Called by ExportSystem on the save-load edge. Re-arms the quickstart

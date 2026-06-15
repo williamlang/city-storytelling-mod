@@ -29,6 +29,20 @@ namespace CityStoryMod.Storyteller
             string commandName,
             ILog log,
             CancellationToken ct)
+            => RunCommandAsync(conv, cityDir, commandName, null, log, ct);
+
+        // Overload with an extra block appended after the command + snapshot
+        // hint. Used by the quickstart wizard to deliver the
+        // <<QUICKSTART_CONFIG>> block alongside /new-city on the API path —
+        // where there's no native slash-command expansion, so the command file
+        // has to be inlined rather than left for the model to read.
+        public static Task<RunResult> RunCommandAsync(
+            Conversation conv,
+            string cityDir,
+            string commandName,
+            string promptSuffix,
+            ILog log,
+            CancellationToken ct)
         {
             string cityDirFull = Path.GetFullPath(cityDir ?? "");
             string commandPath = Path.Combine(cityDirFull, ".claude", "commands", commandName + ".md");
@@ -38,6 +52,8 @@ namespace CityStoryMod.Storyteller
             string command = File.ReadAllText(commandPath);
             string snapshotHint = DescribeLatestSnapshot(cityDirFull);
             string userPrompt = $"{command}\n\n---\n\n{snapshotHint}";
+            if (!string.IsNullOrWhiteSpace(promptSuffix))
+                userPrompt += $"\n\n---\n\n{promptSuffix}";
             return RunPromptAsync(conv, cityDir, userPrompt, log, ct);
         }
 

@@ -35,6 +35,23 @@ namespace CityStoryMod.Storyteller
                 log);
         }
 
+        // Runs a slash command with an extra block appended to the prompt,
+        // delivering it deterministically on every provider. On the API path
+        // the command file is inlined (the model doesn't expand /command on its
+        // own there), with the suffix appended after it. On the CLI path Claude
+        // Code expands /command natively, so we pass "/<command>\n\n<suffix>" as
+        // text. Used by the quickstart wizard to ship the <<QUICKSTART_CONFIG>>
+        // block with /new-city — so the config is honored even on weaker API
+        // models that wouldn't think to read the command file themselves.
+        public static StorytellerDispatcher.RunFunc BuildCommandWithSuffix(
+            string commandName, string promptSuffix, ILog log)
+        {
+            return (CancellationToken ct) => RunWithProvider(
+                cityDir => AgentLoop.RunCommandAsync(BuildConversation(log), cityDir, commandName, promptSuffix, log, ct),
+                cliRun: (cityDir) => ClaudeCliRunner.RunPromptAsync(cityDir, $"/{commandName}\n\n{promptSuffix}", log, ct),
+                log);
+        }
+
         // Resolves city dir + dispatches to either the API agent loop or the
         // CLI runner based on Settings.Provider. Both branches return a
         // RunResult; the API branch also attaches the Conversation to the
