@@ -51,6 +51,10 @@ export function useResize(opts: {
     if (!resizedEl) return;
     e.stopPropagation();  // don't let the header's drag handler also fire
     e.preventDefault();
+    // Safe under Cohtml's once-per-frame layout for the same reason as
+    // useDrag.beginDrag: a mousedown read of a settled element, no
+    // layout-affecting write earlier this frame, so the previous-frame
+    // geometry this returns is the current truth. (UI/coherent.md.)
     const rect = resizedEl.getBoundingClientRect();
     dragRef.current = {
       startX: e.clientX,

@@ -53,5 +53,6 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
 * **Region is now pinned canon.** Your city's real-world region is a proper setting the storyteller honors for naming and cultural grounding, defaulted from the map's latitude and overridable any time.
 * **Story era is read from the in-game date** at founding, so the world matches the year you're actually playing.
 * **Works on every provider.** The founding runs the same whether you're on the Anthropic API, Claude Code CLI, OpenAI, Gemini, or local Ollama.
+* **Clickable references, inline.** Cross-references between canon files now flow as inline links you can click to jump straight to the linked character, place, or company &#8212; and map coordinates in canon files and chat are clickable too, flying the camera there. No more separate link list at the top of each window.
   </ChangeLog>
 </Publish>

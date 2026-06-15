@@ -1,6 +1,6 @@
 import { render, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { extractMapRefs, MapRefChips } from "./mapRefs";
+import { extractMapRefs, renderTextWithMapRefs } from "./mapRefs";
 
 describe("extractMapRefs", () => {
   it("pulls a coordinate pair out of prose", () => {
@@ -56,33 +56,44 @@ describe("extractMapRefs", () => {
   });
 });
 
-describe("MapRefChips", () => {
-  it("renders a chip per unique coordinate and fires onGoto on click", () => {
+describe("renderTextWithMapRefs", () => {
+  it("renders each coordinate pair as an inline link and fires onGoto on click", () => {
     const onGoto = vi.fn();
     const { container } = render(
-      <MapRefChips
-        text="site office (820, 1140); subdivision (-430, -1180)"
-        onGoto={onGoto}
-      />
+      <div>{renderTextWithMapRefs("site office (820, 1140); subdivision (-430, -1180)", onGoto, "t")}</div>
     );
-    const chips = container.querySelectorAll("button");
-    expect(chips.length).toBe(2);
-    // Click target is a <button>, fine here — chips are out-of-prose block
-    // elements, not inline-in-text (which Cohtml can't render).
-    fireEvent.click(chips[0]);
+    const links = container.querySelectorAll("a");
+    expect(links.length).toBe(2);
+    // The literal coordinate text is preserved inline so prose reads naturally.
+    expect(container.textContent).toBe("site office (820, 1140); subdivision (-430, -1180)");
+    fireEvent.click(links[0]);
     expect(onGoto).toHaveBeenCalledWith(820, 1140);
-    fireEvent.click(chips[1]);
+    fireEvent.click(links[1]);
     expect(onGoto).toHaveBeenCalledWith(-430, -1180);
-    // Coordinate numbers are visible in the chip label.
-    expect(container.textContent).toContain("820, 1140");
-    expect(container.textContent).toContain("-430, -1180");
   });
 
-  it("renders nothing when the text has no coordinates", () => {
+  it("strips thousands separators when computing the jump target", () => {
+    const onGoto = vi.fn();
     const { container } = render(
-      <MapRefChips text="no coordinates here" onGoto={() => {}} />
+      <div>{renderTextWithMapRefs("the yards at (-1,500, -800)", onGoto, "t")}</div>
     );
-    expect(container.querySelector("button")).toBeNull();
-    expect(container.firstChild).toBeNull();
+    fireEvent.click(container.querySelector("a") as HTMLElement);
+    expect(onGoto).toHaveBeenCalledWith(-1500, -800);
+  });
+
+  it("emits no links when the text has no coordinates", () => {
+    const { container } = render(
+      <div>{renderTextWithMapRefs("no coordinates here", () => {}, "t")}</div>
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toBe("no coordinates here");
+  });
+
+  it("leaves text untouched when onGoto is omitted", () => {
+    const { container } = render(
+      <div>{renderTextWithMapRefs("plaza at (820, 1140)", undefined, "t")}</div>
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toBe("plaza at (820, 1140)");
   });
 });

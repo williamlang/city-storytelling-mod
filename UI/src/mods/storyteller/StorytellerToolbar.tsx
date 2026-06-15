@@ -77,7 +77,7 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
   useEffect(() => {
     const el = props.scrollRef.current;
     if (!el) return;
-    const update = () => {
+    const read = () => {
       const sh = el.scrollHeight;
       const ch = el.clientHeight;
       if (sh <= ch) {
@@ -91,6 +91,21 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
       const topPct = scrolled * (100 - heightPct);
       setState({ topPct, heightPct, visible: true });
     };
+    // Coalesce + defer the read to the next frame. The MutationObserver
+    // below fires right after rows are inserted — a layout-affecting change
+    // — and Cohtml only re-lays-out once per frame, so reading scrollHeight
+    // synchronously in that callback can return the previous (shorter)
+    // frame's value and mis-size the thumb. A requestAnimationFrame read
+    // sees the settled post-insertion layout. The flag also collapses a
+    // burst of scroll/resize/mutation events into one read per frame.
+    let raf = 0;
+    const update = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        read();
+      });
+    };
     update();
     el.addEventListener("scroll", update);
     const ro = new ResizeObserver(update);
@@ -101,6 +116,7 @@ function ChatScrollIndicator(props: { scrollRef: React.RefObject<HTMLDivElement>
     const mo = new MutationObserver(update);
     mo.observe(el, { childList: true, subtree: true });
     return () => {
+      if (raf) cancelAnimationFrame(raf);
       el.removeEventListener("scroll", update);
       ro.disconnect();
       mo.disconnect();

@@ -1,18 +1,19 @@
+import { ReactNode } from "react";
 import styles from "./storyteller.module.scss";
 
 // Surfaces the coordinate pairs the storyteller writes in prose — "(820, 1140)",
-// "(-4000, -3500)" — as clickable chips that fly the in-game camera there
+// "(-4000, -3500)" — as clickable jump targets that fly the in-game camera there
 // (GH #29). The agent already emits these pairs organically from spatial data
 // (carto/processed/*.md), so there's no new syntax to teach it.
 //
-// WHY CHIPS, NOT INLINE PINS: Cohtml (CS2's UI engine) cannot inline-flow a
-// child *element* inside running text — any <span>/<a>/<svg>/etc. between text
-// nodes is laid out as a full-width block on its own line, regardless of
-// `display` (confirmed live: even stylesheet `display:inline !important` keeps
-// it full-width). This is the same limitation that made FileModal surface
-// cross-reference links as a separate clickable list rather than inline. So we
-// leave the "(x, y)" text untouched in the prose (text nodes flow fine) and
-// render the clickable jump targets out-of-prose as a row of block chips.
+// INLINE, NOT CHIPS (GH #44): these used to render out-of-prose as a row of
+// block chips because Cohtml laid an element between text nodes out as a
+// full-width block. The `cohinline` attribute (set on prose blocks by
+// MarkdownLite, and on the chat row) fixes that — so the coordinate text itself
+// is now the clickable target, flowing inline in the sentence. We render it as
+// a plain text link (`.mapRefLink`), NOT a bordered pill: box decorations
+// (border/background) on a `cohinline` *child* don't paint, so a pill would lose
+// its border. A text link needs no box decoration and renders correctly.
 
 export interface MapRef {
   x: number;
@@ -51,53 +52,43 @@ export function extractMapRefs(text: string): MapRef[] {
   return out;
 }
 
-// Small map-pin drawn as inline SVG, not an emoji — Coherent's UI font has no
-// color-emoji glyphs (📍 renders as a tofu box in-game). SVG renders reliably
-// and fill is hard-coded because currentColor doesn't propagate into SVG under
-// Cohtml. Lives inside a block chip, so its own display doesn't matter.
-function PinIcon() {
-  return (
-    <svg
-      className={styles.mapChipIcon}
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        fill="#5bb3e6"
-        d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"
-      />
-    </svg>
-  );
-}
-
-// A wrap-row of clickable jump-to-coordinate chips, rendered beneath prose
-// (chat messages, canon files). Returns null when the text mentions no
-// coordinates, so callers can drop it in unconditionally.
-export function MapRefChips({
-  text,
-  onGoto,
-}: {
-  text: string;
-  onGoto: (x: number, y: number) => void;
-}) {
-  const refs = extractMapRefs(text);
-  if (refs.length === 0) return null;
-  return (
-    <div className={styles.mapChips}>
-      {refs.map((r) => (
-        <button
-          key={`${r.x},${r.y}`}
-          type="button"
-          className={styles.mapChip}
-          title={`Fly the camera to (${r.x}, ${r.y})`}
-          onClick={() => onGoto(r.x, r.y)}
-        >
-          <PinIcon />
-          {r.x}, {r.y}
-        </button>
-      ))}
-    </div>
-  );
+// Linkifies coordinate pairs in a run of plain text: splits on the coordinate
+// regex and returns the text as a list of nodes where each "(x, y)" becomes a
+// clickable inline link (the literal coordinate text is preserved, so prose
+// reads naturally) and everything else stays a bare string. Callers must place
+// the result inside a `cohinline` block for the links to flow inline.
+//
+// `keyBase` namespaces the generated React keys so multiple calls within one
+// parent (e.g. several text slices between markdown tokens) don't collide.
+// When `onGoto` is omitted the text is returned unchanged (single string), so
+// this is a no-op for contexts without a camera binding.
+export function renderTextWithMapRefs(
+  text: string,
+  onGoto: ((x: number, y: number) => void) | undefined,
+  keyBase: string
+): ReactNode[] {
+  if (!onGoto || !text) return [text];
+  const out: ReactNode[] = [];
+  COORD_RE.lastIndex = 0; // module-level /g regex — reset per call
+  let last = 0;
+  let n = 0;
+  let match: RegExpExecArray | null;
+  while ((match = COORD_RE.exec(text)) !== null) {
+    if (match.index > last) out.push(text.slice(last, match.index));
+    const x = parseInt(match[1].replace(/,/g, ""), 10);
+    const y = parseInt(match[2].replace(/,/g, ""), 10);
+    out.push(
+      <a
+        key={`${keyBase}-c${n++}`}
+        className={styles.mapRefLink}
+        title={`Fly the camera to (${x}, ${y})`}
+        onClick={() => onGoto(x, y)}
+      >
+        {match[0]}
+      </a>
+    );
+    last = COORD_RE.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length > 0 ? out : [text];
 }

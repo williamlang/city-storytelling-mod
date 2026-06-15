@@ -44,6 +44,13 @@ export function useDrag() {
   // position (which respects any prior drag-to-position) and pin the new
   // drag relative to that. Without this the second drag would snap back
   // to the original CSS-default position.
+  //
+  // This getBoundingClientRect read is safe under Cohtml's once-per-frame
+  // layout (it returns the *previous* frame's geometry): it fires from a
+  // mousedown handler against an element that's been sitting settled, with
+  // no layout-affecting JS write earlier in this frame — so "previous
+  // frame" == current truth. No requestAnimationFrame deferral needed here.
+  // (Cohtml layout timing: UI/coherent.md → "once-per-frame layout".)
   const beginDrag = (e: ReactMouseEvent, draggedEl: HTMLElement | null) => {
     if (!draggedEl) return;
     const rect = draggedEl.getBoundingClientRect();

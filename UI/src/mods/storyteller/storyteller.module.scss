@@ -466,10 +466,8 @@
     margin: 12rem 0;
   }
 
-  // No inline link styling — links render as plain text in the body
-  // and are surfaced separately as clickable rows in the frontmatter
-  // (see .fileLinkList). Coherent UI mistreats inline elements badly;
-  // sidestepping the whole problem keeps the prose clean and readable.
+  // Inline links + coordinate jump targets flow within the prose (GH #44);
+  // their shared styling lives in .markdownLink / .mapRefLink below.
 
   strong { color: #ffffff; font-weight: 600; }
   em { color: rgba(230, 238, 247, 0.95); }
@@ -513,10 +511,14 @@
   // items: text segments and link spans are laid out left-to-right
   // with no wrapping, blow past the modal's right edge, and visually
   // reorder relative to source. Forcing `display: block` on these
-  // restores normal block + inline-flow rendering so prose wraps as
-  // a paragraph and links wrap as phrases.
+  // restores normal block-level stacking and text wrapping.
   // (Confirmed via getComputedStyle dump in Logs/CityStoryMod.log —
   // every <p> reported `display: flex` until this override was added.)
+  //
+  // NOTE: `display: block` alone does NOT make *child* inline elements
+  // (bold/italic/code/link spans) flow inline — between text nodes they
+  // still drop to their own full-width line. The `cohinline` attribute
+  // that MarkdownLite sets on each block is what fixes that (GH #44).
   p, h1, h2, h3, h4, h5, h6, blockquote, pre {
     display: block;
   }
@@ -527,6 +529,26 @@
   li {
     display: list-item;
   }
+}
+
+// Inline cross-reference link inside rendered canon markdown. Flows
+// inline thanks to the `cohinline` block attribute (see MarkdownLite);
+// hard-coded color because `currentColor` doesn't reliably inherit here
+// and we want links visually distinct from prose.
+.markdownLink {
+  color: rgba(91, 179, 230, 0.95);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+// Inline coordinate camera-jump link (GH #44) — "(820, 1140)" in prose,
+// clickable to fly the camera there. A plain text link, NOT a bordered
+// pill: box decorations on a `cohinline` child don't paint (see coherent.md),
+// so a border would vanish. Used in canon markdown and chat rows.
+.mapRefLink {
+  color: rgba(91, 179, 230, 0.95);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .fileFrontmatterRow {
@@ -789,38 +811,6 @@
 .text {
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-// Clickable jump-to-coordinate chips (GH #29), rendered beneath chat
-// messages and canon-file metadata by MapRefChips. Cohtml can't inline-flow
-// an element inside running text, so these live out-of-prose as a wrap-row
-// of block chips. Flex `gap` is silently dropped by Cohtml (see notes), so
-// chips are spaced with margins.
-.mapChips {
-  display: flex;
-  flex-wrap: wrap;
-  margin-top: 6rem;
-}
-
-.mapChip {
-  display: flex;
-  align-items: center;
-  margin: 0 4rem 4rem 0;
-  padding: 2rem 7rem;
-  background: rgba(91, 179, 230, 0.1);
-  border: 1rem solid rgba(91, 179, 230, 0.35);
-  border-radius: 4rem;
-  color: rgba(230, 238, 247, 0.9);
-  font-size: 11rem;
-  cursor: pointer;
-  &:hover {
-    background: rgba(91, 179, 230, 0.22);
-    border-color: rgba(91, 179, 230, 0.6);
-  }
-}
-
-.mapChipIcon {
-  margin-right: 4rem;
 }
 
 .toolCalls {
@@ -1128,57 +1118,6 @@
     color: #e6eef7;
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.32);
-  }
-}
-
-// Internal markdown link — bare-minimum styling: color + cursor only.
-// No text-decoration, display, white-space, word-break, or
-// overflow-wrap overrides. Span's defaults give us inline wrappable
-// `display: inline-block` not `display: inline`. Coherent UI's layout
-// engine has a bug where `display: inline` on a span computes as
-// "inline" via getComputedStyle but is rendered as a block-sized,
-// own-line element (rect width = parent width, on its own row).
-// `inline-block` is the workaround that Coherent actually flows
-// inline. Tradeoff: an inline-block link is an atomic unit, so very
-// long link text won't wrap mid-phrase — instead it goes to the next
-// line as a single chunk. Acceptable; link text is rarely long enough
-// to need mid-link wrapping. (Confirmed in Logs/CityStoryMod.log
-// after switching from inline to inline-block.)
-// Link list in the FileModal frontmatter — one row per internal
-// reference in the body. Stacked vertically inside the frontmatter
-// `dd` cell. Each item is a block-level button so CS2's global
-// `display: flex` on spans (and its layout-engine bug treating
-// `display: inline` as block-sized) doesn't matter — buttons + flex
-// are first-class in Coherent UI and behave correctly.
-.fileLinkList {
-  display: flex;
-  flex-direction: column;
-  gap: 4rem;
-  width: 100%;
-}
-
-.fileLinkItem {
-  display: flex;
-  align-items: center;
-  background: rgba(91, 179, 230, 0.10);
-  border: 1px solid rgba(91, 179, 230, 0.25);
-  border-radius: 4rem;
-  padding: 4rem 8rem;
-  color: #9bc4ff;
-  font-size: 12rem;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-
-  &:hover:not(:disabled) {
-    background: rgba(91, 179, 230, 0.18);
-    border-color: rgba(91, 179, 230, 0.45);
-    color: #c8dfff;
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 }
 

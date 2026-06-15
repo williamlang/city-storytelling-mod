@@ -1,9 +1,8 @@
 import { useMemo, useRef } from "react";
 import styles from "./storyteller.module.scss";
 import { useDrag } from "./useDrag";
-import { parseFrontmatter, extractMarkdownLinks } from "./frontmatter";
+import { parseFrontmatter } from "./frontmatter";
 import { MarkdownLite } from "./MarkdownLite";
-import { MapRefChips } from "./mapRefs";
 import { mapGoto } from "./bindings";
 import type { CanonEntry } from "./bindings";
 
@@ -93,14 +92,22 @@ function FileContent({
 }) {
   const { fields, body } = useMemo(() => parseFrontmatter(content), [content]);
   const fieldNames = Object.keys(fields);
-  // Surface every internal cross-reference in the body as a clickable
-  // list row. Done out-of-prose because Coherent UI's layout engine
-  // mistreats inline elements; the prose body just shows link text.
-  const links = useMemo(() => extractMarkdownLinks(body), [body]);
 
+  // Open an in-prose link: resolve its cityDir-relative href against this
+  // file's directory and ask the parent to open a modal for it. External
+  // links are ignored here (MarkdownLite doesn't wire them to a click).
+  const onLinkClick = (href: string) => {
+    if (!onOpenFile) return;
+    onOpenFile(resolveCanonHref(basePath, href));
+  };
+
+  // Cross-reference links and coordinate pairs both render inline in the
+  // markdown body now (GH #44) — the `cohinline` block attribute lets them
+  // flow within the prose, so the old out-of-prose link list and coordinate
+  // chip row are gone. Camera-jump on coordinate click goes straight to mapGoto.
   return (
     <>
-      {(fieldNames.length > 0 || links.length > 0) && (
+      {fieldNames.length > 0 && (
         <dl className={styles.fileFrontmatter}>
           {fieldNames.map((k) => (
             <div key={k} className={styles.fileFrontmatterRow}>
@@ -108,45 +115,11 @@ function FileContent({
               <dd className={styles.fileFrontmatterValue}>{fields[k]}</dd>
             </div>
           ))}
-          {links.length > 0 && (
-            <div className={styles.fileFrontmatterRow}>
-              <dt className={styles.fileFrontmatterKey}>links</dt>
-              <dd className={styles.fileFrontmatterValue}>
-                <div className={styles.fileLinkList}>
-                  {links.map((link) => {
-                    const resolved = resolveCanonHref(basePath, link.href);
-                    const isExternal = /^https?:\/\//i.test(link.href);
-                    return (
-                      <button
-                        key={link.href}
-                        type="button"
-                        className={styles.fileLinkItem}
-                        disabled={isExternal || !onOpenFile}
-                        onClick={
-                          isExternal || !onOpenFile
-                            ? undefined
-                            : () => onOpenFile(resolved)
-                        }
-                        title={resolved}
-                      >
-                        {link.text}
-                      </button>
-                    );
-                  })}
-                </div>
-              </dd>
-            </div>
-          )}
         </dl>
       )}
-      {/* Coordinate pairs in the canon body, surfaced as clickable
-          camera-jump chips out-of-prose (GH #29) — same rationale as the
-          links list above: Cohtml can't inline-flow an element inside the
-          markdown text, so the jump targets live here as block chips. */}
-      <MapRefChips text={body} onGoto={mapGoto} />
       {body && (
         <div className={styles.fileMarkdownBody}>
-          <MarkdownLite>{body}</MarkdownLite>
+          <MarkdownLite onLinkClick={onLinkClick} onMapGoto={mapGoto}>{body}</MarkdownLite>
         </div>
       )}
     </>
