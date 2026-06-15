@@ -41,15 +41,17 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.3.0" />
+  <ModVersion Value="0.4.0" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.3.0** &#8212; safer settings, and the ghostwriter notices your visitors.
+**0.4.0** &#8212; found your city in one click with the Quickstart Wizard.
 
-* **Your API key is hidden by default.** Options now shows the key masked (last 4 characters only) so it can't be caught on a stream or screenshot. Flip "Show / edit API key" to paste or change it, then off again to re-hide. It always re-masks the next time the game loads, so a revealed key never carries over.
-* **Tourists are now tracked per district.** The ghostwriter can see *where* your visitors are, not just how many &#8212; so it can tell when Old Town is overrun this season or the riverfront can't pull any traffic.
+* **Quickstart Wizard.** When you load a fresh city, the Ghostwriter icon glows amber and a banner offers to found its story. One native form collects everything &#8212; region, name (or let the storyteller pick), tone, narrative focus, and a handful of optional choices &#8212; with no model calls until you hit **Found my city**. Then a single generation writes the founding history, premise, and canon, and hands you off to your first session.
+* **Region is now pinned canon.** Your city's real-world region is a proper setting the storyteller honors for naming and cultural grounding, defaulted from the map's latitude and overridable any time.
+* **Story era is read from the in-game date** at founding, so the world matches the year you're actually playing.
+* **Works on every provider.** The founding runs the same whether you're on the Anthropic API, Claude Code CLI, OpenAI, Gemini, or local Ollama.
   </ChangeLog>
 </Publish>
