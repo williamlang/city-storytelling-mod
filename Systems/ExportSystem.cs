@@ -14,6 +14,7 @@ using Game.Citizens;
 using Game.City;
 using Game.Common;
 using Game.Companies;
+using Game.Modding;
 using Game.Prefabs;
 using Game.SceneFlow;
 using Game.Simulation;
@@ -649,7 +650,7 @@ namespace CityStoryMod.Systems
         // workplace, school, plus followed/is_criminal flags. Households'
         // wealth tier is deferred — needs a CitizenHappinessParameterData
         // singleton join we don't do yet. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.10";
+        const string SchemaVersion = "0.11";
 
         void Export(string triggeredBy)
         {
@@ -741,6 +742,7 @@ namespace CityStoryMod.Systems
             object churn = ReadChurnStats();
             object social = ReadSocialStats();
             object budget = ReadBudgetStats();
+            object loadedMods = CollectLoadedMods();
             DateTime currentIngameDate = CurrentIngameDate();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -774,6 +776,14 @@ namespace CityStoryMod.Systems
                 session_started_at_utc = Mod.SessionStartedAtUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 captured_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 captured_at_ingame = ingameDate,
+
+                // v0.11 (#39) — code mods CS2 reports as enabled. The storyteller
+                // cross-references `mods.loaded[].id` against the shipped
+                // `mod-effects.md` registry: any matching entry describes how that
+                // mod bends storyteller-relevant gameplay (population scale, aging
+                // bands, services, or whole new systems like Elections), and that
+                // description is a hard grounding input alongside the snapshot.
+                mods = new { loaded = loadedMods },
 
                 // v0.3 — world identity. The city is the player's; the map is
                 // the world the city sits inside. At founding time the agent
@@ -2637,6 +2647,41 @@ namespace CityStoryMod.Systems
         // CitizenFlags (m_State) is treated opaquely: we split its ToString into named
         // flags (AgeBit1, Male, EducationBit2, ...) and count each. The agent can
         // interpret the flag names without us needing to decode the bit layout.
+        // v0.11 (#39) — the code mods CS2 reports as enabled this session, so
+        // the storyteller can check `snapshot.mods.loaded` against the shipped
+        // `mod-effects.md` registry and adjust its grounding (a peer mod can
+        // bend population scale, citizen aging, services, or add whole systems
+        // like elections that the vanilla-calibrated grounding rules don't know
+        // about). Id is the assembly name (the registry's match key); the same
+        // reflective-light modManager walk CartoBridge uses. Asset-only mods
+        // (props/buildings — no gameplay-mechanic effect) carry no assembly and
+        // are skipped: the registry is about mechanics, not content.
+        object CollectLoadedMods()
+        {
+            var modManager = GameManager.instance?.modManager;
+            if (modManager == null) return new object[0];
+
+            var found = new List<(string id, string version)>();
+            var seen = new HashSet<string>();
+            foreach (ModManager.ModInfo mod in modManager)
+            {
+                Assembly asm = null;
+                try { asm = mod.asset?.assembly; }
+                catch { /* asset not loaded / disabled — skip */ }
+                if (asm == null) continue;
+
+                var asmName = asm.GetName();
+                string id = asmName.Name;
+                if (string.IsNullOrEmpty(id) || !seen.Add(id)) continue;
+                found.Add((id, asmName.Version?.ToString()));
+            }
+
+            found.Sort((a, b) => string.CompareOrdinal(a.id, b.id));
+            return found
+                .Select(m => (object)new { id = m.id, name = m.id, version = m.version })
+                .ToList();
+        }
+
         object CollectDemographics()
         {
             var flagCounts = new Dictionary<string, int>();

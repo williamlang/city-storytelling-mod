@@ -1,4 +1,4 @@
-# Snapshot schema (v0.10)
+# Snapshot schema (v0.11)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -172,16 +172,40 @@ Shape:
 
 Hotel occupancy and top-attraction visitor counts (issue #34 parts 2–3) build on the same tourist walk and are tracked as follow-ups.
 
+## v0.11 — loaded mods (#39)
+
+Adds a top-level **`mods`** block listing the code mods CS2 reports as enabled this session. The storyteller is calibrated against CS2's *vanilla* mechanics — population scale bands, citizen aging, services, economy. Once a peer mod changes those mechanics, vanilla-grounded narration drifts from what the player actually sees in-game. This block is the generic hook that closes that gap: the snapshot says *what's loaded*; the shipped `template/mod-effects.md` registry says *what each loaded mod does*; the storyteller's grounding rules pick up the matching entries and adjust.
+
+Source: the same reflective-light `GameManager.instance.modManager` walk `CartoBridge` uses to detect Carto. Each enumerated `ModManager.ModInfo` with a loaded assembly contributes one entry; **`id` is the assembly name** — the key the registry matches on. Asset-only mods (props, buildings, maps — no gameplay-mechanic effect) carry no assembly and are omitted: the registry is about mechanics, not content.
+
+```jsonc
+"mods": {
+  "loaded": [
+    { "id": "Carto",      "name": "Carto",      "version": "1.4.2.0" },
+    { "id": "CityStoryMod","name": "CityStoryMod","version": "0.4.1.0" },  // we list ourselves too
+    { "id": "Elections",  "name": "Elections",  "version": "0.3.0.0" }
+  ]
+}
+```
+
+Sorted by `id`. `name` currently mirrors `id` (CS2's `ModInfo` doesn't cleanly expose the player-facing display name from the loaded assembly); the registry keys on `id`, so this is sufficient. `version` is the assembly version (`null` if unreadable). A mod that only tunes vanilla simulation values (tax curves, growth rates) without adding components still appears here as long as it ships an assembly — the registry handles its effects as prose, not field detection.
+
 ## The shape
 
 ```json
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "snapshot_id": "snapshot-1779083749",
   "session_id": "session-1779083100",
   "session_started_at_utc": "2026-05-17T22:45:00Z",
   "captured_at_utc": "2026-05-17T22:55:49Z",
   "captured_at_ingame": null,
+
+  "mods": {                           // v0.11 (#39) — enabled code mods; cross-ref mod-effects.md
+    "loaded": [
+      { "id": "Carto", "name": "Carto", "version": "1.4.2.0" }
+    ]
+  },
 
   "map": {
     "name": "Lakeland",               // From Game.UI.MapMetadataSystem.mapName.

@@ -737,6 +737,7 @@ The story drives the city by writing open events the player has to respond to in
 - `city.milestone_level` — CS2's unlock gate. If the milestone level is too low to actually build the thing in CS2 (no university unlocked yet, no metro unlocked yet, no high-density zoning unlocked yet), the option can't fire even if the player wants to. Don't propose options that aren't yet buildable in-game.
 - **District scale matters too.** A "downtown revitalization" option for a district with 12 buildings is silly; a "build a school" option for a district with no residential is misdirected. Read `district_zones` and `carto/processed/districts/<slug>.md` for the district the option targets.
 - **The premise still wins ties.** When two scale-appropriate options exist and one bends toward the playthrough premise / active arcs / secret pressure, pick that one. Grounding sets the floor; the premise picks among grounded options.
+- **Check loaded mods against `mod-effects.md`.** Read `snapshot.mods.loaded[]` and, for every loaded `id` with an entry in [`mod-effects.md`](mod-effects.md), treat that entry's description as a hard grounding input — on equal footing with the fields above. A peer mod can change the population scale, the aging bands, the services, or add whole systems (elections, custom chirps) that these vanilla-calibrated rules don't otherwise know about. If a loaded mod has no registry entry, I don't guess what it does (see `mod-effects.md` for how to handle that).
 
 ## Naming civic buildings
 
