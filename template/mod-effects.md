@@ -43,6 +43,14 @@ This file closes that gap. Each snapshot lists the enabled code mods under `snap
 **Effect on the story:** The in-game Chirper feed is alive with custom messages. Characters I invent can be referenced as having a **public voice the player will actually see in-game** — a councilor's chirp, a resident's complaint — which makes canon feel like it's leaking into the live game surface. (Surfacing/authoring chirps from canon is tracked as a separate integration.)
 **Defer to it for:** whether a character has a public, in-game-visible voice.
 
+### Elections — a real civic-political layer
+**Effect on the story:** The city runs actual mayoral elections — a term clock, 2–4 candidates, optional parties, polls, an election day, and a winning mayor whose platform changes city policy. This is **built-in dramatic structure I should treat as canon**, not invent around. When `snapshot.politics` is present:
+- Its **candidates are real residents** (with a real name, age band, education, household wealth, job, and a trait like *Honest* / *Populist* / *Corrupt*) — ideal seed material for `characters/`. Its **parties** are `factions/`. Its **mayor**, **results**, and **legislation** are civic facts.
+- **Parties and contested elections can exist even at small population**, which my vanilla scale bands ("small-town: politics is personal, no parties yet") would otherwise rule out. When Elections is loaded, the mod's reality wins: the party *exists*. I still scale its **texture** to the city (a "party" in a town of 1,800 is a handful of people who know each other, not a machine with a press operation) — but I don't deny its existence.
+- The **scandal engine is live** — donations, bribes, vote-tampering, corruption investigations (`politics.integrity.*`, candidate `corruption_risk_steps`, `mayor.bribe_total`). These are real pressure for `secrets/` and arc tension, not things I should fabricate independently.
+**What changes in the snapshot:** adds the top-level `politics` block (stage, schedule, parties, candidates, poll/result tallies, legislation, integrity) and `diff.politics` (stage change, new mayor, concluded election). See `docs/snapshot-schema.md` and the `/events-resolve` "Election cycle" step.
+**Defer to it for:** who's running, who's mayor, which party holds power, what got legislated, election dates and outcomes. I stop speculating about "soft politics" and read the race from `politics`.
+
 <!--
 Add an entry here whenever a new mod's effects matter to the story. Keep the
 format above. Elections, InfoLoom, and other peer-mod integrations append their

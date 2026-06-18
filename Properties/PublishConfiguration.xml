@@ -30,6 +30,10 @@ A way for the mod to talk to a language model. Several options — pick what fit
 
 Stories live as plain Markdown files at `LocalLow\Colossal Order\Cities Skylines II\ModsData\CityStoryMod\&lt;your-city&gt;\` — a folder of **canon**, **characters**, **companies**, **places**, **factions**, **events**, **sessions**, **stories**, and **secrets** that grows as your city does. There's an **Open story folder** button in Options if you want to read or back them up directly. The agent treats player-renamed buildings as canon links and weaves them into the world.
 
+## Plays well with
+
+Ghostwriter automatically enriches its story from certain peer mods if you have them — no setup required. Run the **[Elections](https://mods.paradoxplaza.com/mods/146816/Windows)** mod and the ghostwriter reads your city's real mayoral races: candidates become named characters, parties become factions, and campaigns, scandals, and results become civic events in your story. It's entirely optional — Ghostwriter just uses it when it's there.
+
 ## A note on what the model sees
 
 The ghostwriter reads your city's snapshot JSON and any canon files inside its own folder. It does NOT read other saves, other mods' data, or anything outside that folder. If you're using a hosted provider (Anthropic / OpenAI / Gemini), that data is sent to their servers per their terms of service. **Ollama runs entirely on your machine** — pick it if you want full local-only.
