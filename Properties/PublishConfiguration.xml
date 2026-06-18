@@ -45,14 +45,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.4.1" />
+  <ModVersion Value="0.5.0" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.4.1** &#8212; sharper zoning colors on the city map.
+**0.5.0** &#8212; the ghostwriter now reads your other mods.
 
-* **Accurate zoning on the generated map.** Residential, commercial, industrial, and office buildings are now colored from Carto's real zone data instead of being guessed from each building's name, so the topographic map the storyteller reads matches what you actually zoned &#8212; including mixed-use blocks. Thanks to Carto's author for the pointer.
+* **Elections integration.** If you run the **Elections** mod, Ghostwriter automatically weaves your city's mayoral races into the story &#8212; candidates become named characters (with their real age, background, and traits), parties become factions, and campaigns, donations, scandals, and election results become civic events and news in your canon. Entirely optional; it just lights up when Elections is installed.
+* **Peer-mod awareness.** Ghostwriter now sees which other mods you have loaded and adjusts its storytelling so it doesn't drift from what those mods change in-game (population scale, citizen aging, and more). New mods can be described in a `mod-effects.md` file in your city folder, which you can edit per playthrough.
   </ChangeLog>
 </Publish>
