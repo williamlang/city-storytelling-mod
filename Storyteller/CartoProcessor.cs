@@ -22,16 +22,16 @@ namespace CityStoryMod.Storyteller
     // without a CS2 build.
     public static class CartoProcessor
     {
-        // Carto's peer-API FromRequest helper sets TargetProjection = UTM but
-        // leaves ProjectionDefinition as `default` (zero-initialized), so the
-        // emitted coordinates land in a degree-scale frame instead of UTM
-        // meters. Reported upstream — when Carto fixes that helper (or adds a
-        // Projection field to ExportRequest), we can drop this conversion.
-        // For now we project to a local meters frame on parse so area,
-        // distance, and adjacency work in honest units: at the equator
-        // (which is where Carto's default origin sits) one degree is
-        // ~111,320 m, and an equirectangular approximation is well under
-        // 0.5 % off for a city-sized region.
+        // Carto emits GeoJSON in WGS84 decimal degrees because the GeoJSON
+        // spec (RFC 7946) mandates it — this is intended Carto behavior, not a
+        // bug awaiting an upstream fix (confirmed by Carto's author), so the
+        // conversion here is permanent. We project to a local meters frame on
+        // parse so area, distance, and adjacency work in honest units: Carto
+        // anchors the city origin at (0, 0) — the equator — where one degree
+        // is ~111,320 m, and an equirectangular approximation is well under
+        // 0.5 % off for a city-sized region. (Were a future Carto build to
+        // anchor cities at their true latitude, the X axis would need a
+        // cos(lat) factor; it doesn't today.)
         const double DegreesToMetersAtEquator = 111320.0;
 
         // Two districts count as adjacent if at least this many of their
@@ -282,10 +282,12 @@ namespace CityStoryMod.Storyteller
             public BuildingClass MapClass;
         }
 
-        // Coarse building classification for the map render. Carto doesn't
-        // expose a clean zone-type, so the zoned classes are *inferred* from the
-        // Name + Resident/Employee counts (see ClassifyBuildingForMap); the
-        // service classes come straight from Carto's "Public, <Type>" category.
+        // Coarse building classification for the map render. Service classes
+        // come straight from Carto's "Public, <Type>" category. Zoned classes
+        // are read from Carto's Zoning attribute when present (requested via
+        // CartoBridge's Building property set), falling back to a Name +
+        // Resident/Employee heuristic for unzoned buildings, "None" zoning, or
+        // older Carto builds that don't emit Zoning. See ClassifyBuildingForMap.
         public enum BuildingClass
         {
             Other = 0,
@@ -730,6 +732,7 @@ namespace CityStoryMod.Storyteller
                 var props = feat["properties"] as JObject;
                 string name = (string)props?["Name"];
                 string category = (string)props?["Category"];
+                string zoning = (string)props?["Zoning"];
                 int resident = (int?)props?["Resident"] ?? 0;
                 int employee = (int?)props?["Employee"] ?? 0;
 
@@ -740,22 +743,30 @@ namespace CityStoryMod.Storyteller
                     CentroidX = sumX / poly.Count,
                     CentroidY = sumY / poly.Count,
                     Polygon = poly.ToArray(),
-                    MapClass = ClassifyBuildingForMap(name, category, objectType, resident, employee),
+                    MapClass = ClassifyBuildingForMap(name, category, objectType, resident, employee, zoning),
                 });
             }
             return buildings;
         }
 
-        // Best-effort building classification for the map render. Service
-        // buildings classify cleanly off Carto's "Public, <Type>" category.
-        // Zoned buildings all arrive as Category "Property" with no zone-type
-        // field, so we infer from the Name (CS2's auto-names encode use:
-        // "...Housing" / "...Business" / "...Offices") and fall back to the
-        // Resident/Employee split. It's a heuristic — player-renamed buildings
-        // with no use keyword fall back to the count split (employee-only →
-        // commercial), which is right more often than not but not guaranteed.
+        // Building classification for the map render, in order of authority:
+        //   1. Service buildings off Carto's "Public, <Type>" category.
+        //   2. Decoration / Extractor / Landfill off category + object type.
+        //   3. Carto's Zoning attribute — authoritative for zoned buildings.
+        //      Values are "Residential" / "Commercial" / "Industrial" /
+        //      "Office" / "None". Mixed-use buildings arrive comma-separated
+        //      ("Residential, Commercial") when Carto's Zoning display mode is
+        //      "All"; we take the first recognized zone family as the dominant
+        //      map color. ("Single" mode emits one value — handled the same.)
+        //   4. Fallback for "None"/blank Zoning (unzoned buildings, or older
+        //      Carto builds that don't emit the attribute): infer from the Name
+        //      (CS2 auto-names encode use — "...Housing"/"...Business"/
+        //      "...Offices") then the Resident/Employee split. Heuristic, not
+        //      exact — a player-renamed building with no use keyword and no
+        //      zoning falls to the count split (employee-only → commercial).
         internal static BuildingClass ClassifyBuildingForMap(
-            string name, string category, string objectType, int resident, int employee)
+            string name, string category, string objectType, int resident, int employee,
+            string zoning = null)
         {
             string cat = category ?? string.Empty;
             if (cat.StartsWith("Public", StringComparison.OrdinalIgnoreCase))
@@ -779,6 +790,11 @@ namespace CityStoryMod.Storyteller
                 || string.Equals(objectType, "Landfill", StringComparison.Ordinal))
                 return BuildingClass.Industrial;
 
+            // Carto's Zoning attribute is authoritative when present; only
+            // fall through to the name/occupancy heuristic when it's absent
+            // or "None".
+            if (TryClassifyZoning(zoning, out BuildingClass zoned)) return zoned;
+
             string n = (name ?? string.Empty).ToLowerInvariant();
             if (n.Contains("housing") || n.Contains("residential") || n.Contains("rent")
                 || n.Contains("apartment") || n.Contains("dorm")) return BuildingClass.Residential;
@@ -796,6 +812,31 @@ namespace CityStoryMod.Storyteller
             if (resident > 0) return BuildingClass.Residential;
             if (employee > 0) return BuildingClass.Commercial;
             return BuildingClass.Other;
+        }
+
+        // Maps Carto's Zoning attribute to a map-render class. Returns false
+        // (so the caller falls back to the name/occupancy heuristic) when
+        // zoning is null, empty, or "None". Tolerates both Carto display
+        // modes: "Single" emits one value, "All" emits comma-separated values
+        // for mixed-use buildings ("Residential, Commercial") — we take the
+        // first recognized zone family as the dominant color. Substring
+        // matching keeps it robust to any subtype prefixes/suffixes.
+        internal static bool TryClassifyZoning(string zoning, out BuildingClass cls)
+        {
+            cls = BuildingClass.Other;
+            if (string.IsNullOrWhiteSpace(zoning)) return false;
+            foreach (string token in zoning.Split(','))
+            {
+                string z = token.Trim();
+                if (z.Length == 0) continue;
+                if (z.IndexOf("Residential", StringComparison.OrdinalIgnoreCase) >= 0) { cls = BuildingClass.Residential; return true; }
+                if (z.IndexOf("Office", StringComparison.OrdinalIgnoreCase) >= 0) { cls = BuildingClass.Office; return true; }
+                if (z.IndexOf("Commercial", StringComparison.OrdinalIgnoreCase) >= 0) { cls = BuildingClass.Commercial; return true; }
+                if (z.IndexOf("Industrial", StringComparison.OrdinalIgnoreCase) >= 0) { cls = BuildingClass.Industrial; return true; }
+                // "None" (or any unrecognized token) — keep scanning; if no
+                // token matches, the caller's heuristic takes over.
+            }
+            return false;
         }
 
         internal static void AssignBuildingsToDistricts(List<Building> buildings, List<District> districts)
@@ -2403,9 +2444,9 @@ namespace CityStoryMod.Storyteller
 
         // Zoning fill color for a zoned building class. Semi-transparent so the
         // terrain reads underneath. Returns false for service/decoration
-        // classes (handled by TryServiceFill / skipped). The classes are
-        // inferred — see ClassifyBuildingForMap — so these are "best guess"
-        // colors, not authoritative zone paint.
+        // classes (handled by TryServiceFill / skipped). Classes come from
+        // Carto's Zoning attribute when present (authoritative) and otherwise
+        // from the name/occupancy heuristic — see ClassifyBuildingForMap.
         static bool TryZoningFill(BuildingClass cls, out Rgba color)
         {
             switch (cls)

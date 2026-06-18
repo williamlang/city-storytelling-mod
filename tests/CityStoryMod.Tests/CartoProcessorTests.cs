@@ -917,6 +917,45 @@ namespace CityStoryMod.Tests
                 .Should().Be(expected);
         }
 
+        [Theory]
+        // Carto's Zoning attribute is authoritative — it overrides what the
+        // name or occupancy split would have guessed.
+        [InlineData("Residential", "Property", 0, 0, CartoProcessor.BuildingClass.Residential)]
+        [InlineData("Commercial", "Property", 0, 0, CartoProcessor.BuildingClass.Commercial)]
+        [InlineData("Industrial", "Property", 0, 0, CartoProcessor.BuildingClass.Industrial)]
+        [InlineData("Office", "Property", 0, 0, CartoProcessor.BuildingClass.Office)]
+        // Zoning beats a misleading name (a "Steakhouse" zoned Office is an Office).
+        [InlineData("Office", "Property", 0, 14, CartoProcessor.BuildingClass.Office)]
+        // Mixed-use ("All" display mode) → first recognized family wins.
+        [InlineData("Residential, Commercial", "Property", 20, 5, CartoProcessor.BuildingClass.Residential)]
+        [InlineData("Commercial, Residential", "Property", 20, 5, CartoProcessor.BuildingClass.Commercial)]
+        public void ClassifyBuildingForMap_prefers_zoning_attribute(
+            string zoning, string category, int resident, int employee,
+            CartoProcessor.BuildingClass expected)
+        {
+            // Name is deliberately a misleading "Steakhouse" to prove zoning wins.
+            CartoProcessor.ClassifyBuildingForMap(
+                "Hayloft Steakhouse", category, "Building", resident, employee, zoning)
+                .Should().Be(expected);
+        }
+
+        [Theory]
+        // "None" / blank zoning → fall through to the name+occupancy heuristic.
+        [InlineData("None")]
+        [InlineData("")]
+        [InlineData(null)]
+        public void ClassifyBuildingForMap_falls_back_when_zoning_absent(string zoning)
+        {
+            // "...Housing" name → Residential via the heuristic, zoning notwithstanding.
+            CartoProcessor.ClassifyBuildingForMap(
+                "NA Low Density Housing", "Property", "Building", 3, 0, zoning)
+                .Should().Be(CartoProcessor.BuildingClass.Residential);
+            // Service category still wins regardless of zoning.
+            CartoProcessor.ClassifyBuildingForMap(
+                "Small Police Station", "Public, Police", "Building", 0, 8, zoning)
+                .Should().Be(CartoProcessor.BuildingClass.ServicePolice);
+        }
+
         [Fact]
         public void ParseBuildingsForMap_keeps_all_buildings_with_footprints()
         {

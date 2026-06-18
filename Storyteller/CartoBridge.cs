@@ -213,8 +213,11 @@ namespace CityStoryMod.Storyteller
 
             // Properties: Dictionary<Carto.IO.System, HashSet<Carto.IO.Property>>
             //   Area     → {Name, Object, Resident, Employee, Unlocked}
-            //   Building → {Name, Object, Category, Resident, Employee}
+            //   Building → {Name, Object, Category, Zoning, Resident, Employee}
             //   Network  → {Name, Object, Category, Form, Length, Lane, Limit}
+            // Zoning is Carto's authoritative zone-type ("Residential" /
+            // "Commercial" / "Industrial" / "Office" / "None"); CartoProcessor
+            // colors zoned buildings off it instead of guessing from the name.
             Type hashSetOfPropertyType = typeof(System.Collections.Generic.HashSet<>)
                 .MakeGenericType(_propertyEnumType);
             MethodInfo addToSet = hashSetOfPropertyType.GetMethod("Add", new[] { _propertyEnumType });
@@ -262,6 +265,11 @@ namespace CityStoryMod.Storyteller
             AddDisplay("Category", "POI", true);
             AddDisplay("Object", "Unknown", false);
             AddDisplay("Zoning", "Unknown", true);
+            // We now request Zoning on the Building system, so the Building
+            // writer will index display[(Zoning, Building)] — provide it (a
+            // missing (Property, System) key throws KeyNotFoundException and
+            // crashes the export). Mirrors the (Category, Building) entry.
+            AddDisplay("Zoning", "Building", true);
 
             Set(opts, "Display", display);
 
@@ -382,7 +390,7 @@ namespace CityStoryMod.Storyteller
             // Mirrors what upstream's prior BuildDefaultProperties produced
             // for these systems — just the fields the processor uses.
             string[] areaPropNames = { "Name", "Object", "Resident", "Employee", "Unlocked" };
-            string[] buildingPropNames = { "Name", "Object", "Category", "Resident", "Employee" };
+            string[] buildingPropNames = { "Name", "Object", "Category", "Zoning", "Resident", "Employee" };
             string[] networkPropNames = { "Name", "Object", "Category", "Form", "Length", "Lane", "Limit" };
             if (!TryResolvePropertyEnumValues(version, areaPropNames, out _propertyValuesForArea)) return;
             if (!TryResolvePropertyEnumValues(version, buildingPropNames, out _propertyValuesForBuilding)) return;

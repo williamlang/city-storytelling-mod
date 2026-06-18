@@ -41,18 +41,14 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.4.0" />
+  <ModVersion Value="0.4.1" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.4.0** &#8212; found your city in one click with the Quickstart Wizard.
+**0.4.1** &#8212; sharper zoning colors on the city map.
 
-* **Quickstart Wizard.** When you load a fresh city, the Ghostwriter icon glows amber and a banner offers to found its story. One native form collects everything &#8212; region, name (or let the storyteller pick), tone, narrative focus, and a handful of optional choices &#8212; with no model calls until you hit **Found my city**. Then a single generation writes the founding history, premise, and canon, and hands you off to your first session.
-* **Region is now pinned canon.** Your city's real-world region is a proper setting the storyteller honors for naming and cultural grounding, defaulted from the map's latitude and overridable any time.
-* **Story era is read from the in-game date** at founding, so the world matches the year you're actually playing.
-* **Works on every provider.** The founding runs the same whether you're on the Anthropic API, Claude Code CLI, OpenAI, Gemini, or local Ollama.
-* **Clickable references, inline.** Cross-references between canon files now flow as inline links you can click to jump straight to the linked character, place, or company &#8212; and map coordinates in canon files and chat are clickable too, flying the camera there. No more separate link list at the top of each window.
+* **Accurate zoning on the generated map.** Residential, commercial, industrial, and office buildings are now colored from Carto's real zone data instead of being guessed from each building's name, so the topographic map the storyteller reads matches what you actually zoned &#8212; including mixed-use blocks. Thanks to Carto's author for the pointer.
   </ChangeLog>
 </Publish>
