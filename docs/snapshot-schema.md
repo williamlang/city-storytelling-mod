@@ -190,6 +190,79 @@ Source: the same reflective-light `GameManager.instance.modManager` walk `CartoB
 
 Sorted by `id`. `name` currently mirrors `id` (CS2's `ModInfo` doesn't cleanly expose the player-facing display name from the loaded assembly); the registry keys on `id`, so this is sufficient. `version` is the assembly version (`null` if unreadable). A mod that only tunes vanilla simulation values (tax curves, growth rates) without adding components still appears here as long as it ships an assembly — the registry handles its effects as prose, not field detection.
 
+## v0.11 — civic politics, via the Elections peer mod (#43)
+
+Adds a top-level **`politics`** block, populated from [ruzbeh0's Elections mod](https://github.com/ruzbeh0/Elections) (assembly `Elections`) when it's installed and has initialized. **`null`** otherwise — same "not implemented / not present" contract as `map.*` or `pollution`. Elections is built-in dramatic structure: a clock (the term), stakes (the result), a cast (candidates), and factions (parties), all of which map onto canon the storyteller already maintains — candidates → `characters/`, parties → `factions/`, results → `events/` + `stories/`, donations/bribery → `secrets/`.
+
+**Read path (`Storyteller/ElectionsBridge.cs`).** The mod carries the whole election in one serializable ECS singleton, `Elections.Components.ElectionState`. The bridge resolves it reflectively (no compile-time dep on `Elections.dll`, same soft-coupling as `CartoBridge`) and reads it via the struct's **public accessor methods** (`GetCandidate(i)`, `GetPartyName(i)`, `GetCandidateTagId(i)`, `HasLegislation(type)`, …) rather than raw fields — the mod's author explicitly versions the field layout, so the accessors are the stable surface. Candidate/mayor **identities come from the game's own `NameSystem`** (the candidates are real citizen entities), not the mod, so names are robust to mod changes. Candidate/party **tag ids** are decoded against a mirrored label table (append-only on the mod's side; an unknown id degrades to `"tag-#N"`).
+
+```jsonc
+"politics": {
+  "source": "Elections",
+  "mod_version": "0.3.0.0",
+  "stage": "Voting",                 // None | CandidatesSelected | PollReleased | Voting
+  "accelerated_cycle": false,
+  "runoff_active": false,
+  "schedule": {
+    "selection": "2026-03",          // YYYY-MM; null when unset
+    "poll": "2026-04",
+    "election": "2026-05",
+    "mayor_term_year": 2026
+  },
+  "mayor": {                         // sitting mayor; null before the first is elected
+    "name": "Marcus Devereaux",
+    "party_index": 1,
+    "party": "Reform Slate",
+    "tag": "Honest",
+    "term_year": 2026,
+    "bribe_total": 0                 // > 0 is a corruption signal → secrets/
+  },
+  "parties": [                       // up to 4; only slots with a (player-editable) name
+    { "index": 0, "name": "Civic Trust", "color": "#b16cff", "reputation": 55,
+      "consecutive_terms": 1, "wins": 3, "tags": ["Civic Trust", "Pragmatic"] }
+  ],
+  "candidates": [                    // up to ActiveCandidateCount; real citizens
+    { "index": 0, "name": "Lila Conrad", "party_index": 0, "party": "Civic Trust",
+      "tag": "Neighborhood Champion", "age_band": "Adult", "education": "Well Educated",
+      "work": "Working", "wealth": "Modest income", "support_modifier_percent": 5,
+      "donation": 12000, "poll_votes": 1180, "votes": 0,
+      "corruption_risk_steps": 0, "negative_softened": false }
+  ],
+  "poll_undecided": 340,
+  "result": {                        // winner_* null until an election concludes
+    "winner_index": null,
+    "winner_name": null,
+    "turnout_requests": 0,
+    "turnout_arrivals": 0,
+    "outgoing_mayor": null,
+    "outgoing_mayor_bribe_total": 0
+  },
+  "legislation": ["VoterIdentification"],   // enacted ElectionLegislationType names
+  "integrity": {                     // scandal-engine signals → secrets/ and arc tension
+    "mayor_bribe_total": 0,
+    "strict_voting_id_law_passed": false,
+    "vote_tampering_active": false,
+    "corruption_investigation_active": false
+  }
+}
+```
+
+**`diff.politics`** carries the transitions worth a canon event, present only when Elections was loaded on *both* the current and previous export and something storyworthy changed:
+
+```jsonc
+"diff": {
+  "politics": {
+    "stage": { "from": "PollReleased", "to": "Voting" },
+    "new_mayor": { "name": "Marcus Devereaux", "party_index": 1,
+                   "from": "Ada Whitlock", "incumbent_party_held": false },
+    "election_concluded": { "winner_index": 1, "winner_name": "Marcus Devereaux",
+                            "election": "2026-05" }
+  }
+}
+```
+
+A candidate's `age_band` / `education` / `work` / `wealth` are decoded to the same labels the player sees in the candidate panel (mirroring the mod's `ElectionCandidateProfileUtility`): age is a band (Adult/Elderly, not a year count), `work` is a coarse Working/Non-working/Student reading, `wealth` is the household band (Struggling → Wealthy). `color` is `#rrggbb` from the party's editable color, `null` when unset.
+
 ## The shape
 
 ```json
@@ -206,6 +279,8 @@ Sorted by `id`. `name` currently mirrors `id` (CS2's `ModInfo` doesn't cleanly e
       { "id": "Carto", "name": "Carto", "version": "1.4.2.0" }
     ]
   },
+
+  "politics": null,                   // v0.11 (#43) — Elections peer mod; null when absent. See section above.
 
   "map": {
     "name": "Lakeland",               // From Game.UI.MapMetadataSystem.mapName.

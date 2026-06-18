@@ -53,6 +53,10 @@ namespace CityStoryMod.Systems
         Dictionary<string, BuildingFingerprint> _prevAllBuildings;        // entityId → slim fingerprint for churn diff
         DateTime? _prevIngameDate;
         string _prevSnapshotId;
+        // Previous politics summary (Elections peer mod). Backs diff.politics —
+        // stage changes, election outcomes, and changes of mayor. Default
+        // (Present=false) until the first export that sees Elections loaded.
+        ElectionsBridge.Summary _prevPolitics;
 
         // Slim fingerprint for every building, kept between snapshots so the
         // diff can surface per-district demolitions and constructions
@@ -743,6 +747,13 @@ namespace CityStoryMod.Systems
             object social = ReadSocialStats();
             object budget = ReadBudgetStats();
             object loadedMods = CollectLoadedMods();
+            // Elections peer mod (#43). Null Reading when Elections isn't
+            // installed or hasn't created its state yet — the `politics` block
+            // and diff then stay null, same contract as map.* / pollution.
+            ElectionsBridge.Reading politicsReading =
+                ElectionsBridge.TryRead(EntityManager, e => _nameSystem.GetRenderedLabelName(e), _log);
+            object politics = politicsReading?.Block;
+            ElectionsBridge.Summary politicsSummary = politicsReading != null ? politicsReading.Diffable : default;
             DateTime currentIngameDate = CurrentIngameDate();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -754,7 +765,8 @@ namespace CityStoryMod.Systems
                 ? ComputeDiff(zoneCounts, currentIngameDate,
                     named.outsideConnectionsFingerprints,
                     named.waterSourcesFingerprints,
-                    districtZones, namedBuildings, allBuildings)
+                    districtZones, namedBuildings, allBuildings,
+                    politicsSummary)
                 : null;
 
             // Advance the previous-snapshot pointers for the next export.
@@ -766,6 +778,7 @@ namespace CityStoryMod.Systems
             _prevAllBuildings = allBuildings;
             _prevIngameDate = currentIngameDate;
             _prevSnapshotId = snapshotId;
+            _prevPolitics = politicsSummary;
 
             var snapshot = new
             {
@@ -784,6 +797,14 @@ namespace CityStoryMod.Systems
                 // bands, services, or whole new systems like Elections), and that
                 // description is a hard grounding input alongside the snapshot.
                 mods = new { loaded = loadedMods },
+
+                // v0.11 (#43) — civic/political state from the Elections peer
+                // mod, read reflectively (ElectionsBridge). Null when Elections
+                // isn't installed or hasn't initialized. Campaign stage,
+                // schedule, parties, candidates (real citizens), poll/result
+                // tallies, legislation, and scandal signals. Transitions surface
+                // in diff.politics. See docs/snapshot-schema.md and mod-effects.md.
+                politics = politics,
 
                 // v0.3 — world identity. The city is the player's; the map is
                 // the world the city sits inside. At founding time the agent
@@ -1367,7 +1388,8 @@ namespace CityStoryMod.Systems
             Dictionary<string, NameRef> currentWaterSources,
             Dictionary<string, Dictionary<string, int>> currentDistrictZones,
             Dictionary<string, NamedBuilding> currentNamedBuildings,
-            Dictionary<string, BuildingFingerprint> currentAllBuildings)
+            Dictionary<string, BuildingFingerprint> currentAllBuildings,
+            ElectionsBridge.Summary currentPolitics)
         {
             int? ingameDaysElapsed = _prevIngameDate.HasValue
                 ? (int)(currentIngameDate - _prevIngameDate.Value).TotalDays
@@ -1465,6 +1487,12 @@ namespace CityStoryMod.Systems
             var ocDiff = DiffNameRefs(_prevOutsideConnections, currentOutsideConnections);
             var wsDiff = DiffNameRefs(_prevWaterSources, currentWaterSources);
 
+            // Elections peer mod (#43). Surfaces the transitions worth a canon
+            // event: the campaign moving stage, a new mayor taking office, and a
+            // concluded election. Null when Elections isn't loaded (or wasn't on
+            // the previous export — no baseline to compare).
+            object politicsDiff = ComputePoliticsDiff(_prevPolitics, currentPolitics);
+
             // v0.4 — per-district demolition/construction churn. Sits next to
             // (not replacing) district_zone_deltas: the latter is net change,
             // this is gross movement on both sides. Stories about
@@ -1486,7 +1514,49 @@ namespace CityStoryMod.Systems
                 named_buildings = new { added = nbAdded, removed = nbRemoved, renamed = nbRenamed },
                 outside_connections = new { added = ocDiff.added, removed = ocDiff.removed, changed = ocDiff.changed },
                 water_sources = new { added = wsDiff.added, removed = wsDiff.removed, changed = wsDiff.changed },
+                politics = politicsDiff,
             };
+        }
+
+        // Election transitions between two snapshots. Returns null unless
+        // Elections was present on BOTH exports and at least one storyworthy
+        // change occurred — so the agent only sees this key when there's an
+        // event to write. The mayor change reports party for the
+        // power-changed-hands framing; the concluded election reports the
+        // winner so /events-resolve can land a results-night piece.
+        object ComputePoliticsDiff(ElectionsBridge.Summary prev, ElectionsBridge.Summary cur)
+        {
+            if (!prev.Present || !cur.Present) return null;
+
+            var changes = new Dictionary<string, object>();
+
+            if (prev.Stage != cur.Stage)
+                changes["stage"] = new { from = prev.Stage, to = cur.Stage };
+
+            // New mayor: the name changed (an election was certified, or the
+            // first mayor took office). Skip null→null and transient nulls.
+            if (!string.IsNullOrEmpty(cur.MayorName) && cur.MayorName != prev.MayorName)
+                changes["new_mayor"] = new
+                {
+                    name = cur.MayorName,
+                    party_index = cur.MayorPartyIndex,
+                    from = prev.MayorName,
+                    incumbent_party_held = cur.MayorPartyIndex == prev.MayorPartyIndex && !string.IsNullOrEmpty(prev.MayorName),
+                };
+
+            // Concluded election: a winner index appeared, or the election
+            // year advanced (a new cycle's result certified).
+            bool winnerAppeared = cur.WinnerIndex >= 0 && cur.WinnerIndex != prev.WinnerIndex;
+            bool cycleAdvanced = cur.ElectionYear > prev.ElectionYear && prev.ElectionYear > 0;
+            if (winnerAppeared || cycleAdvanced)
+                changes["election_concluded"] = new
+                {
+                    winner_index = cur.WinnerIndex >= 0 ? (int?)cur.WinnerIndex : null,
+                    winner_name = cur.WinnerName,
+                    election = cur.ElectionYear > 0 ? $"{cur.ElectionYear:D4}-{Math.Max(1, cur.ElectionMonth):D2}" : null,
+                };
+
+            return changes.Count > 0 ? changes : null;
         }
 
         // Generic added/removed/renamed diff for the simple id+name entity classes.
