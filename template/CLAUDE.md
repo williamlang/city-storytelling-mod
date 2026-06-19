@@ -254,6 +254,20 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               surface_water_availability. This is the climate
                               and region anchor — latitude alone narrows
                               "where in North America" enormously.
+                mods.loaded — peer code mods CS2 reports as enabled, each
+                              { id, name, version }. Cross-reference id against
+                              mod-effects.md; a matching entry is a HARD grounding
+                              input (a mod can change scale, aging, services, or
+                              add whole systems). See "Grounded in city state".
+                politics    — civic/political state, present ONLY when the
+                              Elections mod is loaded (null otherwise — check
+                              before relying on it). Stage, schedule, parties,
+                              candidates (real residents), poll / result tallies,
+                              legislation, and scandal signals. Elections is the
+                              AUTHORITY on the race: candidates → characters/,
+                              parties → factions/, results → events/. See
+                              mod-effects.md "Elections" and the /events-resolve
+                              "Election cycle" step.
                 city.*      — money, happiness, health, tourists, milestone,
                               danger, XP, zone counts by type.
                 city.churn  — daily births / deaths / moved-in / moved-away
@@ -439,7 +453,8 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 
 - "What kind of world is this city in?" / "What's the climate?" → `map.*` in the latest snapshot.
 - "What's the city's current state?" → latest `snapshots/*.json` (`city.*`, `demographics`).
-- "What changed since last play?" → `diff` block in the latest snapshot.
+- "Who's running for mayor? / who's mayor? / which party holds power? / when's the election?" → `politics` in the latest snapshot (present only with the Elections mod; `null` otherwise). It's the authority on the race — read it instead of speculating. Candidates are real residents → seed `characters/`; parties → `factions/`.
+- "What changed since last play?" → `diff` block in the latest snapshot (including `diff.politics` for election transitions).
 - "Why are people leaving?" → `city.churn.moved_away_by_reason`.
 - "How rough is this neighborhood?" → `pollution.by_district[<name>].residential` (what homes feel, not the raw district avg) + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
 - "Is anyone actually suffering from noise / who's making it?" → `pollution.noise_hotspots` (affected homes, x/y) + `pollution.noise_sources` (loudest producers, x/y); only a story when a source sits near a hotspot.
@@ -461,6 +476,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - `diff.named_buildings.added` — civic infrastructure or player-renamed places appearing for the first time. Schools, fire stations, transformer stations, rail yards, named landmarks. Each one is an `events/*.md` candidate (e.g., "Inger Brevik Elementary opened, March 2027").
 - `diff.named_buildings.removed` — demolitions of previously-named places. Worth noting if the building had a canon entry; not every removal needs an event.
 - `diff.outside_connections.added` — new highway/rail/air destination connected. "Route to Canmore opened" is a real civic milestone.
+- `diff.politics` — election transitions (Elections mod): `stage` change (campaign moving toward election day), `new_mayor` (power changed hands or the first mayor took office), `election_concluded` (a winner certified). Each is a strong `events/*.md` candidate — handled in detail by the `/events-resolve` "Election cycle" step.
 
 **Story-worthy signals in the snapshot body** — these are *standing* signals (the current state, not a change), useful for grounding character motives, faction positions, and the city's mood when writing canon at any point:
 
@@ -472,6 +488,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - `land_value.by_district` — per-district averages. "This is where the money lives" + "the bottom fell out of this district" both live here. Cross-reference against pollution (pollution drags land value down — the engine's own update job subtracts pollution penalties).
 - `crime.by_district` — per-district active-criminal counts. Districts with no active criminals are omitted; districts with elevated counts vs. their population are the "rough neighborhoods" the storyteller should be writing about. Pair with `pollution.by_district` and low `land_value.by_district` to spot the classic neglected-quarter triple.
 - `tourists.by_district` — where the city's visitors are right now. A district carrying most of the tourist count is the city's tourist face (its businesses, its character, its locals' relationship to outsiders); a marquee district pulling none is a story about why. Cross-reference `attractiveness` and `city.churn.moved_away_by_reason` tourist variants (`tourist_no_hotel`, `tourist_no_target`) to write about a tourism economy that's straining or failing to land.
+- `politics` — the live civic-political layer (Elections mod; `null` when not loaded). The standing race is real, mod-authored fact: `parties[]` are `factions/` (with `reputation`, `wins`, `tags`), `candidates[]` are real residents to seed as `characters/` (each carries `name`, `age_band`, `education`, `work`, `wealth`, and a `tag` like *Populist* / *Honest* / *Corrupt* — a ready-made characterization hook), `mayor` holds power now, and `legislation[]` is enacted policy. `integrity.*` + a candidate's `corruption_risk_steps` + `mayor.bribe_total` are real scandal pressure for `secrets/`. Don't fabricate a political backdrop when this block exists — read it and give it human texture (scaled to the city's size).
 - `citizens_sample.citizens` — the candidate-character pool. When the story needs a named face (a homeowner objecting to a rezoning, a small-business owner in a struggling district, a teenager about to leave town), pluck one whose attributes fit: matching home_district, matching workplace, matching age band, matching education. Always-included `followed: true` citizens are the player's explicit picks — anchor canon around them first.
 
 **Reading the spatial chunks — what to take literally vs. softly:**
