@@ -22,6 +22,7 @@ The mod's auto-start-on-save-load setting may have already written the stub for 
 - Read `canon/city.md`, `canon/era.md`, `canon/tone.md` if present (small, always-load world canon). Treat `city.md`'s `region:` as a hard constraint on naming and cultural grounding, and `tone.md`'s narrative focus lenses as the bias for what *kind* of opening objectives to propose (citizens → human-scale/neighborhood; civic → systems/economy/politics).
 - Most recent file in `sessions/` (recent ones only — older sessions live compressed in `sessions/archive/`; skim that index lazily, only pulling specific months if relevant).
 - Latest snapshot in `snapshots/` for the current in-game state.
+- **Live election check (Elections mod).** If the latest snapshot's `politics` block is non-null, a mayoral race is running. Verify it's reflected in canon: are the candidates in `characters/`, the parties in `factions/`, and is there an open `type: election` event for this cycle (`politics.schedule.mayor_term_year`)? If any of that is missing — e.g. Elections came online mid-playthrough and the ballot never made it into the story — flag it as a gap and run the `/events-resolve` "Election cycle" step to seed the cast and open the event. (Don't let a race run for sessions without the cast existing in canon.)
 - Unpopulated scaffold features:
   - Is `canon/playthrough-premise.md` missing or empty?
   - Is `secrets/` missing or empty?

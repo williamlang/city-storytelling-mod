@@ -9,7 +9,7 @@ Write **one** open event — a moment the story is pushing on the city — with 
 
 If a focus is supplied above (a topic, character, faction, place, or theme — e.g. `transit`, `Halverson Civil`, `riverfront`, `scandal`), the event must engage with it. Before writing, state in one short line how I interpreted the focus so the player can redirect. If the focus line is empty, generate from current canon and city state as usual.
 
-**1. Check the open-event cap.** Count `events/*.md` files with `status: open`. If the count is already 3 or more, do *not* write a new event. Instead:
+**1. Check the open-event cap.** Count `events/*.md` files with `status: open`, **excluding `type: election` events** (those are mod-driven civic events on their own cycle — they ride the Elections schedule and don't compete for the storyteller's proposal budget). If the remaining count is already 3 or more, do *not* write a new event. Instead:
 - Surface the open count and the titles in one short sentence to the player.
 - Offer to either (a) resolve / supersede a stale one (run `/events-resolve` to clear timeouts, or pick one to retire early), or (b) describe what kind of event they'd want once one closes.
 - Stop here. Don't generate a new proposal on top of a full queue.
@@ -24,6 +24,7 @@ If a focus is supplied above (a topic, character, faction, place, or theme — e
   - `city.churn.moved_away_by_reason`, `city.social`, `pollution.by_district`, `land_value.by_district`, `crime.by_district` — pressure signals worth dramatizing.
   - `services.education` — per-school enrollment vs. capacity. A school at/over capacity (`utilization` ≥ ~0.95) or a tier with no seats is a ready-made "build/expand a school" event. Use the real numbers; never invent enrollment. (null = no school yet.)
   - `district_zones` and `diff.*` — what's actually being built / changing right now.
+- `politics` (Elections mod; null if absent) — **a live race is a major live thread that should bias what I propose.** A poll dropping in three weeks, a frontrunner with strong `poll_votes` vs. a trailing rival, a sitting `mayor` about to face re-election, an active scandal in `integrity.*` — these pull the proposal toward civic-spend moments (a project the mayor's faction wants to point to before the vote), candidate-positioning moments (a developer courting a frontrunner), or scandal-bait. The election itself already has its own `type: election` event (from `/events-resolve`); what I write here is a *story event that intersects the race*, not a duplicate of it. Tie `pushed_by`/`opposed_by` to the candidates and parties in `politics`.
 - **Current in-world date** — read `clock.json` at the city root (`in_world_date`). This is the live "now," refreshed every few seconds; use it as the event's open date and the base for computing the deadline — not the snapshot's `captured_at_ingame`, which can be in-world weeks stale. Fall back to the snapshot's `captured_at_ingame` only if `clock.json` is missing.
 - `carto/processed/index.md` plus any `districts/<slug>.md` the event will target — for spatial grounding (where the road would actually go, which district the rezoning hits).
 - Open `events/*.md` (`status: open`) — don't propose something that overlaps with an open thread; either pick a different angle or reference / supersede the existing one.

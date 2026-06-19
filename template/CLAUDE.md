@@ -131,6 +131,15 @@ The mod's `AutoSessionStartOnSaveLoad` setting (in CS2's Options → CityStoryMo
 
 If the player opens a conversation *without* `/session-start` and I notice the canon has unpopulated scaffold features (missing `secrets/`, missing `arc:` blocks on major entities, etc.), I raise the gap as my first response and offer to run the **Scaffold arrival** backfill — I do not silently begin other work while scaffold features sit empty.
 
+### New-snapshot-surface backstop
+
+Scaffold-arrival is about the *template* gaining features. The mirror case is a *runtime* feature appearing in the snapshot mid-playthrough: a top-level block that was `null`/empty on earlier snapshots becomes populated because the player turned on a mod or built something for the first time. **Whenever I read a snapshot, if a top-level surface has gone from absent to present and isn't yet reflected in canon, I flag it and seed it rather than reading past it.** The cases today:
+- **`politics`** newly non-null → the Elections mod came online; a mayoral race exists. Seed candidates → `characters/`, parties → `factions/`, and open the `type: election` event (this is exactly the `/events-resolve` "Election cycle" step; I run it now rather than waiting to be asked).
+- **`services.education`** newly non-null → the city's first school(s); fold into canon and the "build/expand a school" signal.
+- **`services.civic_buildings`** newly non-empty → civic buildings exist to name (see "Naming civic buildings").
+
+The principle generalizes to any future top-level block: absent→present is a story signal, not noise to skip.
+
 ## Slash commands
 
 The player has these project commands at `.claude/commands/`:
@@ -624,6 +633,8 @@ Lifecycle for an `events/*.md` file:
 - **`resolved-by-timeout`** — the window closed without any option firing. The storyteller wrote the "ignored" consequence canon (the deal collapsed, the rival smelled blood, the offer expired). `resolved_via: timeout`. `consequences` filled in.
 - **`historical`** — recorded after the fact by `/session-end` for things that happened without a corresponding open event (a new outside connection opened, a player-named landmark appeared, a milestone advanced). No options, no deadline, no resolution loop. Records, not proposals.
 
+**`type: election` — the mod-driven civic event (Elections mod).** A mayoral race is a real `events/*.md` so it rides this exact lifecycle automatically — I don't hand-track it. `/events-resolve` *generates* it (as `status: open`) the moment a campaign appears in `snapshot.politics`, carrying `cycle:` (= `politics.schedule.mayor_term_year`, the dedupe key — one election event per cycle), `in_world_deadline:` = the known election date from `politics.schedule.election`, and an option per candidate plus a `stay-neutral` option. The player influences it in-game through the Elections mod's own levers (donations, endorsements, turnout programs); `/events-resolve` then closes it the moment the race concludes, matching `resolved_via` to whichever option backed the **actual winner** in `politics.result` — even if the player backed someone who lost (recorded as their bet failing, not left open). Closing it propagates the usual way: winner → the sitting `mayor` character, party → `factions/`. Unlike a normal proposal its outcome is machine-truth (`politics.result.winner_name`), so it resolves cleanly rather than on a judgment call, and it's exempt from the `/story-driven` open-event cap.
+
 **sessions/*.md**
 ```yaml
 ---
@@ -777,6 +788,7 @@ The mod lists every city-service building in `snapshot.services.civic_buildings`
 ## Style guide
 
 - **Plausible names.** North American, varied ethnic backgrounds, no joke names. Real-sounding companies (e.g. "Halverson Civil" beats "BuildCo").
+- **Grounding mod-given names.** When a peer mod hands me a real entity — most often an Elections candidate, who arrives as an actual citizen with a game-given first name like "Olive" or "Ralph" — that name is canon (the mod is the authority; the player may see it in-game). I don't reject or replace it for feeling like a placeholder. Instead I *ground it*: keep the given name and build the character around it — add a region-plausible surname if the mod only supplies one part ("Olive Voss", "Ralph Reichert", drawn from the city's `region:`), tie them to existing canon (a family already in the story, a neighborhood, a company), and let their `tag`/`age_band`/`work`/`wealth` flesh out a real person. The mod gives the seed; I grow it — I don't swap the seed.
 - **No magic.** No superpowers, no in-world destiny. People act from interests, biases, and incomplete information. (Authorial `arc:` bias is writer's-room intent — characters never feel it.)
 - **Specifics over abstraction.** Don't write "a developer wants to build housing." Write "Marcus Devereaux's firm has a 14-acre option on the old Conrail yard and a quiet promise from two councilors."
 - **Locate canon in space.** When a canon entry is tied to a physical spot — a place or landmark, a company's premises, an event's site, a character's home or workplace — work a real `(x, y)` coordinate into its body prose. The mod turns any `(x, y)` pair in the text into a clickable pin that flies the camera there (in chat *and* in canon files), so the coordinate makes the location live, not just described. Coordinates are the recentered-meters frame the chunks already use.
