@@ -1003,6 +1003,13 @@ namespace CityStoryMod.Systems
             string file = Path.Combine(snapshotsDir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
 
+            // Prune snapshots older than the retention window. At a 5-minute
+            // cadence a week is ~2,000 files; the agent only ever reads the
+            // latest snapshot and the most-recent prior one, and the C# diff
+            // works off in-memory _prev* state, not old files — so nothing the
+            // mod or agent does needs week-old snapshots on disk.
+            CleanupOldSnapshots(snapshotsDir);
+
             Mod.LastExportedCityDir = dir;
 
             _log.Info($"Exported snapshot ({triggeredBy}): citizens_total={citizensTotal}, outside_connections={named.outsideConnections.Count}, water_sources={named.waterSources.Count} -> {file}");
@@ -2717,6 +2724,54 @@ namespace CityStoryMod.Systems
         // CitizenFlags (m_State) is treated opaquely: we split its ToString into named
         // flags (AgeBit1, Male, EducationBit2, ...) and count each. The agent can
         // interpret the flag names without us needing to decode the bit layout.
+        // Snapshots are kept for this many days, then pruned on the next
+        // export. Easy to promote to a Settings slider later if anyone wants
+        // longer history; a week is plenty given the agent only reads the
+        // latest plus the most-recent prior snapshot.
+        const int SnapshotRetentionDays = 7;
+
+        // Deletes snapshot-<unixTs>.json files older than the retention window.
+        // Age comes from the unix timestamp baked into the filename (the
+        // export's real-world capture time); if a name doesn't parse, falls
+        // back to the file's last-write time. Best-effort per file — a locked
+        // or unreadable file is logged and skipped, and retried next export.
+        // Only touches snapshot-*.json, so clock.json / naming files are safe.
+        void CleanupOldSnapshots(string snapshotsDir)
+        {
+            long cutoffUnix = DateTimeOffset.UtcNow.AddDays(-SnapshotRetentionDays).ToUnixTimeSeconds();
+            DateTime cutoffUtc = DateTime.UtcNow.AddDays(-SnapshotRetentionDays);
+
+            string[] files;
+            try { files = Directory.GetFiles(snapshotsDir, "snapshot-*.json"); }
+            catch (Exception ex)
+            {
+                _log.Warn($"Snapshot cleanup: could not list {snapshotsDir}: {ex.Message}");
+                return;
+            }
+
+            int deleted = 0;
+            foreach (string path in files)
+            {
+                try
+                {
+                    string name = Path.GetFileNameWithoutExtension(path);   // snapshot-<ts>
+                    int dash = name.IndexOf('-');
+                    bool old = (dash >= 0 && long.TryParse(name.Substring(dash + 1), out long ts))
+                        ? ts < cutoffUnix
+                        : File.GetLastWriteTimeUtc(path) < cutoffUtc;
+
+                    if (old) { File.Delete(path); deleted++; }
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"Snapshot cleanup: could not delete {Path.GetFileName(path)}: {ex.Message}");
+                }
+            }
+
+            if (deleted > 0)
+                _log.Info($"Snapshot cleanup: removed {deleted} snapshot(s) older than {SnapshotRetentionDays} days.");
+        }
+
         // v0.11 (#39) — the code mods CS2 reports as enabled this session, so
         // the storyteller can check `snapshot.mods.loaded` against the shipped
         // `mod-effects.md` registry and adjust its grounding (a peer mod can
