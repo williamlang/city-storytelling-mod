@@ -8,6 +8,7 @@ import {
   isRunningBinding,
   wizardDoneBinding,
   quickstartAvailableBinding,
+  electionsAvailableBinding,
   lastErrorBinding,
   foundCity,
   dismissQuickstart,
@@ -29,27 +30,27 @@ import type { WizardDone } from "./bindings";
 //   cartoExporting       → spatial-data prerequisite gate
 //   otherwise            → the config form
 
-const REGIONS = [
+export const REGIONS = [
   "North America", "Europe", "Asia", "Latin America",
   "Africa", "Oceania", "Middle East",
 ];
-const TONES = ["grounded-realist", "dramatic", "noir", "hopeful", "satirical"];
-const MATURITY = ["cozy", "pg-13", "gritty"];
-const CAST = ["tight", "balanced", "sprawling"];
+export const TONES = ["grounded-realist", "dramatic", "noir", "hopeful", "satirical"];
+export const MATURITY = ["cozy", "pg-13", "gritty"];
+export const CAST = ["tight", "balanced", "sprawling"];
 
-// Placeholder integrations — none are wired yet. Each is gated on its own
-// issue (#31 / #19 / #43) and only appears once both supported and detected.
-// Rendered disabled here so the form shows where they'll live.
+// Planned integrations still gated on their own issue (#31 / #19). Rendered
+// disabled so the form shows where they'll live, until each is wired and a
+// detection binding exists. Elections (#43) is wired, so it's handled
+// separately below as a real, default-on toggle gated on electionsAvailable.
 const PLANNED_INTEGRATIONS = [
   { id: "infoloom", label: "InfoLoom", issue: "#31" },
   { id: "custom-chirps", label: "Custom Chirps", issue: "#19" },
-  { id: "elections", label: "Elections", issue: "#43" },
 ];
 
 // A row of mutually-exclusive pill buttons standing in for a radio group.
 // Native <input type=radio> styling is unreliable in Coherent, so we paint
 // our own selectable pills.
-function PillRow(props: {
+export function PillRow(props: {
   value: string;
   options: { id: string; label: string }[];
   onPick: (id: string) => void;
@@ -70,14 +71,14 @@ function PillRow(props: {
   );
 }
 
-const pills = (ids: string[]) => ids.map((id) => ({ id, label: id }));
+export const pills = (ids: string[]) => ids.map((id) => ({ id, label: id }));
 
 // A click-to-open dropdown built from div/button only. We can't use a native
 // <select>: Cohtml doesn't implement HTMLSelectElement.options, so React's
 // controlled-<select> mount path throws on `node.options.length` and takes the
 // whole UI down with it. This renders the chosen value as a button and expands
 // an inline list of options below it on click.
-function Dropdown(props: {
+export function Dropdown(props: {
   value: string;
   options: string[];
   onPick: (value: string) => void;
@@ -116,6 +117,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const cartoExporting = useValue(cartoExportingBinding);
   const isRunning = useValue(isRunningBinding);
   const quickstartAvailable = useValue(quickstartAvailableBinding);
+  const electionsAvailable = useValue(electionsAvailableBinding);
   const lastError = useValue(lastErrorBinding);
   const doneJson = useValue(wizardDoneBinding);
   const done = useMemo<WizardDone | null>(() => {
@@ -172,6 +174,12 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const [levelup, setLevelup] = useState(true);
   const [proactivity, setProactivity] = useState<"on-request" | "proactive">("on-request");
   const [git, setGit] = useState(false);
+  // Peer-mod integrations. Default ON when detected — the player opts OUT,
+  // not in (spec §7.1): installing the peer mod implies wanting it reflected
+  // in the story. Unchecking omits "elections" from the written integrations[]
+  // list, which the storyteller reads as a deliberate opt-out (see
+  // template/CLAUDE.md "Peer-mod integration gate").
+  const [elections, setElections] = useState(true);
 
   // At least one focus lens must stay checked — a story can't focus on
   // nothing (spec §7.1). Unchecking the last one is a no-op.
@@ -184,6 +192,9 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   };
 
   const submit = () => {
+    // Enabled integrations: only ids that are both detected and left checked.
+    // Elections is the only wired one today; absence is a real opt-out.
+    const integrations = electionsAvailable && elections ? ["elections"] : [];
     const config = {
       region,
       name: name.trim(), // blank → C# treats as (suggest)
@@ -198,7 +209,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
       levelup_storylines: levelup,
       storyteller_proactivity: proactivity,
       git_versioning: git,
-      integrations: [], // placeholder — none supported yet
+      integrations,
     };
     foundCity(JSON.stringify(config));
     setSubmitted(true);
@@ -488,10 +499,21 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
                   <div className={styles.wizSectionLabel}>Mod integrations</div>
                   <div className={styles.wizField}>
                     <div className={styles.wizHint}>
-                      None available yet — these light up once detected and
-                      supported.
+                      {electionsAvailable
+                        ? "Detected peer mods are on by default — uncheck to keep one out of the story."
+                        : "None available yet — these light up once detected and supported."}
                     </div>
                     <div className={styles.wizCheckRow}>
+                      {electionsAvailable && (
+                        <button
+                          type="button"
+                          className={`${styles.wizCheck} ${elections ? styles.wizCheckOn : ""}`}
+                          onClick={() => setElections((v) => !v)}
+                        >
+                          <span className={styles.wizCheckBox}>{elections ? "✓" : ""}</span>
+                          Elections
+                        </button>
+                      )}
                       {PLANNED_INTEGRATIONS.map((m) => (
                         <button
                           key={m.id}

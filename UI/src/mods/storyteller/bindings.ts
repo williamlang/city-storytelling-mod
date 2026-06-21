@@ -14,6 +14,12 @@ export const availableCommandsBinding = bindValue<string>(GROUP, "availableComma
 export const canonTreeBinding = bindValue<string>(GROUP, "canonTree", "{}");
 export const cartoExportingBinding = bindValue<boolean>(GROUP, "cartoExporting", false);
 export const cartoAvailableBinding = bindValue<boolean>(GROUP, "cartoAvailable", false);
+// True when the Elections peer mod is detected as loaded. The quickstart
+// wizard renders a real (default-on) Elections integration toggle only when
+// this is true; otherwise the integration sits as a disabled placeholder.
+// Mirrors the reflective probe ExportSystem uses for the snapshot `politics`
+// block, so the checkbox appears iff politics data would actually be exported.
+export const electionsAvailableBinding = bindValue<boolean>(GROUP, "electionsAvailable", false);
 // True when no usable LLM provider is configured yet (hosted provider with no
 // API key, or no model id). Drives the first-run "set up a provider" nudge.
 export const setupNeededBinding = bindValue<boolean>(GROUP, "setupNeeded", false);
@@ -45,6 +51,21 @@ export interface WizardDone {
   region: string;
   founded?: string;
   premise: string;
+}
+
+// JSON of the current per-city settings.json preference fields, read by the
+// native Story Settings editor to pre-populate. Mirrors the editable subset
+// PromptUISystem.BuildStorySettingsJson emits; "{}" before a city is loaded.
+export const storySettingsBinding = bindValue<string>(GROUP, "storySettings", "{}");
+
+export interface StorySettings {
+  secrets_visibility: "hidden" | "shown";
+  levelup_storylines: boolean;
+  cast_density: "tight" | "balanced" | "sprawling";
+  content_maturity: "cozy" | "pg-13" | "gritty";
+  storyteller_proactivity: "on-request" | "proactive";
+  git_versioning: boolean;
+  integrations: string[];
 }
 
 // JSON-serialized list of currently-open story events (status: open in
@@ -137,6 +158,14 @@ export function dismissQuickstart() {
 // submitPrompt and sidesteps CS2's multi-arg binding limits.
 export function foundCity(configJson: string) {
   trigger(GROUP, "foundCity", configJson);
+}
+
+// Save edited per-city settings.json preference fields. C# merges the known
+// fields into the existing file directly — NO LLM call (these are pure
+// preferences). Sent as one JSON string (same StorySettings shape above);
+// mirrors foundCity and sidesteps CS2's multi-arg binding limits.
+export function saveSettings(settingsJson: string) {
+  trigger(GROUP, "saveSettings", settingsJson);
 }
 
 // Pipe a diagnostic message to the C# mod log. Coherent UI has no

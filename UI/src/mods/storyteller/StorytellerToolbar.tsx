@@ -34,6 +34,7 @@ import { CanonBrowser } from "./CanonBrowser";
 import { FileModal } from "./FileModal";
 import { OpenEventsInbox } from "./OpenEventsInbox";
 import { QuickstartWizard } from "./QuickstartWizard";
+import { StorySettingsModal } from "./StorySettingsModal";
 
 // Top-level Storyteller entry. The toolbar icon (floating variant matches
 // CS2's other top-left tool mods) toggles a draggable panel with:
@@ -202,6 +203,10 @@ export function StorytellerToolbar() {
   // "Start" button; the warm-amber icon flash + banner appear whenever the
   // city is fresh (quickstartAvailable binding).
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Whether the Story Settings editor (gear button) is open. Post-founding
+  // surface for changing settings.json preferences, including the Elections
+  // integration toggle.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Local "pending" state for the Refresh map button. The C# cartoExporting
   // binding round-trips through Coherent UI, but the main thread blocks
@@ -408,9 +413,9 @@ export function StorytellerToolbar() {
     maxH: typeof window !== "undefined" ? window.innerHeight - 40 : 1080,
   });
   const onHeaderMouseDown = (e: React.MouseEvent) => {
-    // Skip when the click is on the close button so its handler fires
-    // without starting a drag.
-    if ((e.target as HTMLElement).closest(`.${styles.close}`)) return;
+    // Skip when the click lands on the right-side header controls (gear +
+    // close) so their handlers fire without starting a panel drag.
+    if ((e.target as HTMLElement).closest(`.${styles.headerActions}`)) return;
     beginDrag(e, panelRef.current);
   };
   const onResizeHandleMouseDown = (e: React.MouseEvent) => {
@@ -487,13 +492,33 @@ export function StorytellerToolbar() {
                 {__BUILD_TIME__}
               </span>
             </span>
-            <button
-              type="button"
-              className={styles.close}
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
+            <div className={styles.headerActions}>
+              <button
+                type="button"
+                className={styles.headerGear}
+                title="Story settings"
+                aria-label="Story settings"
+                onClick={() => setSettingsOpen(true)}
+              >
+                {/* Inline gear SVG — Coherent UI has no emoji font (a ⚙ glyph
+                    renders as tofu) and doesn't resolve `currentColor` on SVG,
+                    so the fill is hard-coded and sizing comes from the SCSS
+                    class (matching CommandMenu's chevron pattern). */}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#cfe5f5"
+                    d="M19.14 12.94a7.49 7.49 0 0 0 .05-.94 7.49 7.49 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.62l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.43h-3.84a.5.5 0 0 0-.5.43l-.36 2.54a7 7 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.27 8.86a.5.5 0 0 0 .12.62l2.03 1.58a7.49 7.49 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.62l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96a7 7 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .5.43h3.84a.5.5 0 0 0 .5-.43l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.62l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.close}
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           {setupNeeded && (
@@ -669,6 +694,8 @@ export function StorytellerToolbar() {
       ))}
 
       {wizardOpen && <QuickstartWizard onClose={() => setWizardOpen(false)} />}
+
+      {settingsOpen && <StorySettingsModal onClose={() => setSettingsOpen(false)} />}
     </>
   );
 }

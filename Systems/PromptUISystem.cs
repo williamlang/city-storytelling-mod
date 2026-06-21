@@ -64,6 +64,21 @@ namespace CityStoryMod.Systems
         //                         wizard_done tool call.
         ValueBinding<bool> _quickstartAvailableBinding;
         ValueBinding<string> _wizardDoneBinding;
+        // True when a supported peer-mod integration is detected as loaded, so
+        // the wizard can render a real (default-on) toggle for it instead of a
+        // disabled placeholder. Today the only gated integration is Elections;
+        // its detection is the same reflective probe ExportSystem uses for the
+        // `politics` block. Mirrored each OnUpdate next to cartoAvailable (never
+        // at OnCreate — ElectionsBridge.IsAvailable latches on first call, so we
+        // wait until the modManager is populated to avoid latching false).
+        ValueBinding<bool> _electionsAvailableBinding;
+        // JSON of the current per-city settings.json preference fields, read by
+        // the native Story Settings editor to pre-populate (and re-read after a
+        // direct Save). Recomputed on the same cadence as quickstartAvailable
+        // (both read settings.json) and pushed immediately after a saveSettings
+        // write. "{}" before any city is loaded.
+        ValueBinding<string> _storySettingsBinding;
+        string _storySettingsScannedCityDir;
         // Session-scoped: "Later" sets this so the flash/banner stay down for
         // this load. Reset on the next save-load edge of a still-fresh city.
         bool _quickstartDismissed;
@@ -149,6 +164,8 @@ namespace CityStoryMod.Systems
             _openEventsBinding = new ValueBinding<string>(Group, "openEvents", "[]");
             _quickstartAvailableBinding = new ValueBinding<bool>(Group, "quickstartAvailable", false);
             _wizardDoneBinding = new ValueBinding<string>(Group, "wizardDone", "");
+            _electionsAvailableBinding = new ValueBinding<bool>(Group, "electionsAvailable", false);
+            _storySettingsBinding = new ValueBinding<string>(Group, "storySettings", "{}");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
             AddBinding(_tokenSummaryBinding);
@@ -164,6 +181,8 @@ namespace CityStoryMod.Systems
             AddBinding(_openEventsBinding);
             AddBinding(_quickstartAvailableBinding);
             AddBinding(_wizardDoneBinding);
+            AddBinding(_electionsAvailableBinding);
+            AddBinding(_storySettingsBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
             AddBinding(new TriggerBinding(Group, "cancelRun", OnCancelRun));
@@ -175,6 +194,7 @@ namespace CityStoryMod.Systems
             AddBinding(new TriggerBinding(Group, "startQuickstart", OnStartQuickstart));
             AddBinding(new TriggerBinding(Group, "dismissQuickstart", OnDismissQuickstart));
             AddBinding(new TriggerBinding<string>(Group, "foundCity", OnFoundCity));
+            AddBinding(new TriggerBinding<string>(Group, "saveSettings", OnSaveSettings));
 
             StorytellerDispatcher d = Mod.Storyteller;
             if (d != null)
@@ -416,6 +436,9 @@ namespace CityStoryMod.Systems
             // A finished /new-city run may have flipped settings.bootstrapped;
             // re-evaluate the fresh-city signal so the flash/banner clear.
             _quickstartDirty = true;
+            // …and may have written settings.json (founding, or a chat edit) —
+            // force the Story Settings editor's snapshot to rebuild next tick.
+            _storySettingsScannedCityDir = null;
         }
 
         // ---- Drain (main thread) ----
@@ -452,6 +475,16 @@ namespace CityStoryMod.Systems
                 _quickstartDirty = false;
                 _quickstartScannedCityDir = cityDir;
                 RecomputeQuickstartAvailable(cityDir);
+            }
+
+            // Refresh the Story Settings editor's snapshot of settings.json on
+            // the same triggers (city switch, run finish, save-load edge). After
+            // a direct Save, OnSaveSettings pushes the new value itself, so this
+            // is just the city-change / external-edit refresh path.
+            if (cityDir != _storySettingsScannedCityDir)
+            {
+                _storySettingsScannedCityDir = cityDir;
+                _storySettingsBinding.Update(BuildStorySettingsJson(cityDir));
             }
 
             // Drain a wizard_done founding summary stashed by the tool executor
@@ -510,6 +543,16 @@ namespace CityStoryMod.Systems
             if (cartoAvail != _cartoAvailableBinding.value)
             {
                 _cartoAvailableBinding.Update(cartoAvail);
+            }
+
+            // Same for Elections — the one peer-mod integration the wizard can
+            // offer as a real (default-on) toggle today. Mirrors the reflective
+            // probe ExportSystem uses for the `politics` block, so the checkbox
+            // appears iff the snapshot would actually carry politics data.
+            bool electionsAvail = ElectionsBridge.IsAvailable;
+            if (electionsAvail != _electionsAvailableBinding.value)
+            {
+                _electionsAvailableBinding.Update(electionsAvail);
             }
 
             // Reflect provider-setup status so the panel can nudge a tester who
@@ -809,6 +852,82 @@ namespace CityStoryMod.Systems
             bool available = fresh && !_quickstartDismissed;
             if (_quickstartAvailableBinding.value != available)
                 _quickstartAvailableBinding.Update(available);
+        }
+
+        // The settings.json preference fields the native Story Settings editor
+        // reads (and writes back). Each carries its default — both for building
+        // the editor's view of a partial/old settings.json and for the merge in
+        // OnSaveSettings. cs2_mod_output_dir / bootstrapped are owned elsewhere
+        // and never touched here; story-shaping canon fields live in canon/*.md,
+        // not settings.json, and are changed via chat (see CLAUDE.md).
+        static readonly (string key, JToken dflt)[] _editableSettings =
+        {
+            ("secrets_visibility", "hidden"),
+            ("levelup_storylines", true),
+            ("cast_density", "balanced"),
+            ("content_maturity", "pg-13"),
+            ("storyteller_proactivity", "on-request"),
+            ("git_versioning", false),
+        };
+
+        // Serializes the current settings.json preference fields (with defaults
+        // for anything missing) into the JSON the storySettings binding carries.
+        // `integrations` is emitted as an array (default empty).
+        static string BuildStorySettingsJson(string cityDir)
+        {
+            JObject settings = ReadCitySettings(cityDir) ?? new JObject();
+            var o = new JObject();
+            foreach ((string key, JToken dflt) in _editableSettings)
+                o[key] = settings[key] ?? dflt.DeepClone();
+            o["integrations"] = settings["integrations"] is JArray arr
+                ? (JToken)arr.DeepClone()
+                : new JArray();
+            return o.ToString(Formatting.None);
+        }
+
+        // "Save" from the native Story Settings editor — a direct settings.json
+        // write with NO LLM call (these are pure preferences; see CLAUDE.md
+        // "Changing founding choices later"). Merges only the known editable
+        // fields from the payload into the existing file, preserving everything
+        // else (cs2_mod_output_dir, bootstrapped, any unknown keys). Pushes the
+        // refreshed binding so the editor reflects what landed.
+        void OnSaveSettings(string json)
+        {
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir))
+            {
+                _log.Warn("OnSaveSettings: no city dir; ignoring.");
+                return;
+            }
+
+            JObject incoming;
+            try { incoming = string.IsNullOrWhiteSpace(json) ? new JObject() : JObject.Parse(json); }
+            catch (Exception ex)
+            {
+                _log.Warn($"OnSaveSettings: unparseable payload ({ex.Message}); ignoring.");
+                return;
+            }
+
+            JObject settings = ReadCitySettings(cityDir) ?? new JObject();
+            foreach ((string key, JToken _) in _editableSettings)
+                if (incoming[key] != null) settings[key] = incoming[key];
+            if (incoming["integrations"] is JArray arr)
+                settings["integrations"] = arr;
+
+            string path = Path.Combine(cityDir, "settings.json");
+            try
+            {
+                File.WriteAllText(path, settings.ToString(Formatting.Indented));
+                _log.Info($"Story Settings saved to {path}.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"OnSaveSettings: failed to write {path}: {ex.Message}");
+                return;
+            }
+
+            _storySettingsScannedCityDir = cityDir;
+            _storySettingsBinding.Update(BuildStorySettingsJson(cityDir));
         }
 
         static bool IsCityUnbootstrapped(string cityDir)

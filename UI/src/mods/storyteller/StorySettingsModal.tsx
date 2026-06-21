@@ -1,0 +1,212 @@
+import { useMemo, useRef, useState } from "react";
+import { useValue } from "cs2/api";
+import styles from "./storyteller.module.scss";
+import { useDrag } from "./useDrag";
+import {
+  storySettingsBinding,
+  electionsAvailableBinding,
+  saveSettings,
+} from "./bindings";
+import type { StorySettings } from "./bindings";
+import { PillRow, pills, MATURITY, CAST } from "./QuickstartWizard";
+
+// Story Settings editor — the post-founding surface for changing the per-city
+// settings.json preference fields (docs/quickstart-wizard.md §11). Opened from
+// the gear affordance in the panel header. Reuses the Quickstart wizard's
+// controls and modal chrome, but: it reads CURRENT state from settings.json
+// (the storySettings binding), its primary action is "Save", and Save writes
+// settings.json DIRECTLY with no LLM call (these are pure preferences).
+//
+// Scope: the settings.json behavior/disclosure fields only — including the
+// peer-mod integration toggles (Elections). Story-shaping canon fields (tone,
+// region, era) are NOT here: changing those adapts the story forward and is a
+// chat request (see CLAUDE.md "Changing founding choices later"). The footer
+// points the player there.
+
+const DEFAULTS: StorySettings = {
+  secrets_visibility: "hidden",
+  levelup_storylines: true,
+  cast_density: "balanced",
+  content_maturity: "pg-13",
+  storyteller_proactivity: "on-request",
+  git_versioning: false,
+  integrations: [],
+};
+
+export function StorySettingsModal({ onClose }: { onClose: () => void }) {
+  const settingsJson = useValue(storySettingsBinding);
+  const electionsAvailable = useValue(electionsAvailableBinding);
+
+  // Parse the current settings once at mount. The modal is conditionally
+  // mounted (StorytellerToolbar unmounts it on close), so this initializer
+  // re-reads fresh state every time the player opens the editor.
+  const initial = useMemo<StorySettings>(() => {
+    try {
+      return { ...DEFAULTS, ...(JSON.parse(settingsJson) as Partial<StorySettings>) };
+    } catch {
+      return DEFAULTS;
+    }
+    // Intentionally mount-only: re-syncing mid-edit would clobber the player's
+    // in-progress choices. Save closes the modal, so there's no live re-read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [maturity, setMaturity] = useState(initial.content_maturity);
+  const [secrets, setSecrets] = useState<"hidden" | "shown">(initial.secrets_visibility);
+  const [levelup, setLevelup] = useState(initial.levelup_storylines);
+  const [castDensity, setCastDensity] = useState(initial.cast_density);
+  const [proactivity, setProactivity] =
+    useState<"on-request" | "proactive">(initial.storyteller_proactivity);
+  const [git, setGit] = useState(initial.git_versioning);
+  const [elections, setElections] = useState(initial.integrations.includes("elections"));
+
+  // Draggable floating window (same pattern as the wizard).
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const { pos, beginDrag } = useDrag();
+  const onHeaderMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest(`.${styles.wizClose}`)) return;
+    beginDrag(e, modalRef.current);
+  };
+  const modalStyle = pos
+    ? { top: `${pos.y}px`, left: `${pos.x}px` }
+    : { top: "120rem", left: "730rem" };
+
+  const save = () => {
+    // Carry forward any integrations the editor doesn't surface (future ids),
+    // toggling only Elections by what's checked. Drop "elections" when off.
+    const others = initial.integrations.filter((id) => id !== "elections");
+    const integrations = elections ? [...others, "elections"] : others;
+    const payload: StorySettings = {
+      secrets_visibility: secrets,
+      levelup_storylines: levelup,
+      cast_density: castDensity,
+      content_maturity: maturity,
+      storyteller_proactivity: proactivity,
+      git_versioning: git,
+      integrations,
+    };
+    saveSettings(JSON.stringify(payload));
+    onClose();
+  };
+
+  return (
+    <div className={styles.wizModal} style={modalStyle} ref={modalRef}>
+      <div className={styles.wizHeader} onMouseDown={onHeaderMouseDown}>
+        <span className={styles.wizTitle}>Story settings</span>
+        <button type="button" className={styles.wizClose} onClick={onClose}>×</button>
+      </div>
+
+      <div className={styles.wizBody}>
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Content maturity</label>
+          <PillRow
+            value={maturity}
+            options={pills(MATURITY)}
+            onPick={(id) => setMaturity(id as "cozy" | "pg-13" | "gritty")}
+          />
+          <div className={styles.wizHint}>
+            Affects how explicitly detail is divulged to you — not what story
+            gets written.
+          </div>
+        </div>
+
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Secrets visibility</label>
+          <PillRow
+            value={secrets}
+            options={[
+              { id: "hidden", label: "Hidden" },
+              { id: "shown", label: "Shown" },
+            ]}
+            onPick={(id) => setSecrets(id as "hidden" | "shown")}
+          />
+        </div>
+
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Level-up storylines</label>
+          <PillRow
+            value={levelup ? "on" : "off"}
+            options={[
+              { id: "on", label: "On" },
+              { id: "off", label: "Off" },
+            ]}
+            onPick={(id) => setLevelup(id === "on")}
+          />
+        </div>
+
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Cast density</label>
+          <PillRow
+            value={castDensity}
+            options={pills(CAST)}
+            onPick={(id) => setCastDensity(id as "tight" | "balanced" | "sprawling")}
+          />
+        </div>
+
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Storyteller proactivity</label>
+          <PillRow
+            value={proactivity}
+            options={[
+              { id: "on-request", label: "On-request only" },
+              { id: "proactive", label: "Proactive" },
+            ]}
+            onPick={(id) => setProactivity(id as "on-request" | "proactive")}
+          />
+        </div>
+
+        <div className={styles.wizField}>
+          <label className={styles.wizLabel}>Git versioning</label>
+          <PillRow
+            value={git ? "on" : "off"}
+            options={[
+              { id: "off", label: "Off" },
+              { id: "on", label: "On" },
+            ]}
+            onPick={(id) => setGit(id === "on")}
+          />
+        </div>
+
+        <div className={styles.wizSectionLabel}>Mod integrations</div>
+        <div className={styles.wizField}>
+          {electionsAvailable ? (
+            <>
+              <div className={styles.wizCheckRow}>
+                <button
+                  type="button"
+                  className={`${styles.wizCheck} ${elections ? styles.wizCheckOn : ""}`}
+                  onClick={() => setElections((v) => !v)}
+                >
+                  <span className={styles.wizCheckBox}>{elections ? "✓" : ""}</span>
+                  Elections
+                </button>
+              </div>
+              <div className={styles.wizHint}>
+                On weaves your mayoral races into the story; off keeps politics
+                soft and inferred, as if Elections weren&rsquo;t running.
+              </div>
+            </>
+          ) : (
+            <div className={styles.wizHint}>
+              No supported peer-mod integrations are detected right now.
+            </div>
+          )}
+        </div>
+
+        <div className={styles.wizHint}>
+          Tone, region, and era shape the story itself — ask the ghostwriter in
+          chat to change those (e.g. &ldquo;switch the tone to noir&rdquo;).
+        </div>
+      </div>
+
+      <div className={styles.wizFooter}>
+        <button type="button" className={styles.wizLater} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={styles.wizFound} onClick={save}>
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}

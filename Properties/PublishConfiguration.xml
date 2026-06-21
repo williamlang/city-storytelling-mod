@@ -32,7 +32,7 @@ Stories live as plain Markdown files at `LocalLow\Colossal Order\Cities Skylines
 
 ## Plays well with
 
-Ghostwriter automatically enriches its story from certain peer mods if you have them — no setup required. Run the **[Elections](https://mods.paradoxplaza.com/mods/146816/Windows)** mod and the ghostwriter reads your city's real mayoral races: candidates become named characters, parties become factions, and campaigns, scandals, and results become civic events in your story. It's entirely optional — Ghostwriter just uses it when it's there.
+Ghostwriter automatically enriches its story from certain peer mods if you have them — no setup required. Run the **[Elections](https://mods.paradoxplaza.com/mods/146816/Windows)** mod and the ghostwriter reads your city's real mayoral races: candidates become named characters, parties become factions, and campaigns, scandals, and results become civic events in your story. It's entirely optional — on by default when Elections is installed, and you can switch it off per city when you found it (or later in the city's settings) if you'd rather keep politics soft.
 
 ## A note on what the model sees
 
@@ -45,15 +45,15 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.5.0" />
+  <ModVersion Value="0.5.1" />
   <GameVersion Value="1.5.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.5.0** &#8212; the ghostwriter now reads your other mods.
+**0.5.1** &#8212; you're in charge of your settings.
 
-* **Elections integration.** If you run the **Elections** mod, Ghostwriter automatically weaves your city's mayoral races into the story &#8212; candidates become named characters (with their real age, background, and traits), parties become factions, and campaigns, donations, scandals, and election results become civic events and news in your canon. Entirely optional; it just lights up when Elections is installed.
-* **Peer-mod awareness.** Ghostwriter now sees which other mods you have loaded and adjusts its storytelling so it doesn't drift from what those mods change in-game (population scale, citizen aging, and more). New mods can be described in a `mod-effects.md` file in your city folder, which you can edit per playthrough.
+* **Turn Elections storytelling on or off per city.** When you found a city with the **Elections** mod installed, the founding wizard now shows an **Elections** integration toggle (under Advanced &#8594; Mod integrations), on by default. Leave it on and Ghostwriter weaves your mayoral races into the story as before; switch it off and the ghostwriter ignores the political layer entirely &#8212; keeping politics soft and inferred, as if Elections weren't running.
+* **Story Settings editor.** A new **gear button** in the Ghostwriter panel header opens a settings editor you can use any time after founding &#8212; change content maturity, secrets visibility, level-up storylines, cast density, proactivity, and your mod integrations (including Elections) without re-founding the city. Changes save instantly. Tone, region, and era still shape the story itself, so you change those by just asking the ghostwriter in chat.
   </ChangeLog>
 </Publish>

@@ -9,10 +9,10 @@ Walk every open event and decide which ones close, then propagate consequences. 
 - **Current in-world date** — read `clock.json` at the city root. Its `in_world_date` is the live "now," refreshed every few seconds; **use this for all deadline comparisons**, not the snapshot's `captured_at_ingame` (which can be minutes stale — i.e. in-world weeks behind, since the sim clock runs fast). If `clock.json` is missing, fall back to the latest snapshot's `captured_at_ingame`.
 - **Snapshot state** — pull the latest snapshot in `snapshots/`. Hold onto:
   - `city.*`, `pollution.*`, `crime.*`, `land_value.*`, `district_zones`, `diff.*` — the fields acceptance criteria refer to.
-  - `politics` + `diff.politics` — the election cycle (step 2), present only with the Elections mod.
+  - `politics` + `diff.politics` — the election cycle (step 2), present only with the Elections mod **and** the integration enabled (`"elections"` in `settings.json.integrations`; see CLAUDE.md "Peer-mod integration gate"). If the integration is off, treat `politics` as absent.
   - `carto/processed/index.md`, `roads.md`, `districts/<slug>.md` — for criteria that reference spatial state.
 
-**2. Election cycle — runs every pass, whether or not there are open events** (Elections mod; skip entirely if `snapshot.politics` is `null`). The mod is the **authority** on the race — I read it, I don't invent around it. The point of this step is to turn the live election into a normal open event so the rest of this command's machinery carries it automatically. Two inputs: `politics` (current state) and `diff.politics` (what just changed).
+**2. Election cycle — runs every pass, whether or not there are open events** (Elections mod). **Gate first:** skip this entire step unless `"elections"` is in `settings.json.integrations` **and** `snapshot.politics` is non-null. If the player opted the integration out (id absent), I ignore `politics` even when it's populated and do nothing here — the race stays soft/inferred like any vanilla city (see CLAUDE.md "Peer-mod integration gate"). When the gate passes, the mod is the **authority** on the race — I read it, I don't invent around it. The point of this step is to turn the live election into a normal open event so the rest of this command's machinery carries it automatically. Two inputs: `politics` (current state) and `diff.politics` (what just changed).
 
 - **Seed the cast and the factions** from `politics`, the first time I see them and whenever they change:
   - Each entry in `politics.candidates[]` → a `characters/*.md` entry. Keep the mod's real `name` (see CLAUDE.md "Grounding mod-given names"), and seed traits from `age_band`, `education`, `work`, `wealth`, and the `tag` (e.g. *Populist*, *Honest*, *Corrupt* — a strong characterization hook). Note party affiliation. Give an authorial `arc:` bias (`ascends` / `falls`) consistent with their standing and tag. If a candidate already has a canon file, reconcile rather than duplicate.
@@ -28,7 +28,7 @@ Walk every open event and decide which ones close, then propagate consequences. 
 
 The election event created here is then resolved by the very next steps — I don't resolve it separately.
 
-**3. Find open events.** Read every `events/*.md` file with `status: open` in frontmatter — including any election event from step 2. If there are none *and* step 2 did nothing (no Elections mod, or no live race), say so in one short line and stop.
+**3. Find open events.** Read every `events/*.md` file with `status: open` in frontmatter — including any election event from step 2. If there are none *and* step 2 did nothing (integration off, no Elections mod, or no live race), say so in one short line and stop.
 
 **4. For each open event, decide one of (this whole step is internal — the criteria-matching never reaches the player; only its narrative outcome does, in step 7):**
 

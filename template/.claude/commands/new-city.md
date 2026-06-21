@@ -134,7 +134,7 @@ Behavior / disclosure (→ `settings.json`):
 - **Level-up storylines** — `true` (default) or `false`.
 - **Storyteller proactivity** — `on-request` (default) or `proactive` (turns on the active-events loop from session 1).
 - **Git versioning** — `false` (default) or `true`. Record the preference; the repo-init plumbing is gated on a separate issue, so until then this is just a recorded flag.
-- **Integrations** — a list of enabled peer-mod integrations; empty for now (none supported yet).
+- **Integrations** — the list of enabled peer-mod integrations, written to `settings.json.integrations[]` (the authoritative per-city allowlist — see CLAUDE.md "Peer-mod integration gate"). **Config mode:** use the `integrations` line verbatim — the wizard already resolved detection + the player's opt-outs (a missing/blank line means none enabled). **Chat mode:** default is opt-*out*, not opt-in — read `snapshot.mods.loaded[]` and enable every supported integration that's detected, then let the player drop any they don't want. Today the only supported id is `"elections"`: if a `mods.loaded[]` entry's `name`/`id` starts with `Elections`, include `"elections"` by default (mention it in one line: *"Elections is loaded — I'll fold the mayoral races into the story; say so if you'd rather I leave politics soft."*); if Elections isn't loaded, the list is empty. Never enable an integration whose mod isn't loaded.
 
 In chat mode, you can batch the lighter toggles into one or two prose messages (secrets + level-up together, the rest together) rather than nine separate turns — but still ask region, name, and founding history as their own steps. Map each answer to the field names above.
 

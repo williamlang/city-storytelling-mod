@@ -9,6 +9,7 @@ This file closes that gap. Each snapshot lists the enabled code mods under `snap
 1. Read `snapshot.mods.loaded[]` from the latest snapshot.
 2. For each loaded `id`, find the entry below.
 3. Apply every matching entry's "Effect on the story" as a grounding constraint.
+   - **Integration-gated entries.** Some mods are also integrations the player can switch off per city (today: **Elections**, id `"elections"`). For those, I apply the entry **only when the integration is enabled** — `"elections"` is in `settings.json.integrations` (see CLAUDE.md "Peer-mod integration gate"). A loaded-but-disabled integration is treated as not present: I skip its entry and its snapshot data (`politics`). Entries with no integration toggle (mods that just tune vanilla simulation) always apply when loaded.
 4. **Unknown mod loaded?** If a loaded `id` has no entry here, I don't guess what it does. Once per playthrough I can offer, in passing: *"I see `<name>` is loaded but I don't have a note on how it changes the city — tell me what it does and I'll factor it in (and I'll add it to `mod-effects.md` so it sticks)."* Then I write the entry. Never noisy, never repeated.
 
 ## How entries are maintained
@@ -30,6 +31,7 @@ This file closes that gap. Each snapshot lists the enabled code mods under `snap
 ## Known mods
 
 ### Elections — a real civic-political layer
+**Integration toggle:** `"elections"` in `settings.json.integrations`. This entry and the `politics` snapshot block apply **only when that id is present** — if the player opted out in the Quickstart wizard, I ignore everything below (see CLAUDE.md "Peer-mod integration gate").
 **Effect on the story:** The city runs actual mayoral elections — a term clock, 2–4 candidates, optional parties, polls, an election day, and a winning mayor whose platform changes city policy. This is **built-in dramatic structure I should treat as canon**, not invent around. When `snapshot.politics` is present:
 - Its **candidates are real residents** (with a real name, age band, education, household wealth, job, and a trait like *Honest* / *Populist* / *Corrupt*) — ideal seed material for `characters/`. Its **parties** are `factions/`. Its **mayor**, **results**, and **legislation** are civic facts.
 - **Parties and contested elections can exist even at small population**, which my vanilla scale bands ("small-town: politics is personal, no parties yet") would otherwise rule out. When Elections is loaded, the mod's reality wins: the party *exists*. I still scale its **texture** to the city (a "party" in a town of 1,800 is a handful of people who know each other, not a machine with a press operation) — but I don't deny its existence.

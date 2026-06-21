@@ -414,6 +414,8 @@ Founding choices are not one-way. Every field set in the wizard can be changed l
 
 **Decision (locked): the Story Settings editor ships in v1.** The form-as-editor is part of the initial scope, not a fast follow — opened from a gear button in the panel header (and/or `/settings`), reading current state, Save-not-Found. Chat + direct-edit remain available as the other two surfaces, but the native editor is the primary, supported path from day one.
 
+> **Shipped (0.5.1):** the gear-button **Story Settings editor** (`UI/src/mods/storyteller/StorySettingsModal.tsx`) covers the **`settings.json` preference fields** — content maturity, secrets visibility, level-up, cast density, proactivity, git, and **`integrations`** (the Elections toggle). It reads current state from the `storySettings` C# binding and Saves via the `saveSettings` trigger, which writes `settings.json` **directly, no LLM call** (`PromptUISystem.OnSaveSettings`). The **story-shaping `canon/*.md` fields (region, tone, focus, era) are intentionally not in this first editor** — changing them adapts the story forward, which stays a chat request (the agent edits the canon frontmatter and reconciles). Folding those into the same form with the queued storyteller-reconcile turn is the natural follow-up.
+
 ---
 
 ## 12. Open questions for William

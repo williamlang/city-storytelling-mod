@@ -65,6 +65,23 @@ export function seedSampleCity() {
   bindValue("CityStoryMod", "cartoAvailable", true);
   bindValue("CityStoryMod", "cartoExporting", false);
 
+  // Elections peer-mod detection. `true` renders the wizard's real, default-on
+  // Elections integration toggle (Advanced → Mod integrations); set `false` to
+  // preview the disabled-placeholder state when Elections isn't installed.
+  bindValue("CityStoryMod", "electionsAvailable", true);
+
+  // Story Settings editor (gear button in the panel header). Seeds the current
+  // per-city settings.json preference fields the editor pre-populates from.
+  bindValue("CityStoryMod", "storySettings", JSON.stringify({
+    secrets_visibility: "hidden",
+    levelup_storylines: true,
+    cast_density: "balanced",
+    content_maturity: "pg-13",
+    storyteller_proactivity: "on-request",
+    git_versioning: false,
+    integrations: ["elections"],
+  }));
+
   bindValue("CityStoryMod", "availableCommands", JSON.stringify([
     { name: "session-start", description: "Open a session — state scan + checklist of opening tasks", order: 20 },
     { name: "story-driven", description: "Generate concrete story-driven gameplay choices with for/against framing", order: 30 },

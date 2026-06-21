@@ -605,6 +605,37 @@
   user-select: text;
 }
 
+// Right-side header controls (gear + close). Wrapped so the header's
+// space-between keeps the title hard-left and this group hard-right.
+.headerActions {
+  display: flex;
+  align-items: center;
+}
+
+// Gear affordance that opens the Story Settings editor. Carries an inline
+// SVG (Coherent UI has no emoji font, so a gear glyph would render as tofu).
+.headerGear {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0 6rem;
+  display: flex;
+  align-items: center;
+
+  // Cohtml sizes inline SVG from CSS, not from width/height attributes —
+  // give it explicit dimensions here (matching the chevron pattern).
+  svg {
+    display: block;
+    width: 15rem;
+    height: 15rem;
+    flex-shrink: 0;
+  }
+
+  &:hover svg path {
+    fill: #ffffff;
+  }
+}
+
 .close {
   background: transparent;
   border: 0;

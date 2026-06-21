@@ -74,6 +74,18 @@ namespace CityStoryMod.Tests
                 block.Should().Contain("integrations: \n").And.NotContain("integrations: [");
             }
 
+            [Fact]
+            public void enabled_integrations_render_comma_joined()
+            {
+                // Mirrors the wizard keeping the (default-on) Elections toggle:
+                // foundCity() sends integrations: ["elections"]. The config block
+                // must carry it so new-city.md writes it to settings.json — the
+                // opt-out signal the storyteller reads (Peer-mod integration gate).
+                string block = QuickstartConfig.BuildConfigBlock(
+                    @"{ ""integrations"": [""elections""] }");
+                block.Should().Contain("integrations: elections");
+            }
+
             [Theory]
             [InlineData(@"{""name"": """"}")]
             [InlineData(@"{""name"": ""   ""}")]
