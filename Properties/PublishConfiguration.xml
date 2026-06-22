@@ -45,15 +45,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.5.1" />
-  <GameVersion Value="1.5.*" />
+  <ModVersion Value="0.5.2" />
+  <GameVersion Value="1.6.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.5.1** &#8212; you're in charge of your settings.
-
-* **Turn Elections storytelling on or off per city.** When you found a city with the **Elections** mod installed, the founding wizard now shows an **Elections** integration toggle (under Advanced &#8594; Mod integrations), on by default. Leave it on and Ghostwriter weaves your mayoral races into the story as before; switch it off and the ghostwriter ignores the political layer entirely &#8212; keeping politics soft and inferred, as if Elections weren't running.
-* **Story Settings editor.** A new **gear button** in the Ghostwriter panel header opens a settings editor you can use any time after founding &#8212; change content maturity, secrets visibility, level-up storylines, cast density, proactivity, and your mod integrations (including Elections) without re-founding the city. Changes save instantly. Tone, region, and era still shape the story itself, so you change those by just asking the ghostwriter in chat.
+**0.5.2** &#8212; rebuilt for the latest Cities: Skylines II version. No feature changes.
   </ChangeLog>
 </Publish>
