@@ -20,6 +20,11 @@ export const cartoAvailableBinding = bindValue<boolean>(GROUP, "cartoAvailable",
 // Mirrors the reflective probe ExportSystem uses for the snapshot `politics`
 // block, so the checkbox appears iff politics data would actually be exported.
 export const electionsAvailableBinding = bindValue<boolean>(GROUP, "electionsAvailable", false);
+// True when the InfoLoom peer mod (InfoLoomTwo) is detected as loaded. Same
+// role as electionsAvailable: the wizard renders a real (default-on) InfoLoom
+// integration toggle only when this is true. Mirrors the reflective probe
+// ExportSystem uses for the snapshot `trade` / `labor` blocks.
+export const infoloomAvailableBinding = bindValue<boolean>(GROUP, "infoloomAvailable", false);
 // True when no usable LLM provider is configured yet (hosted provider with no
 // API key, or no model id). Drives the first-run "set up a provider" nudge.
 export const setupNeededBinding = bindValue<boolean>(GROUP, "setupNeeded", false);

@@ -72,6 +72,7 @@ namespace CityStoryMod.Systems
         // at OnCreate — ElectionsBridge.IsAvailable latches on first call, so we
         // wait until the modManager is populated to avoid latching false).
         ValueBinding<bool> _electionsAvailableBinding;
+        ValueBinding<bool> _infoloomAvailableBinding;
         // JSON of the current per-city settings.json preference fields, read by
         // the native Story Settings editor to pre-populate (and re-read after a
         // direct Save). Recomputed on the same cadence as quickstartAvailable
@@ -165,6 +166,7 @@ namespace CityStoryMod.Systems
             _quickstartAvailableBinding = new ValueBinding<bool>(Group, "quickstartAvailable", false);
             _wizardDoneBinding = new ValueBinding<string>(Group, "wizardDone", "");
             _electionsAvailableBinding = new ValueBinding<bool>(Group, "electionsAvailable", false);
+            _infoloomAvailableBinding = new ValueBinding<bool>(Group, "infoloomAvailable", false);
             _storySettingsBinding = new ValueBinding<string>(Group, "storySettings", "{}");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
@@ -182,6 +184,7 @@ namespace CityStoryMod.Systems
             AddBinding(_quickstartAvailableBinding);
             AddBinding(_wizardDoneBinding);
             AddBinding(_electionsAvailableBinding);
+            AddBinding(_infoloomAvailableBinding);
             AddBinding(_storySettingsBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
@@ -553,6 +556,16 @@ namespace CityStoryMod.Systems
             if (electionsAvail != _electionsAvailableBinding.value)
             {
                 _electionsAvailableBinding.Update(electionsAvail);
+            }
+
+            // Same for InfoLoom (#31) — the wizard's second real (default-on)
+            // peer-mod toggle. Mirrors the reflective probe ExportSystem uses
+            // for the snapshot `trade` / `labor` blocks, so the checkbox appears
+            // iff InfoLoom data would actually be exported.
+            bool infoloomAvail = InfoLoomBridge.IsAvailable;
+            if (infoloomAvail != _infoloomAvailableBinding.value)
+            {
+                _infoloomAvailableBinding.Update(infoloomAvail);
             }
 
             // Reflect provider-setup status so the panel can nudge a tester who

@@ -200,14 +200,16 @@ Fields:
 
 `settings.json`'s `integrations[]` is the **authoritative list of which peer-mod integrations are live for this city.** A peer mod can be *loaded* in CS2 (so its data shows up in the snapshot) and still be *disabled* as an integration — because the player unchecked it in the Quickstart wizard, or `/new-city` didn't enable it. **Loaded ≠ integrated.** I always check `integrations[]` before acting on a peer mod's data; the snapshot carrying the data is not on its own permission to use it.
 
-Today the only gated integration is **Elections** (`"elections"`):
+Two integrations are gated today — **Elections** (`"elections"`) and **InfoLoom** (`"infoloom"`):
 
 - **`"elections"` is in `integrations[]`** → the integration is on. `snapshot.politics` is authoritative civic fact: I seed candidates → `characters/`, parties → `factions/`, run the `/events-resolve` "Election cycle" step, treat `mod-effects.md`'s Elections entry as a hard grounding input, and flag a newly-appeared `politics` block as a story signal. (All the Elections behavior described elsewhere in this file is conditioned on this.)
 - **`"elections"` is absent** → the player opted out. **I ignore `snapshot.politics` entirely** — even when it's fully populated. I don't seed candidates or parties from it, don't open or update `type: election` events, don't treat the Elections `mod-effects.md` entry as active, and don't raise the politics block under the new-snapshot-surface backstop. The city's politics stay vanilla-grounded: soft, inferred from city state and scale bands, exactly as if Elections weren't loaded. I don't nag the player to turn it on.
+- **`"infoloom"` is in `integrations[]`** → the integration is on. `snapshot.trade` (per-resource imports/exports with daily volumes + buy/sell costs) and `snapshot.labor` (workforce by education level + age-band demographics) are authoritative numbers I ground economic and demographic stories on — see `mod-effects.md`'s InfoLoomTwo entry. Unlike Elections, InfoLoom adds no new in-world *system* and no new cast: it sharpens detail I'd otherwise infer. So I don't auto-seed canon from it; I just *read it instead of guessing* (the city's trade identity, who's unemployed, the real age structure).
+- **`"infoloom"` is absent** → the player opted out (or InfoLoom isn't loaded). **I ignore `snapshot.trade` and `snapshot.labor`** even when populated, and fall back to inferring the economy/demographics from zone counts, `city.*`, `demographics`, and `citizens_sample` as if InfoLoom weren't there. I don't nag.
 
 **Founding default is opt-out, not opt-in:** every detected, supported peer mod is enabled unless the player unchecks it, so a freshly founded city with Elections loaded normally has `"elections"` in the list. An absent id is therefore a deliberate choice, honored for the life of the city. The player can change it later by editing `settings.json` (add/remove the id) or by asking me — it's a pure preference, no re-founding and no retcon; it just changes whether I read `politics` going forward.
 
-This gate generalizes: as future integrations (InfoLoom, Custom Chirps, …) land, each gets an id in `integrations[]` and the same loaded-but-not-integrated rule applies.
+This gate generalizes: as future integrations (Custom Chirps, …) land, each gets an id in `integrations[]` and the same loaded-but-not-integrated rule applies.
 
 ## Quickstart founding protocol
 
@@ -360,6 +362,23 @@ snapshots/    JSON dumps of city state + spatial identity + temporal signals
                               when the story needs a face.
                 demographics — citizen flag counts, average wellbeing/health,
                               employed count, sampled population.
+                trade       — per-resource imports/exports (daily volume +
+                              buy/sell cost), via the InfoLoom peer mod. Empty
+                              arrays when InfoLoom isn't loaded. I use it only
+                              when the "infoloom" integration is enabled
+                              (settings.json.integrations — see "Peer-mod
+                              integration gate"); otherwise I treat it as empty.
+                              When live it's the city's real economic identity:
+                              what it buys and sells, and at what cost.
+                labor       — workforce by education level (with unemployment
+                              rate, employable, commuting-out, underemployment,
+                              homelessness per band) + age_distribution (the
+                              four bands with per-band schooling/education) +
+                              city totals. Via InfoLoom; null when absent, and
+                              ignored unless "infoloom" is enabled. Harder
+                              numbers than the own-ECS `demographics` block —
+                              "the uneducated are the ones out of work", "a town
+                              of retirees and commuters" read straight off this.
                 outside_connections, water_sources — named entities Carto
                               doesn't surface separately.
                 district_zones — per-district building-type counts (subdivision
@@ -482,6 +501,8 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - "What's the city's current state?" → latest `snapshots/*.json` (`city.*`, `demographics`).
 - "Who's running for mayor? / who's mayor? / which party holds power? / when's the election?" → `politics` in the latest snapshot (present only with the Elections mod *and* the integration enabled — `"elections"` in `settings.json.integrations`; otherwise treat as `null` and answer with soft, inferred politics). When live it's the authority on the race — read it instead of speculating. Candidates are real residents → seed `characters/`; parties → `factions/`.
 - "What changed since last play?" → `diff` block in the latest snapshot (including `diff.politics` for election transitions).
+- "What does the city import / export? / what's its economy actually trading?" → `snapshot.trade.imports` / `exports` (InfoLoom; present only with InfoLoom loaded *and* `"infoloom"` in `settings.json.integrations` — otherwise empty, infer from zone counts). When live, real volumes + costs.
+- "Who's out of work? / what's the age structure?" → `snapshot.labor.workforce` (unemployment by education level) and `labor.age_distribution` (InfoLoom; same `"infoloom"` gate; `null` otherwise — fall back to `demographics` + `citizens_sample`).
 - "Why are people leaving?" → `city.churn.moved_away_by_reason`.
 - "How rough is this neighborhood?" → `pollution.by_district[<name>].residential` (what homes feel, not the raw district avg) + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
 - "Is anyone actually suffering from noise / who's making it?" → `pollution.noise_hotspots` (affected homes, x/y) + `pollution.noise_sources` (loudest producers, x/y); only a story when a source sits near a hotspot.

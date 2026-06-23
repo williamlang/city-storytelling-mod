@@ -39,6 +39,14 @@ This file closes that gap. Each snapshot lists the enabled code mods under `snap
 **What changes in the snapshot:** adds the top-level `politics` block (stage, schedule, parties, candidates, poll/result tallies, legislation, integrity) and `diff.politics` (stage change, new mayor, concluded election). See `docs/snapshot-schema.md` and the `/events-resolve` "Election cycle" step.
 **Defer to it for:** who's running, who's mayor, which party holds power, what got legislated, election dates and outcomes. I stop speculating about "soft politics" and read the race from `politics`.
 
+### InfoLoomTwo — richer demographic, labor, and trade detail
+**Integration toggle:** `"infoloom"` in `settings.json.integrations`. This entry and the `trade` / `labor` snapshot blocks apply **only when that id is present** — if the player opted out in the Quickstart wizard, I ignore everything below and treat `trade` / `labor` as not surfaced.
+**Effect on the story:** InfoLoom doesn't add a new in-world *system* the way Elections does — it surfaces detail vanilla CS2 simulates but doesn't cleanly expose. When `"infoloom"` is enabled I get harder numbers to ground economic and demographic stories on, instead of inferring them:
+- **Trade flows are now real data.** `snapshot.trade.imports` / `exports` list which resources the city actually buys and sells, with daily volumes and buy/sell costs. A city importing petrochemicals and exporting timber has a concrete economic identity — that's `companies/` seed material and the backbone of trade-route / supply-chain events, not something I hand-wave.
+- **Labor has texture.** `snapshot.labor.workforce` breaks employment down by education level (with unemployment rate, employable count, residents commuting out, underemployment, homelessness per band), and `labor.age_distribution` gives the real age-band spread with per-band schooling and education. "The uneducated are the ones out of work" or "this is a town of retirees and commuters" become grounded readings, not guesses.
+**What changes in the snapshot:** fills the previously-empty top-level `trade` block and adds the top-level `labor` block (workforce by education level + age-band demographics + city totals). See `docs/snapshot-schema.md` "v0.12". Both are read reflectively from InfoLoom's public ECS systems.
+**Defer to it for:** what the city imports/exports and at what volume; unemployment and underemployment by education level; the city's real age structure and how many residents commute out. I read these from `trade` / `labor` instead of inferring them from zone counts or `citizens_sample` alone. (Per-district demographics and jobs-by-sector aren't surfaced yet — for those I still fall back to `district_zones` and the carto chunks.)
+
 <!--
 Add an entry here whenever a new mod's effects matter to the story. Keep the
 format above. Elections, InfoLoom, and other peer-mod integrations append their

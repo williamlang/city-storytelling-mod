@@ -1,4 +1,4 @@
-# Snapshot schema (v0.11)
+# Snapshot schema (v0.12)
 
 The mod's `ExportSystem` emits JSON snapshots into each city's folder. The storytelling agent (running in the same folder, via `StorytellerDispatcher` or any Claude session opened against that folder) ingests them, diffs successive snapshots, and turns observed changes into characters, companies, places, and events.
 
@@ -263,6 +263,61 @@ Adds a top-level **`politics`** block, populated from [ruzbeh0's Elections mod](
 
 A candidate's `age_band` / `education` / `work` / `wealth` are decoded to the same labels the player sees in the candidate panel (mirroring the mod's `ElectionCandidateProfileUtility`): age is a band (Adult/Elderly, not a year count), `work` is a coarse Working/Non-working/Student reading, `wealth` is the household band (Struggling → Wealthy). `color` is `#rrggbb` from the party's editable color, `null` when unset.
 
+## v0.12 — trade flows + labor detail, via the InfoLoom peer mod (#31)
+
+Populates the long-empty **`trade`** block and adds a new top-level **`labor`** block, both from [bruceyboy24804's InfoLoom mod](https://github.com/bruceyboy24804/InfoLoom) (assembly `InfoLoomTwo`) when it's installed. When InfoLoom isn't loaded, `trade` keeps its empty-arrays shape and `labor` is **`null`** — same "not present" contract as `politics` / `map.*`.
+
+**Read path (`Storyteller/InfoLoomBridge.cs`).** Soft-coupled like `CartoBridge` / `ElectionsBridge` — no compile-time dep on `InfoLoomTwo.dll`. InfoLoom already derives these aggregates; we read its **public ECS systems** rather than re-deriving from raw ECS or tailing its CSV exporter (the exporter is button-triggered from InfoLoom's own Settings, toggle-gated, and self-pruning — unreliable). The systems expose result buffers (`m_Results`, `m_LifecycleDetails`, `m_Totals`) and an accessor (`GetSortedResourceTradeCosts()`) as public members.
+
+**Freshness gotcha:** these systems only recompute while their UI panel is visible (their `OnUpdate` early-returns on `!IsPanelVisible`), so read cold the buffers are stale/zero. The bridge calls the same public recalc methods InfoLoom's own `DataExporter` uses — `RecalculateNow()` / `UpdateDemographics()` / `UpdateAllTradeCosts()`, each of which `.Complete()`s its job inline — after forcing the citywide view (`SelectedDistrict = null`) and restoring the player's prior district selection afterward.
+
+```jsonc
+"trade": {                            // empty arrays when InfoLoom absent
+  "source": "InfoLoomTwo",
+  "mod_version": "1.4.2.0",
+  "imports": [                        // resources flowing in, >= 1/day, desc by amount
+    { "resource": "Petrochemicals", "amount_per_day": 1820, "buy_cost": 31.4 }
+  ],
+  "exports": [                        // resources flowing out, >= 1/day, desc by amount
+    { "resource": "Timber", "amount_per_day": 940, "sell_cost": 12.1 }
+  ]
+},
+"labor": {                            // null when InfoLoom absent
+  "source": "InfoLoomTwo",
+  "mod_version": "1.4.2.0",
+  "workforce": {                      // adults by education level + a city rollup
+    "by_education_level": [
+      { "level": "Uneducated", "total": 240, "employed": 180, "unemployed": 60,
+        "unemployment_rate": 25.0, "employable": 240, "commuting_out": 12,
+        "underemployed": 30, "homeless": 4 }
+      // PoorlyEducated, Educated, WellEducated, HighlyEducated …
+    ],
+    "totals": { "level": "Totals", "total": 1400, "employed": 1180, "unemployed": 220,
+                "unemployment_rate": 15.7, "employable": 1400, "commuting_out": 64,
+                "underemployed": 90, "homeless": 11 }
+  },
+  "age_distribution": {
+    "lifecycle": [                    // the vanilla four bands
+      { "band": "Child",   "total": 410, "working": 0, "students": 360,
+        "unemployed": 0, "retired": 0,
+        "education": { "uneducated": 50, "poorly_educated": 0, "educated": 0,
+                       "well_educated": 0, "highly_educated": 0 } }
+      // Teen, Adult, Elderly …
+    ],
+    "totals": { "all_citizens": 2050, "locals": 1900, "tourists": 90, "commuters": 60,
+                "students": 520, "workers": 1180, "oldest_citizen_age_days": 7200,
+                "moving_away": 14, "dead": 3, "homeless": 11 }
+  }
+}
+```
+
+Notes:
+- **Amounts** are whole units/day, rounded from InfoLoom's float blend of theoretical (production vs. consumption) and storage-deviation signals. A resource appears in `imports`/`exports` only when its amount clears 1/day.
+- **`unemployment_rate`** is a percentage (0–100), one decimal. `commuting_out` = residents working outside the city; `underemployed` = working below their education level.
+- **`oldest_citizen_age_days`** is in sim *days*, not years (vanilla CS2 ages in days; this is InfoLoom's raw value).
+- **Deferred (follow-up):** per-district demographic breakdowns and the workplaces-by-sector rollup — InfoLoom carries those on heavier `NativeList<Entity>` structures that are riskier to read reflectively.
+- **Storyteller gate:** `labor`/`trade` are usable by the storyteller only when `"infoloom"` is in `settings.json.integrations` — loaded ≠ integrated (see `template/CLAUDE.md` "Peer-mod integration gate" and `mod-effects.md`).
+
 ## The shape
 
 ```json
@@ -443,12 +498,13 @@ A candidate's `age_band` / `education` / `work` / `wealth` are decoded to the sa
     "commuters_count": null
   },
 
-  "trade": {
+  "trade": {                          // v0.12 — populated by InfoLoom (#31); empty arrays when absent
     "imports": [
-      // { "resource": "oil", "amount_per_day": 1234, "partner_count": 3 }
+      // { "resource": "Petrochemicals", "amount_per_day": 1820, "buy_cost": 31.4 }
     ],
     "exports": []
   },
+  "labor": null,                      // v0.12 — InfoLoom workforce + age detail; null when absent. See section above.
 
   "services": {
     // v0.9 — per-school enrollment vs. capacity + city rollup by tier.
@@ -549,7 +605,7 @@ A candidate's `age_band` / `education` / `work` / `wealth` are decoded to the sa
 - **`session_id`** = `"session-<unix-ts>"`. Set once when the mod loads (CS2 launch). Every snapshot in the same play session carries the same `session_id`. Changes only when the user fully restarts CS2.
 - **Cross-references** (e.g. `building.district_id`) always use the referenced entity's `id`. Never embed copies.
 
-## What's emitted today (v0.10)
+## What's emitted today (v0.12)
 
 - Metadata header: `schema_version`, `snapshot_id`, `session_id`, timestamps — populated.
 - `city.*` — name, money, happiness, health, tourists, attractiveness, danger, milestone, xp, zones, `churn` (incl. `moved_away_by_reason`), `social`, `budget` (income + residential tax only — see [#28](https://github.com/williamlang/city-storytelling-mod/issues/28)).
@@ -561,7 +617,10 @@ A candidate's `age_band` / `education` / `work` / `wealth` are decoded to the sa
 - `district_zones` — per-district building-type counts.
 - `diff.*` — `zones_delta`, `district_zone_deltas`, `building_churn`, `named_buildings`, `outside_connections`, `water_sources`, `ingame_days_elapsed` — populated from second snapshot onward.
 - `services.education` — per-school enrollment vs. capacity + city rollup by tier (v0.9). `null` until the city has a school.
-- `demographics`, `trade`, rest of `services` — still null / empty.
+- `mods.loaded[]` — enabled code mods (v0.11), cross-referenced against `mod-effects.md`.
+- `politics` — Elections peer-mod civic state (v0.11), via `ElectionsBridge`. `null` when Elections absent.
+- `trade`, `labor` — per-resource imports/exports + workforce/age detail (v0.12), via `InfoLoomBridge`. `trade` empty / `labor` null when InfoLoom absent.
+- `demographics`, rest of `services` — still null / empty (own-ECS `demographics` carries flag counts + averages; richer breakdowns come from `labor` when InfoLoom is loaded).
 
 Spatial data (districts, buildings, adjacency) lives in `carto/processed/` chunks — see [the Carto integration issue (#17)](https://github.com/williamlang/city-storytelling-mod/issues/17).
 
@@ -572,9 +631,10 @@ Runtime verification of the most recent schema versions on Windows is tracked in
 Roughly easiest → hardest:
 
 1. **Citizen wealth tier** — extends `citizens_sample` with the deferred wealth field; needs `CitizenHappinessParameterData` singleton + household `Resources` buffer join.
-2. **Demographics aggregations** — by-age / by-education / by-wealth rollups over the same filtered resident set the v0.7 sampler walks.
-3. **Trade flows** — multi-component join via `Game.Economy`.
-4. **Service coverage gaps** — depends on building service-area data; advanced.
+2. **InfoLoom per-district demographics + workplaces-by-sector** — the deferred half of #31; InfoLoom carries these on heavier `NativeList<Entity>` structures than the flat buffers the v0.12 `labor` block reads.
+3. **Service coverage gaps** — depends on building service-area data; advanced.
+
+(Trade flows and demographics aggregations shipped in v0.12 via the InfoLoom bridge — see above.)
 
 Each lands as its own commit; bump `schema_version` only if the shape of an existing field changes meaningfully.
 
@@ -589,6 +649,8 @@ Each lands as its own commit; bump `schema_version` only if the shape of an exis
 - `0.7` — `citizens_sample` is now a real per-citizen array (up to 30 entries) instead of an empty placeholder. Every `Followed` citizen is always included; remaining slots filled with a timestamp-seeded uniform random sample of residents. Per-entry fields: name, age band, education, gender, happiness, home district, workplace, school, followed/is_criminal flags. Wealth tier deferred.
 - `0.8` — `crime` reworked from a building-side `CrimeProducer.m_Crime` average (saturated everywhere — first real-data check on Halverson Crossing showed every district reading ~the same) to a count of active resident criminals binned by home district. Shape changed from `{ average, samples }` per scope to `{ active_criminals }` per scope.
 - `0.9` — Populated the `services` block: `services.education` (per-school enrollment vs. capacity + city rollup by tier) and `services.civic_buildings` (the namable city-service roster + the `naming-requests.json` write-back channel, #40). `pollution` gained a residential split + located `noise_hotspots` / `noise_sources` so source self-noise stops being mistaken for resident suffering.
-- `0.10` — current. Added top-level `tourists` block: per-district visitor counts + a city total, via `CitizenFlags.Tourist` + `CurrentBuilding.m_CurrentBuilding`, binned by `CurrentDistrict` (#34 part 1). First spatial signal on visitors, who are filtered out of `citizens_sample`. Hotel occupancy + top attractions (parts 2–3) are follow-ups on the same walk.
+- `0.10` — Added top-level `tourists` block: per-district visitor counts + a city total, via `CitizenFlags.Tourist` + `CurrentBuilding.m_CurrentBuilding`, binned by `CurrentDistrict` (#34 part 1). First spatial signal on visitors, who are filtered out of `citizens_sample`. Hotel occupancy + top attractions (parts 2–3) are follow-ups on the same walk.
+- `0.11` — Added top-level `mods.loaded[]` (enabled code mods CS2 reports, cross-referenced against `mod-effects.md`, #39) and `politics` (civic/political state from the Elections peer mod, read reflectively via `ElectionsBridge`, #43; `null` when Elections absent). `diff.politics` carries election transitions.
+- `0.12` — current. Populated `trade` (per-resource imports/exports with daily amounts + buy/sell costs) and added top-level `labor` (workforce by education level + age-band demographics), both from the InfoLoom peer mod (`InfoLoomBridge`, #31). `null`/empty when InfoLoom absent. Read from InfoLoom's public ECS systems, not its CSV exporter.
 - `1.0` — full schema implemented, used in at least one playthrough end-to-end, agent has consumed and produced grounded fiction from it.
 

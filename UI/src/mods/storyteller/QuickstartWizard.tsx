@@ -9,6 +9,7 @@ import {
   wizardDoneBinding,
   quickstartAvailableBinding,
   electionsAvailableBinding,
+  infoloomAvailableBinding,
   lastErrorBinding,
   foundCity,
   dismissQuickstart,
@@ -38,12 +39,11 @@ export const TONES = ["grounded-realist", "dramatic", "noir", "hopeful", "satiri
 export const MATURITY = ["cozy", "pg-13", "gritty"];
 export const CAST = ["tight", "balanced", "sprawling"];
 
-// Planned integrations still gated on their own issue (#31 / #19). Rendered
-// disabled so the form shows where they'll live, until each is wired and a
-// detection binding exists. Elections (#43) is wired, so it's handled
-// separately below as a real, default-on toggle gated on electionsAvailable.
+// Planned integrations still gated on their own issue. Rendered disabled so the
+// form shows where they'll live, until each is wired and a detection binding
+// exists. Elections (#43) and InfoLoom (#31) are wired, so they're handled as
+// real, default-on toggles gated on their availability bindings (see WIRED_*).
 const PLANNED_INTEGRATIONS = [
-  { id: "infoloom", label: "InfoLoom", issue: "#31" },
   { id: "custom-chirps", label: "Custom Chirps", issue: "#19" },
 ];
 
@@ -118,6 +118,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const isRunning = useValue(isRunningBinding);
   const quickstartAvailable = useValue(quickstartAvailableBinding);
   const electionsAvailable = useValue(electionsAvailableBinding);
+  const infoloomAvailable = useValue(infoloomAvailableBinding);
   const lastError = useValue(lastErrorBinding);
   const doneJson = useValue(wizardDoneBinding);
   const done = useMemo<WizardDone | null>(() => {
@@ -176,10 +177,22 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const [git, setGit] = useState(false);
   // Peer-mod integrations. Default ON when detected — the player opts OUT,
   // not in (spec §7.1): installing the peer mod implies wanting it reflected
-  // in the story. Unchecking omits "elections" from the written integrations[]
+  // in the story. Unchecking omits the id from the written integrations[]
   // list, which the storyteller reads as a deliberate opt-out (see
-  // template/CLAUDE.md "Peer-mod integration gate").
+  // template/CLAUDE.md "Peer-mod integration gate"). One state flag per wired
+  // integration; only the detected ones render and reach integrations[].
   const [elections, setElections] = useState(true);
+  const [infoloom, setInfoloom] = useState(true);
+
+  // The wired peer-mod integrations, rendered uniformly. Each shows as a real
+  // default-on checkbox only when its detection binding is true; otherwise it's
+  // simply absent (the snapshot wouldn't carry its data either). Adding the next
+  // wired integration is one row here, not a new bespoke block.
+  const WIRED_INTEGRATIONS = [
+    { id: "elections", label: "Elections", available: electionsAvailable, checked: elections, set: setElections },
+    { id: "infoloom", label: "InfoLoom", available: infoloomAvailable, checked: infoloom, set: setInfoloom },
+  ];
+  const anyWiredAvailable = WIRED_INTEGRATIONS.some((m) => m.available);
 
   // At least one focus lens must stay checked — a story can't focus on
   // nothing (spec §7.1). Unchecking the last one is a no-op.
@@ -193,8 +206,11 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
 
   const submit = () => {
     // Enabled integrations: only ids that are both detected and left checked.
-    // Elections is the only wired one today; absence is a real opt-out.
-    const integrations = electionsAvailable && elections ? ["elections"] : [];
+    // An id detected-but-unchecked is a real opt-out (omitted here); an id not
+    // detected can't be integrated, so it's never written.
+    const integrations = WIRED_INTEGRATIONS
+      .filter((m) => m.available && m.checked)
+      .map((m) => m.id);
     const config = {
       region,
       name: name.trim(), // blank → C# treats as (suggest)
@@ -499,21 +515,22 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
                   <div className={styles.wizSectionLabel}>Mod integrations</div>
                   <div className={styles.wizField}>
                     <div className={styles.wizHint}>
-                      {electionsAvailable
+                      {anyWiredAvailable
                         ? "Detected peer mods are on by default — uncheck to keep one out of the story."
                         : "None available yet — these light up once detected and supported."}
                     </div>
                     <div className={styles.wizCheckRow}>
-                      {electionsAvailable && (
+                      {WIRED_INTEGRATIONS.filter((m) => m.available).map((m) => (
                         <button
+                          key={m.id}
                           type="button"
-                          className={`${styles.wizCheck} ${elections ? styles.wizCheckOn : ""}`}
-                          onClick={() => setElections((v) => !v)}
+                          className={`${styles.wizCheck} ${m.checked ? styles.wizCheckOn : ""}`}
+                          onClick={() => m.set((v) => !v)}
                         >
-                          <span className={styles.wizCheckBox}>{elections ? "✓" : ""}</span>
-                          Elections
+                          <span className={styles.wizCheckBox}>{m.checked ? "✓" : ""}</span>
+                          {m.label}
                         </button>
-                      )}
+                      ))}
                       {PLANNED_INTEGRATIONS.map((m) => (
                         <button
                           key={m.id}

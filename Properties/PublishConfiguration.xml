@@ -32,7 +32,7 @@ Stories live as plain Markdown files at `LocalLow\Colossal Order\Cities Skylines
 
 ## Plays well with
 
-Ghostwriter automatically enriches its story from certain peer mods if you have them — no setup required. Run the **[Elections](https://mods.paradoxplaza.com/mods/146816/Windows)** mod and the ghostwriter reads your city's real mayoral races: candidates become named characters, parties become factions, and campaigns, scandals, and results become civic events in your story. It's entirely optional — on by default when Elections is installed, and you can switch it off per city when you found it (or later in the city's settings) if you'd rather keep politics soft.
+Ghostwriter automatically enriches its story from certain peer mods if you have them — no setup required. Run the **[Elections](https://mods.paradoxplaza.com/mods/146816/Windows)** mod and the ghostwriter reads your city's real mayoral races: candidates become named characters, parties become factions, and campaigns, scandals, and results become civic events in your story. Run **[InfoLoom](https://mods.paradoxplaza.com/mods/91433/Windows)** and it grounds the economy and demographics in hard numbers — what your city imports and exports, and unemployment and age structure by education level — instead of guessing them. Both are entirely optional — on by default when installed, and switchable off per city when you found it (or later in the city's settings).
 
 ## A note on what the model sees
 
@@ -45,12 +45,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.5.2" />
+  <ModVersion Value="0.6.0" />
   <GameVersion Value="1.6.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.5.2** &#8212; rebuilt for the latest Cities: Skylines II version. No feature changes.
+**0.6.0** &#8212; InfoLoom integration. When the InfoLoom mod is installed, the ghostwriter now grounds your city's economy and people in real numbers: trade flows (what's imported/exported, daily volumes and costs) and labor detail (unemployment and age structure by education level). On by default when InfoLoom is detected; opt out per city in the founding wizard or city settings. Schema v0.12.
   </ChangeLog>
 </Publish>

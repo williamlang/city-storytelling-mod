@@ -654,7 +654,7 @@ namespace CityStoryMod.Systems
         // workplace, school, plus followed/is_criminal flags. Households'
         // wealth tier is deferred — needs a CitizenHappinessParameterData
         // singleton join we don't do yet. See docs/snapshot-schema.md.
-        const string SchemaVersion = "0.11";
+        const string SchemaVersion = "0.12";
 
         void Export(string triggeredBy)
         {
@@ -754,6 +754,17 @@ namespace CityStoryMod.Systems
                 ElectionsBridge.TryRead(EntityManager, e => _nameSystem.GetRenderedLabelName(e), _log);
             object politics = politicsReading?.Block;
             ElectionsBridge.Summary politicsSummary = politicsReading != null ? politicsReading.Diffable : default;
+
+            // InfoLoom peer mod (#31). Fills the previously-empty `trade` block
+            // and a new top-level `labor` block (workforce by education level +
+            // age-band demographics) when InfoLoomTwo is loaded. Null Reading
+            // when it isn't installed or hasn't initialized — `trade` then falls
+            // back to empty arrays and `labor` stays null, same contract as
+            // politics / map.*. Read reflectively (InfoLoomBridge).
+            InfoLoomBridge.Reading infoLoom = InfoLoomBridge.TryRead(World, _log);
+            object trade = infoLoom?.Trade
+                ?? (object)new { imports = new object[0], exports = new object[0] };
+            object labor = infoLoom?.Labor;
             DateTime currentIngameDate = CurrentIngameDate();
 
             long unixTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -891,11 +902,17 @@ namespace CityStoryMod.Systems
                 demographics = demographics,
                 diff = diff,
 
-                trade = new
-                {
-                    imports = new object[0],
-                    exports = new object[0],
-                },
+                // v0.12 (#31) — trade flows + labor detail from the InfoLoom
+                // peer mod (InfoLoomBridge). `trade` was always-empty before;
+                // now carries per-resource imports/exports with daily amounts
+                // and buy/sell costs when InfoLoom is loaded (empty arrays
+                // otherwise). `labor` (workforce by education level +
+                // unemployment + age-band demographics) is null when InfoLoom
+                // isn't present. Gated for the storyteller behind the "infoloom"
+                // integration id (see template/CLAUDE.md "Peer-mod integration
+                // gate" and mod-effects.md).
+                trade = trade,
+                labor = labor,
 
                 // v0.9 — service capacity/utilization. Education: per-school
                 // enrollment vs. capacity (the "build a new school" signal) plus a
