@@ -409,7 +409,22 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
                 className={styles.wizAdvancedToggle}
                 onClick={() => setAdvancedOpen((v) => !v)}
               >
-                {advancedOpen ? "▾" : "▸"} Advanced / optional
+                {/* Disclosure caret as inline SVG — Coherent/Gameface has no
+                    emoji/symbol font, so the ▸/▾ geometric glyphs render as
+                    tofu boxes. Hard-coded fill (matches the toggle color);
+                    swap the path open/closed rather than CSS-rotate. */}
+                <svg
+                  width="8"
+                  height="8"
+                  viewBox="0 0 8 8"
+                  style={{ marginRight: "6rem", verticalAlign: "middle" }}
+                >
+                  <path
+                    d={advancedOpen ? "M0 2 L8 2 L4 7 Z" : "M2 0 L7 4 L2 8 Z"}
+                    fill="rgba(91, 179, 230, 0.85)"
+                  />
+                </svg>
+                Advanced / optional
               </button>
 
               {advancedOpen && (

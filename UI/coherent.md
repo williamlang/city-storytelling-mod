@@ -137,9 +137,11 @@ On certain elements a `background` / `background-color` set through a CSS *rule*
 
 ## Fonts & SVG
 
-### No color-emoji glyphs
+### No color-emoji glyphs — and no symbol/geometric glyphs either
 
-The UI font has no color-emoji glyphs — emoji render as tofu boxes in-game (they're fine in `dev:web`). Use inline SVG with explicit `width`/`height` and a hard-coded `fill` for icons/glyphs.
+The UI font has no color-emoji glyphs — emoji render as tofu boxes in-game (they're fine in `dev:web`). The same goes for **non-emoji symbol/geometric Unicode** that happens not to be in the font: disclosure triangles (`▸` `▾` U+25B8/BE), arrows, and similar dingbats also come back as tofu boxes (e.g. the Quickstart wizard's "Advanced / optional" caret did until GH #31). A glyph rendering fine in `dev:web` is **not** evidence it'll render in-game — the browser falls back to a system font Coherent doesn't have.
+
+Use inline SVG with explicit `width`/`height` and a hard-coded `fill` for any icon or glyph. For a disclosure caret, swap the `<path d=…>` between open/closed states rather than CSS-rotating a single path (one less feature to depend on). The wizard checkboxes still use a `✓` text glyph — treat that as **unverified in-game** (the toggles weren't actually rendering until the GH #31 detection fix, so nobody's seen it), and if it shows as tofu on the next reload, swap it for an SVG check too.
 
 ### `currentColor` doesn't reliably propagate into SVG
 
