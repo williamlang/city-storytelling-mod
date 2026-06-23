@@ -52,5 +52,7 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
 **0.6.0** &#8212; InfoLoom integration. When the InfoLoom mod is installed, the ghostwriter now grounds your city's economy and people in real numbers: trade flows (what's imported/exported, daily volumes and costs) and labor detail (unemployment and age structure by education level). On by default when InfoLoom is detected; opt out per city in the founding wizard or city settings. Schema v0.12.
+
+Also fixes peer-mod detection so subscribed mods (InfoLoom and Elections) are correctly recognized and now appear as toggles in the founding wizard, and replaces the wizard's "Advanced / optional" caret with an icon that renders correctly in-game.
   </ChangeLog>
 </Publish>
