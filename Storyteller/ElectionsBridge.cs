@@ -430,33 +430,40 @@ namespace CityStoryMod.Storyteller
         static void EnsureResolved()
         {
             if (_resolved) return;
-            _resolved = true;
-            try { Resolve(); }
+            try
+            {
+                // Don't latch if the mod manager isn't up yet — a too-early probe
+                // (loading screen, first UI tick) would otherwise cache "absent"
+                // for the whole session. Retry on the next call instead.
+                var modManager = GameManager.instance?.modManager;
+                if (modManager == null) return;
+                Resolve(modManager);
+                _resolved = true;
+            }
             catch (Exception ex)
             {
                 Mod.Log?.Error(ex, "ElectionsBridge.Resolve threw.");
                 _available = false;
+                _resolved = true;
             }
         }
 
-        static void Resolve()
+        static void Resolve(ModManager modManager)
         {
-            var modManager = GameManager.instance?.modManager;
-            if (modManager == null)
-            {
-                Mod.Log?.Info("ElectionsBridge: modManager unavailable; politics block disabled.");
-                return;
-            }
-
+            // Match on ASSEMBLY name, not ModManager.ModInfo.name — for
+            // subscribed (pdx_mods) mods the latter is the numeric mod folder
+            // (e.g. "146816_42"), not "Elections", so a name prefilter would
+            // skip it. Mirror CollectLoadedMods: inspect every mod's assembly.
             Assembly asm = null;
             foreach (ModManager.ModInfo mod in modManager)
             {
-                if (mod.name != null && mod.name.StartsWith(ElectionsAssemblyName, StringComparison.Ordinal))
+                Assembly candidate = null;
+                try { candidate = mod.asset?.assembly; }
+                catch { continue; /* asset not loaded / disabled — skip */ }
+                if (candidate != null && string.Equals(candidate.GetName().Name, ElectionsAssemblyName, StringComparison.Ordinal))
                 {
-                    asm = mod.asset?.assembly;
-                    if (asm != null && string.Equals(asm.GetName().Name, ElectionsAssemblyName, StringComparison.Ordinal))
-                        break;
-                    asm = null;
+                    asm = candidate;
+                    break;
                 }
             }
             if (asm == null)

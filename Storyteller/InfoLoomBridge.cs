@@ -356,36 +356,39 @@ namespace CityStoryMod.Storyteller
         static void EnsureResolved()
         {
             if (_resolved) return;
-            _resolved = true;
-            try { Resolve(); }
+            try
+            {
+                // Don't latch if the mod manager isn't up yet — a too-early probe
+                // (loading screen, first UI tick) would otherwise cache "absent"
+                // for the whole session. Retry on the next call instead.
+                var modManager = GameManager.instance?.modManager;
+                if (modManager == null) return;
+                Resolve(modManager);
+                _resolved = true;
+            }
             catch (Exception ex)
             {
                 Mod.Log?.Error(ex, "InfoLoomBridge.Resolve threw.");
                 _available = false;
+                _resolved = true;
             }
         }
 
-        static void Resolve()
+        static void Resolve(ModManager modManager)
         {
-            var modManager = GameManager.instance?.modManager;
-            if (modManager == null)
-            {
-                Mod.Log?.Info("InfoLoomBridge: modManager unavailable; trade/labor disabled.");
-                return;
-            }
-
+            // Match on ASSEMBLY name, not ModManager.ModInfo.name — for
+            // subscribed (pdx_mods) mods the latter is the numeric mod folder
+            // (e.g. "91433_42"), not "InfoLoomTwo", so a name prefilter would
+            // skip it. Mirror CollectLoadedMods: inspect every mod's assembly.
             foreach (ModManager.ModInfo mod in modManager)
             {
-                if (mod.name != null && mod.name.StartsWith(AssemblyName, StringComparison.Ordinal))
+                Assembly asm = null;
+                try { asm = mod.asset?.assembly; }
+                catch { continue; /* asset not loaded / disabled — skip */ }
+                if (asm != null && string.Equals(asm.GetName().Name, AssemblyName, StringComparison.Ordinal))
                 {
-                    Assembly asm = null;
-                    try { asm = mod.asset?.assembly; }
-                    catch { /* asset not loaded — skip */ }
-                    if (asm != null && string.Equals(asm.GetName().Name, AssemblyName, StringComparison.Ordinal))
-                    {
-                        _asm = asm;
-                        break;
-                    }
+                    _asm = asm;
+                    break;
                 }
             }
             if (_asm == null)
