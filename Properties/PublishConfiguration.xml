@@ -45,14 +45,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.6.0" />
+  <ModVersion Value="0.6.1" />
   <GameVersion Value="1.6.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.6.0** &#8212; InfoLoom integration. When the InfoLoom mod is installed, the ghostwriter now grounds your city's economy and people in real numbers: trade flows (what's imported/exported, daily volumes and costs) and labor detail (unemployment and age structure by education level). On by default when InfoLoom is detected; opt out per city in the founding wizard or city settings. Schema v0.12.
-
-Also fixes peer-mod detection so subscribed mods (InfoLoom and Elections) are correctly recognized and now appear as toggles in the founding wizard, and replaces the wizard's "Advanced / optional" caret with an icon that renders correctly in-game.
+**0.6.1** &#8212; Trims the storyteller's instruction file (the scaffolded CLAUDE.md) to cut redundant context the agent reloads every turn: the snapshot field reference, integration-gate rules, and routing guidance were each stated several times over and are now consolidated. Same behavior and the same rules, fewer tokens per turn for new cities. No change to existing cities' stories.
   </ChangeLog>
 </Publish>

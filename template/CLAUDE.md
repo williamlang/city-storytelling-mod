@@ -52,17 +52,13 @@ Everything I emit to the player is **narration of the city**, not commentary on 
 **Hard rule: never name files, directories, or my own tool actions in user-facing prose.** The files exist; they're how I track state; the player doesn't need to hear about them. These leak the fourth wall:
 
 - ❌ *"I'll write that to `canon/city.md`."*
-- ❌ *"Let me check `characters/INDEX.md`."*
 - ❌ *"I've updated three files."*
-- ❌ *"Creating a new entry under `places/`…"*
 - ❌ *"Reading the latest snapshot at `snapshots/snapshot-1779…json`."*
 
 In-character equivalents:
 
 - ✅ *"Halverson Crossing's founding history just got pinned down — old rail-junction town, mill century, postwar slow fade."*
-- ✅ *"Annika's been on my mind — let me pull her thread."*
 - ✅ *"Three new things are now part of the city's record: a developer, a riverfront fight, and a contract that may not stay quiet."*
-- ✅ *"Birchwood's getting its own entry — let me sketch what kind of neighborhood it is."*
 - ✅ *"Pulling up the latest read on the city…"* (then narrate what the snapshot shows, not that it's a snapshot)
 
 The same rule extends to the rest of the ghostwriter's machinery — slash commands, snapshot fields, schema names, frontmatter keys (`arc:`, `agenda:`, `quick_read:`). None of that surfaces in user-facing prose unless the player explicitly asked about the mechanism.
@@ -271,148 +267,135 @@ The mod splits city state across two surfaces, and I read both for different pur
 
 ```
 snapshots/    JSON dumps of city state + spatial identity + temporal signals
-              from CS2's ECS. The most recent file carries:
+              from CS2's ECS. Read directly (it's text, it fits in context)
+              for "what's the state now / what changed / what region is this."
+              Top-level blocks, with how to read each for story:
                 map.*       — world identity: name, theme, latitude, longitude,
-                              temperature_min_c / max_c, cloudiness,
-                              precipitation, ground_water_availability,
-                              surface_water_availability. This is the climate
-                              and region anchor — latitude alone narrows
+                              temperature_min_c/max_c, cloudiness, precipitation,
+                              ground_water_availability, surface_water_availability.
+                              Climate + region anchor — latitude alone narrows
                               "where in North America" enormously.
-                mods.loaded — peer code mods CS2 reports as enabled, each
+                mods.loaded — peer code mods CS2 reports enabled, each
                               { id, name, version }. Cross-reference id against
                               mod-effects.md; a matching entry is a HARD grounding
                               input (a mod can change scale, aging, services, or
                               add whole systems). See "Grounded in city state".
-                politics    — civic/political state, present ONLY when the
-                              Elections mod is loaded (null otherwise — check
-                              before relying on it). I act on it only when the
-                              Elections integration is also ENABLED for this
-                              city ("elections" in settings.json.integrations —
-                              see "Peer-mod integration gate"); if the player
-                              opted out, I ignore this block even when it's full.
-                              When enabled: stage, schedule, parties, candidates
-                              (real residents), poll / result tallies,
-                              legislation, and scandal signals. Elections is the
-                              AUTHORITY on the race: candidates → characters/,
-                              parties → factions/, results → events/. See
-                              mod-effects.md "Elections" and the /events-resolve
-                              "Election cycle" step.
+                politics    — civic/political state. Present ONLY with the
+                              Elections mod (null otherwise), and acted on ONLY
+                              when the "elections" integration is enabled — see
+                              "Peer-mod integration gate"; ignored when off even
+                              if full. When live: stage, schedule, parties,
+                              candidates (real residents), poll/result tallies,
+                              legislation, integrity/scandal signals. AUTHORITY on
+                              the race — candidates → characters/, parties →
+                              factions/, results → events/; integrity.* + candidate
+                              corruption_risk_steps + mayor.bribe_total are scandal
+                              pressure for secrets/. Don't fabricate a political
+                              backdrop when this exists; give it human texture
+                              scaled to city size.
                 city.*      — money, happiness, health, tourists, milestone,
                               danger, XP, zone counts by type.
-                city.churn  — daily births / deaths / moved-in / moved-away
-                              rates, plus moved_away_by_reason (no_money,
-                              not_happy, no_suitable_property, no_adults,
-                              + tourist variants). The sleeper signal:
-                              moved_away_by_reason lets the agent write
-                              "people are fleeing the Yards over the noise"
-                              with data backing it.
+                city.population_hud — THE scale number (matches the in-game HUD);
+                              read it every time you write (see "Grounded in city
+                              state"). population_with_move_in / citizens_total run
+                              higher; there is no city.population field.
+                city.churn  — daily births/deaths/moved-in/moved-away, plus
+                              moved_away_by_reason (no_money, not_happy,
+                              no_suitable_property, no_adults, + tourist variants).
+                              WHY people leave — each reason a different character
+                              agenda: not_happy = hostile city, no_money = can't
+                              afford it, no_suitable_property = housing shortage.
+                              Backs "people are fleeing the Yards over the noise."
                 city.social — homeless_count, unemployed_count, crime_count,
-                              crime_rate. City-wide pressure signals.
-                city.budget — income_daily, tax_residential. Pair with
-                              city.money across snapshots to compute net
-                              flow per period.
-                pollution   — per-district + city-wide air / ground / noise
-                              averages, sampled at every building. Each district
-                              (and the city) also carries a `residential` sub-
-                              block: the same averages over RESIDENTIAL buildings
-                              only — what homes actually experience, vs. the
-                              top-level number which includes the polluters' own
-                              loud/dirty footprints. Plus `noise_hotspots` (worst-
-                              affected homes, with x/y) and `noise_sources`
-                              (loudest non-residential buildings, with x/y + type).
-                              NIMBY fights, health scandals, "the Yards smell
-                              like a refinery" anchor here — but on the
-                              `residential` numbers and a source-near-hotspot
-                              proximity check, not the raw district average.
-                land_value  — per-district + city-wide LandValue averages.
-                              The spatial expression of money: pair with
-                              pollution to write "the bottom fell out of
-                              the North Yards" or "Pine Quarter is where
-                              the new money lives."
-                crime       — per-district counts of active resident
-                              criminals (citizens carrying the Criminal
-                              component, binned by home district). Real
-                              spatial signal — districts with no active
-                              criminals are omitted from by_district.
-                              city.social.crime_count has the rolled-up
-                              reported-crime stat; this adds the spatial
-                              dimension and the "who's actively criminal
-                              right now" headcount.
-                tourists    — per-district visitor counts + a city total.
-                              Where the city's visitors actually are, binned
-                              by the district they're currently in. Tourists
-                              are filtered OUT of citizens_sample (residents
-                              only), so this is the only spatial signal on
-                              them. city.total is the walked tourist count
-                              (may differ from city.tourists_current, a
-                              separate headline metric); by_district can sum
-                              to less than total (visitors in transit land in
-                              no district). The "Old Town is overrun this
-                              season" / "the riverfront pulls no traffic"
-                              signal — pair with attractiveness and the
-                              tourist move-away reasons.
-                citizens_sample — up to 30 sampled residents per snapshot
-                              with name, gender, age band, education,
-                              happiness, home district, workplace, school,
-                              followed/is_criminal flags. Every Followed
-                              citizen (player-tracked) is always included;
-                              the rest is a timestamp-seeded random sample.
-                              This is the agent's pool of candidate
-                              characters — pluck named individuals here
-                              when the story needs a face.
+                              crime_rate. City-wide pressure dashboard; cross-ref
+                              pollution/crime by_district to localize it.
+                city.budget — income_daily, tax_residential. Pair with city.money
+                              across two snapshots for net cash flow per period.
+                pollution   — per-district + city-wide air/ground/noise, sampled
+                              at every building. GOTCHA: the top-level number
+                              includes the polluters' own footprint (a plant reads
+                              huge AT the plant, not at any home). For a NIMBY
+                              story read by_district[d].residential — the average
+                              at homes only, what residents actually feel. Plus
+                              noise_hotspots (worst-hit homes, x/y) + noise_sources
+                              (loudest non-residential, x/y + type): a story only
+                              when a source sits NEAR a hotspot (proximity-check
+                              the coordinates — don't blame an unchecked building).
+                land_value  — per-district + city-wide LandValue. "Where the money
+                              lives" / "the bottom fell out." Cross-ref pollution
+                              (it drags land value down).
+                crime       — per-district active resident criminals (Criminal
+                              component, by home district; districts with none
+                              omitted). city.social.crime_count is the rolled-up
+                              stat; this adds the spatial "who's criminal now."
+                              Pollution + low land_value + crime = neglected quarter.
+                tourists    — per-district visitor counts + city.total. Where
+                              visitors are (filtered OUT of citizens_sample, so
+                              this is the only spatial signal on them). city.total
+                              is the walked count (may differ from
+                              city.tourists_current); by_district can sum to less
+                              (in-transit visitors land nowhere). Pair with
+                              attractiveness + the tourist move-away reasons.
+                citizens_sample — up to 30 sampled residents (name, gender, age
+                              band, education, happiness, home_district, workplace,
+                              school, followed/is_criminal). Every Followed citizen
+                              is always included; the rest is a timestamp-seeded
+                              random sample. The candidate-character pool — pluck
+                              by matching attributes; followed:true are the player's
+                              explicit picks, anchor canon there first.
                 demographics — citizen flag counts, average wellbeing/health,
                               employed count, sampled population.
-                trade       — per-resource imports/exports (daily volume +
-                              buy/sell cost), via the InfoLoom peer mod. Empty
-                              arrays when InfoLoom isn't loaded. I use it only
-                              when the "infoloom" integration is enabled
-                              (settings.json.integrations — see "Peer-mod
-                              integration gate"); otherwise I treat it as empty.
-                              When live it's the city's real economic identity:
-                              what it buys and sells, and at what cost.
-                labor       — workforce by education level (with unemployment
-                              rate, employable, commuting-out, underemployment,
-                              homelessness per band) + age_distribution (the
-                              four bands with per-band schooling/education) +
-                              city totals. Via InfoLoom; null when absent, and
-                              ignored unless "infoloom" is enabled. Harder
-                              numbers than the own-ECS `demographics` block —
-                              "the uneducated are the ones out of work", "a town
-                              of retirees and commuters" read straight off this.
-                outside_connections, water_sources — named entities Carto
-                              doesn't surface separately.
-                district_zones — per-district building-type counts (subdivision
+                trade       — per-resource imports/exports (daily volume + buy/sell
+                              cost), via InfoLoom. Empty without it; used ONLY when
+                              the "infoloom" integration is enabled (see "Peer-mod
+                              integration gate"), else treated as empty. The city's
+                              real economic identity — companies/ seed + the
+                              backbone of trade-route events.
+                labor       — workforce by education level (unemployment rate,
+                              employable, commuting-out, underemployment,
+                              homelessness per band) + age_distribution (four bands
+                              with schooling/education) + city totals. Via InfoLoom;
+                              null when absent, ignored unless "infoloom" enabled.
+                              Harder than demographics — "the uneducated are out of
+                              work", "a town of retirees and commuters" read off this.
+                outside_connections, water_sources — named entities Carto doesn't
+                              surface separately.
+                district_zones — per-district building-type counts (subdivision-
                               growth signal).
-                services.education — per-school enrollment vs. capacity, plus a
-                              rollup by tier: elementary / secondary / higher_education
-                              (college + university pooled, as CS2 does). Each
-                              school carries enrolled, capacity, utilization
-                              (enrolled/capacity), tier, education_level (raw),
-                              and district. Read by_tier, NOT the city-wide top
-                              line — higher_education assets carry huge capacities
-                              (~10,000), so the lumped city number reads
-                              artificially low. The "build/expand a school" signal
-                              is a *tier* at or over capacity (utilization ≥ ~0.95),
-                              or a tier with no seats at all. null until the city
-                              has a school. Use these numbers — never invent
-                              enrollment.
-                services.civic_buildings — the roster of city-service buildings
-                              I can give names to (see "Naming civic buildings").
-                              Each entry: id (stable within a session), name
-                              (current label), category (fire / police / health /
-                              education / park / garbage / power / water /
-                              deathcare / transit / …), prefab_name (raw asset),
-                              district, and has_custom_name (true once player- or
-                              I-named). The ones with has_custom_name: false are
-                              the candidates to name. null until the city has a
-                              service building.
-                diff        — change-since-last-snapshot block: zone deltas,
-                              district zone deltas, building_churn (demos +
-                              constructions per district), named-building
-                              churn, outside-connection / water-source
-                              diffs, in-world days elapsed.
-              Read snapshots for "what is the city's state right now / what
-              changed since last play / what region of the world is this."
+                services.education — per-school enrolled/capacity/utilization/tier/
+                              education_level/district, plus a by_tier rollup
+                              (elementary / secondary / higher_education = college +
+                              university pooled). GOTCHA: read by_tier, NOT the
+                              city-wide top line — higher_education carries huge
+                              capacities (~10,000) that drag the lump artificially
+                              low. The build/expand signal is a TIER at/over capacity
+                              (utilization ≥ ~0.95) or with no seats. null until the
+                              first school. Never invent enrollment.
+                services.civic_buildings — roster of nameable service buildings:
+                              id (stable within a session), name, category (fire/
+                              police/health/education/park/garbage/power/water/
+                              deathcare/transit/…), prefab_name, district,
+                              has_custom_name. The has_custom_name:false ones are
+                              naming candidates (see "Naming civic buildings").
+                              null until the city has a service building.
+                diff        — change since last snapshot, and the main event-
+                              candidate feed for /session-end:
+                                • zones_delta — city-wide growth/decline (boom backdrop).
+                                • district_zone_deltas — localized growth; a spike =
+                                  a new subdivision (name it, small events/ entry,
+                                  maybe a developer character).
+                                • building_churn — per-district demos + constructions;
+                                  "6 torn down AND 4 built" is displacement the net
+                                  change hides.
+                                • named_buildings.added/removed — civic infra +
+                                  player-renamed places; each added is an events/
+                                  candidate. Not every removal needs an event.
+                                • outside_connections.added — new highway/rail/air
+                                  destination ("Route to Canmore opened") = milestone.
+                                • diff.politics — election transitions (stage change,
+                                  new_mayor, election_concluded); gated on "elections"
+                                  — see /events-resolve "Election cycle".
+                                • water_source diffs + in-world days elapsed.
 
 carto/        Spatial geography. Refreshed automatically on first export of a
               new city, and on demand via /new-city, /session-end, or the
@@ -495,49 +478,15 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
               captured_at_ingame then.
 ```
 
-**Which surface for what:**
+**Which surface for what.** The trees above are the full field reference — each block lists its own story-use and gotchas. The non-obvious cross-surface routing, the cases that aren't a single field lookup:
 
-- "What kind of world is this city in?" / "What's the climate?" → `map.*` in the latest snapshot.
-- "What's the city's current state?" → latest `snapshots/*.json` (`city.*`, `demographics`).
-- "Who's running for mayor? / who's mayor? / which party holds power? / when's the election?" → `politics` in the latest snapshot (present only with the Elections mod *and* the integration enabled — `"elections"` in `settings.json.integrations`; otherwise treat as `null` and answer with soft, inferred politics). When live it's the authority on the race — read it instead of speculating. Candidates are real residents → seed `characters/`; parties → `factions/`.
-- "What changed since last play?" → `diff` block in the latest snapshot (including `diff.politics` for election transitions).
-- "What does the city import / export? / what's its economy actually trading?" → `snapshot.trade.imports` / `exports` (InfoLoom; present only with InfoLoom loaded *and* `"infoloom"` in `settings.json.integrations` — otherwise empty, infer from zone counts). When live, real volumes + costs.
-- "Who's out of work? / what's the age structure?" → `snapshot.labor.workforce` (unemployment by education level) and `labor.age_distribution` (InfoLoom; same `"infoloom"` gate; `null` otherwise — fall back to `demographics` + `citizens_sample`).
-- "Why are people leaving?" → `city.churn.moved_away_by_reason`.
-- "How rough is this neighborhood?" → `pollution.by_district[<name>].residential` (what homes feel, not the raw district avg) + `crime.by_district[<name>]` + `land_value.by_district[<name>]`.
-- "Is anyone actually suffering from noise / who's making it?" → `pollution.noise_hotspots` (affected homes, x/y) + `pollution.noise_sources` (loudest producers, x/y); only a story when a source sits near a hotspot.
-- "Give me a named resident in <district>" → `citizens_sample.citizens` filtered by `home_district`.
-- "Is the school overcrowded? / does the city need another school?" → `services.education` (per-school `utilization`, and `city.by_tier` for whole tiers with no seats). Never invent enrollment — if `services.education` is null, the city has no school yet.
-- "Where do the tourists go? / is the city's tourism working?" → `tourists.by_district` for the spatial spread (which district is the visitor face), `tourists.city.total` + `attractiveness` for scale, and the tourist `moved_away_by_reason` variants for whether visitors are leaving unsatisfied.
-- "What does the terrain look like?" → `carto/processed/elevation.md`.
-- "How much water is there and what shape?" → `carto/processed/water.md`.
-- "Where is Old Halverson relative to Riverside?" / "What's in this district?" → `carto/processed/index.md` + `districts/<slug>.md`.
-- "What highways pass through?" → `carto/processed/roads.md`.
-- "How many residential buildings does the city have total?" → `city.zones.residential` in the snapshot.
-- "What's today's in-world date?" / "Has this event's deadline passed?" → `clock.json` (`in_world_date`), not the snapshot's `captured_at_ingame`.
+- **Spatial questions** — terrain, water shape, where a district sits and what's in it, which highways pass through → the `carto/processed/` chunks (`elevation.md`, `water.md`, `index.md` + `districts/<slug>.md`, `roads.md`), never the snapshot.
+- **"How rough is this neighborhood?"** → compose `pollution.by_district[d].residential` (what homes feel, not the raw district avg) + `crime.by_district[d]` + low `land_value.by_district[d]`.
+- **"Who's suffering from noise / who's making it?"** → `pollution.noise_hotspots` + `noise_sources`, only a story when a source sits near a hotspot (proximity-check the coordinates).
+- **Totals / counts** ("how many residential buildings?") → read the already-aggregated `city.zones.*` / `district_zones`; don't recompute.
+- **"Today's in-world date / has a deadline passed?"** → `clock.json` `in_world_date`, NOT the snapshot's possibly-stale `captured_at_ingame`.
 
-**Story-worthy signals in `snapshot.diff`** — the agent should treat these as event candidates and write `events/*.md` entries from them on `/session-end`:
-
-- `diff.zones_delta` — city-wide growth or decline. "The city added 65 residential lots in the last month" is a backdrop signal for a boom narrative.
-- `diff.district_zone_deltas` — localized growth. A spike in one district's residential count is a new subdivision opening — name it, write a small `events/` entry, possibly introduce a developer character.
-- `diff.building_churn` — per-district demolitions + constructions, separate from the net `district_zone_deltas`. "6 lots torn down AND 4 built" is a displacement / gentrification signal that the net change alone hides.
-- `diff.named_buildings.added` — civic infrastructure or player-renamed places appearing for the first time. Schools, fire stations, transformer stations, rail yards, named landmarks. Each one is an `events/*.md` candidate (e.g., "Inger Brevik Elementary opened, March 2027").
-- `diff.named_buildings.removed` — demolitions of previously-named places. Worth noting if the building had a canon entry; not every removal needs an event.
-- `diff.outside_connections.added` — new highway/rail/air destination connected. "Route to Canmore opened" is a real civic milestone.
-- `diff.politics` — election transitions (Elections mod; **only when the integration is enabled** — see "Peer-mod integration gate"): `stage` change (campaign moving toward election day), `new_mayor` (power changed hands or the first mayor took office), `election_concluded` (a winner certified). Each is a strong `events/*.md` candidate — handled in detail by the `/events-resolve` "Election cycle" step. If the integration is off, I skip `diff.politics`.
-
-**Story-worthy signals in the snapshot body** — these are *standing* signals (the current state, not a change), useful for grounding character motives, faction positions, and the city's mood when writing canon at any point:
-
-- `city.churn.moved_away_by_reason` — *why* people are leaving (no_money / not_happy / no_suitable_property / no_adults, plus tourist variants). High `not_happy` is a "the city is hostile" story; high `no_money` is a "can't afford to live here" story; high `no_suitable_property` is a housing-shortage story. Each maps to a different character agenda.
-- `city.social` — homeless_count, unemployed_count, crime_count, crime_rate. The headline social-pressure dashboard. Cross-reference against `pollution.by_district` and `crime.by_district` to localize the pressure to a place worth writing about.
-- `city.budget` — income_daily, tax_residential. Combine with `city.money` across two snapshots to compute net cash flow per in-world period; a city running deficits or hoarding surplus is a different political climate.
-- `pollution.by_district` — per-district air / ground / noise. The agent's NIMBY-fight engine — but read it correctly: the top-level `air`/`ground`/`noise` is the average *at every building in the district, including the polluters themselves*. An industrial district reads enormous because the plant is loud/dirty **at the plant** — that is the source's own level, NOT what anyone hears at home. **For a NIMBY story, read `by_district[d].residential`** — the average at *residential* buildings only, i.e. what homes actually experience. A noise complaint is real only when `residential.noise` is elevated; a loud industrial district with no nearby homes is not a story about suffering residents.
-  - **Don't blame a building you haven't proximity-checked.** `pollution.noise_hotspots` lists the worst-affected *homes* (residential, with `(x, y)`); `pollution.noise_sources` lists the loudest *non-residential* buildings (the likely producers, with `(x, y)` and `type`). Only write "the mill's noise is hurting the homes on X" when a source's coordinate is genuinely **near** a hotspot's coordinate. If the loudest source is far from every hotspot, there is no victim — don't invent one. Pin both the source and the affected homes from these coordinates.
-- `land_value.by_district` — per-district averages. "This is where the money lives" + "the bottom fell out of this district" both live here. Cross-reference against pollution (pollution drags land value down — the engine's own update job subtracts pollution penalties).
-- `crime.by_district` — per-district active-criminal counts. Districts with no active criminals are omitted; districts with elevated counts vs. their population are the "rough neighborhoods" the storyteller should be writing about. Pair with `pollution.by_district` and low `land_value.by_district` to spot the classic neglected-quarter triple.
-- `tourists.by_district` — where the city's visitors are right now. A district carrying most of the tourist count is the city's tourist face (its businesses, its character, its locals' relationship to outsiders); a marquee district pulling none is a story about why. Cross-reference `attractiveness` and `city.churn.moved_away_by_reason` tourist variants (`tourist_no_hotel`, `tourist_no_target`) to write about a tourism economy that's straining or failing to land.
-- `politics` — the live civic-political layer (Elections mod; `null` when not loaded, and **to be ignored unless the integration is enabled** — `"elections"` in `settings.json.integrations`, see "Peer-mod integration gate"). When live the standing race is real, mod-authored fact: `parties[]` are `factions/` (with `reputation`, `wins`, `tags`), `candidates[]` are real residents to seed as `characters/` (each carries `name`, `age_band`, `education`, `work`, `wealth`, and a `tag` like *Populist* / *Honest* / *Corrupt* — a ready-made characterization hook), `mayor` holds power now, and `legislation[]` is enacted policy. `integrity.*` + a candidate's `corruption_risk_steps` + `mayor.bribe_total` are real scandal pressure for `secrets/`. Don't fabricate a political backdrop when this block exists — read it and give it human texture (scaled to the city's size).
-- `citizens_sample.citizens` — the candidate-character pool. When the story needs a named face (a homeowner objecting to a rezoning, a small-business owner in a struggling district, a teenager about to leave town), pluck one whose attributes fit: matching home_district, matching workplace, matching age band, matching education. Always-included `followed: true` citizens are the player's explicit picks — anchor canon around them first.
+Two reading reminders: `diff.*` is the **event-candidate feed** — treat its entries as `events/*.md` candidates on `/session-end`; and the body's `*.by_district` blocks (pollution / land_value / crime / tourists) are **standing** signals for grounding character motives and the city's mood at any time, not just change signals.
 
 **Reading the spatial chunks — what to take literally vs. softly:**
 
