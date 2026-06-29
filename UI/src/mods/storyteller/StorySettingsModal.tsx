@@ -5,6 +5,8 @@ import { useDrag } from "./useDrag";
 import {
   storySettingsBinding,
   electionsAvailableBinding,
+  infoloomAvailableBinding,
+  customChirpsAvailableBinding,
   saveSettings,
 } from "./bindings";
 import type { StorySettings } from "./bindings";
@@ -18,10 +20,10 @@ import { PillRow, pills, MATURITY, CAST } from "./QuickstartWizard";
 // settings.json DIRECTLY with no LLM call (these are pure preferences).
 //
 // Scope: the settings.json behavior/disclosure fields only — including the
-// peer-mod integration toggles (Elections). Story-shaping canon fields (tone,
-// region, era) are NOT here: changing those adapts the story forward and is a
-// chat request (see CLAUDE.md "Changing founding choices later"). The footer
-// points the player there.
+// peer-mod integration toggles (Elections, InfoLoom, Custom Chirps). Story-
+// shaping canon fields (tone, region, era) are NOT here: changing those adapts
+// the story forward and is a chat request (see CLAUDE.md "Changing founding
+// choices later"). The footer points the player there.
 
 const DEFAULTS: StorySettings = {
   secrets_visibility: "hidden",
@@ -36,6 +38,8 @@ const DEFAULTS: StorySettings = {
 export function StorySettingsModal({ onClose }: { onClose: () => void }) {
   const settingsJson = useValue(storySettingsBinding);
   const electionsAvailable = useValue(electionsAvailableBinding);
+  const infoloomAvailable = useValue(infoloomAvailableBinding);
+  const customChirpsAvailable = useValue(customChirpsAvailableBinding);
 
   // Parse the current settings once at mount. The modal is conditionally
   // mounted (StorytellerToolbar unmounts it on close), so this initializer
@@ -58,7 +62,38 @@ export function StorySettingsModal({ onClose }: { onClose: () => void }) {
   const [proactivity, setProactivity] =
     useState<"on-request" | "proactive">(initial.storyteller_proactivity);
   const [git, setGit] = useState(initial.git_versioning);
+  // One state flag per wired integration, initialized from the current
+  // settings.json. A flag keeps its initial value when its toggle isn't
+  // rendered (mod not detected), so Save preserves an opt-in for a peer mod
+  // that simply isn't loaded right now — same behavior the single Elections
+  // toggle had before this was generalized.
   const [elections, setElections] = useState(initial.integrations.includes("elections"));
+  const [infoloom, setInfoloom] = useState(initial.integrations.includes("infoloom"));
+  const [customchirps, setCustomchirps] = useState(initial.integrations.includes("customchirps"));
+
+  // The wired peer-mod integrations, rendered uniformly (mirrors the wizard's
+  // WIRED_INTEGRATIONS). Each renders a real toggle only when its mod is
+  // detected; an undetected one is simply absent but its flag still feeds Save,
+  // so a stored opt-in survives a session where the mod isn't loaded. `hint`
+  // explains what on/off does for that integration.
+  const WIRED_INTEGRATIONS = [
+    {
+      id: "elections", label: "Elections", available: electionsAvailable,
+      checked: elections, set: setElections,
+      hint: "On weaves your mayoral races into the story; off keeps politics soft and inferred, as if Elections weren’t running.",
+    },
+    {
+      id: "infoloom", label: "InfoLoom", available: infoloomAvailable,
+      checked: infoloom, set: setInfoloom,
+      hint: "On grounds trade and labor stories on InfoLoom’s real numbers; off falls back to inferring them from zone counts and demographics.",
+    },
+    {
+      id: "customchirps", label: "Custom Chirps", available: customChirpsAvailable,
+      checked: customchirps, set: setCustomchirps,
+      hint: "On posts a short in-world chirp about each new event to the in-game Chirper feed; off keeps the story to this panel.",
+    },
+  ];
+  const anyWiredAvailable = WIRED_INTEGRATIONS.some((m) => m.available);
 
   // Draggable floating window (same pattern as the wizard).
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -72,10 +107,14 @@ export function StorySettingsModal({ onClose }: { onClose: () => void }) {
     : { top: "120rem", left: "730rem" };
 
   const save = () => {
-    // Carry forward any integrations the editor doesn't surface (future ids),
-    // toggling only Elections by what's checked. Drop "elections" when off.
-    const others = initial.integrations.filter((id) => id !== "elections");
-    const integrations = elections ? [...others, "elections"] : others;
+    // Carry forward any integrations the editor doesn't manage (future ids),
+    // then add back each wired id whose flag is on. A wired id whose toggle
+    // wasn't rendered (mod undetected) keeps its initial flag, so a stored
+    // opt-in is preserved rather than silently dropped.
+    const managed = new Set(WIRED_INTEGRATIONS.map((m) => m.id));
+    const others = initial.integrations.filter((id) => !managed.has(id));
+    const enabled = WIRED_INTEGRATIONS.filter((m) => m.checked).map((m) => m.id);
+    const integrations = [...others, ...enabled];
     const payload: StorySettings = {
       secrets_visibility: secrets,
       levelup_storylines: levelup,
@@ -169,23 +208,22 @@ export function StorySettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className={styles.wizSectionLabel}>Mod integrations</div>
         <div className={styles.wizField}>
-          {electionsAvailable ? (
-            <>
-              <div className={styles.wizCheckRow}>
-                <button
-                  type="button"
-                  className={`${styles.wizCheck} ${elections ? styles.wizCheckOn : ""}`}
-                  onClick={() => setElections((v) => !v)}
-                >
-                  <span className={styles.wizCheckBox}>{elections ? "✓" : ""}</span>
-                  Elections
-                </button>
+          {anyWiredAvailable ? (
+            WIRED_INTEGRATIONS.filter((m) => m.available).map((m) => (
+              <div key={m.id}>
+                <div className={styles.wizCheckRow}>
+                  <button
+                    type="button"
+                    className={`${styles.wizCheck} ${m.checked ? styles.wizCheckOn : ""}`}
+                    onClick={() => m.set((v) => !v)}
+                  >
+                    <span className={styles.wizCheckBox}>{m.checked ? "✓" : ""}</span>
+                    {m.label}
+                  </button>
+                </div>
+                <div className={styles.wizHint}>{m.hint}</div>
               </div>
-              <div className={styles.wizHint}>
-                On weaves your mayoral races into the story; off keeps politics
-                soft and inferred, as if Elections weren&rsquo;t running.
-              </div>
-            </>
+            ))
           ) : (
             <div className={styles.wizHint}>
               No supported peer-mod integrations are detected right now.

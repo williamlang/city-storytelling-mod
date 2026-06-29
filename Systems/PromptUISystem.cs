@@ -73,6 +73,13 @@ namespace CityStoryMod.Systems
         // wait until the modManager is populated to avoid latching false).
         ValueBinding<bool> _electionsAvailableBinding;
         ValueBinding<bool> _infoloomAvailableBinding;
+        // True when Custom Chirps (#19) is detected as loaded. Unlike elections/
+        // infoloom this is an OUTBOUND integration (we post to its API; it adds
+        // no snapshot data), but the toggle plumbing is identical: the wizard
+        // and Story Settings editor render a real default-on checkbox iff this
+        // is true. Mirrors CustomChirpsBridge.IsAvailable, the same probe
+        // ExportSystem uses before draining chirp-requests.json.
+        ValueBinding<bool> _customChirpsAvailableBinding;
         // JSON of the current per-city settings.json preference fields, read by
         // the native Story Settings editor to pre-populate (and re-read after a
         // direct Save). Recomputed on the same cadence as quickstartAvailable
@@ -167,6 +174,7 @@ namespace CityStoryMod.Systems
             _wizardDoneBinding = new ValueBinding<string>(Group, "wizardDone", "");
             _electionsAvailableBinding = new ValueBinding<bool>(Group, "electionsAvailable", false);
             _infoloomAvailableBinding = new ValueBinding<bool>(Group, "infoloomAvailable", false);
+            _customChirpsAvailableBinding = new ValueBinding<bool>(Group, "customChirpsAvailable", false);
             _storySettingsBinding = new ValueBinding<string>(Group, "storySettings", "{}");
             AddBinding(_messagesBinding);
             AddBinding(_isRunningBinding);
@@ -185,6 +193,7 @@ namespace CityStoryMod.Systems
             AddBinding(_wizardDoneBinding);
             AddBinding(_electionsAvailableBinding);
             AddBinding(_infoloomAvailableBinding);
+            AddBinding(_customChirpsAvailableBinding);
             AddBinding(_storySettingsBinding);
 
             AddBinding(new TriggerBinding<string>(Group, "submitPrompt", OnSubmitPrompt));
@@ -566,6 +575,16 @@ namespace CityStoryMod.Systems
             if (infoloomAvail != _infoloomAvailableBinding.value)
             {
                 _infoloomAvailableBinding.Update(infoloomAvail);
+            }
+
+            // Same for Custom Chirps (#19) — the wizard's third real (default-on)
+            // peer-mod toggle, and the Story Settings editor's. Mirrors the
+            // probe ExportSystem uses before posting chirps, so the checkbox
+            // appears iff chirps could actually be delivered.
+            bool customChirpsAvail = CustomChirpsBridge.IsAvailable;
+            if (customChirpsAvail != _customChirpsAvailableBinding.value)
+            {
+                _customChirpsAvailableBinding.Update(customChirpsAvail);
             }
 
             // Reflect provider-setup status so the panel can nudge a tester who

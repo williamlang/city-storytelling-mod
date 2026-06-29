@@ -25,6 +25,13 @@ export const electionsAvailableBinding = bindValue<boolean>(GROUP, "electionsAva
 // integration toggle only when this is true. Mirrors the reflective probe
 // ExportSystem uses for the snapshot `trade` / `labor` blocks.
 export const infoloomAvailableBinding = bindValue<boolean>(GROUP, "infoloomAvailable", false);
+// True when the Custom Chirps peer mod (#19) is detected as loaded. Same role
+// as electionsAvailable/infoloomAvailable: the wizard and Story Settings editor
+// render a real (default-on) Custom Chirps toggle only when this is true.
+// Unlike the others this is an outbound integration — it posts the
+// storyteller's events to the in-game Chirper feed rather than feeding the
+// snapshot — but the toggle plumbing is identical.
+export const customChirpsAvailableBinding = bindValue<boolean>(GROUP, "customChirpsAvailable", false);
 // True when no usable LLM provider is configured yet (hosted provider with no
 // API key, or no model id). Drives the first-run "set up a provider" nudge.
 export const setupNeededBinding = bindValue<boolean>(GROUP, "setupNeeded", false);

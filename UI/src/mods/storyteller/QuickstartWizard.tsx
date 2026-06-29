@@ -10,6 +10,7 @@ import {
   quickstartAvailableBinding,
   electionsAvailableBinding,
   infoloomAvailableBinding,
+  customChirpsAvailableBinding,
   lastErrorBinding,
   foundCity,
   dismissQuickstart,
@@ -41,11 +42,10 @@ export const CAST = ["tight", "balanced", "sprawling"];
 
 // Planned integrations still gated on their own issue. Rendered disabled so the
 // form shows where they'll live, until each is wired and a detection binding
-// exists. Elections (#43) and InfoLoom (#31) are wired, so they're handled as
-// real, default-on toggles gated on their availability bindings (see WIRED_*).
-const PLANNED_INTEGRATIONS = [
-  { id: "custom-chirps", label: "Custom Chirps", issue: "#19" },
-];
+// exists. Elections (#43), InfoLoom (#31), and Custom Chirps (#19) are all
+// wired now, so they're handled as real, default-on toggles gated on their
+// availability bindings (see WIRED_*). Nothing is left planned-but-unwired.
+const PLANNED_INTEGRATIONS: { id: string; label: string; issue: string }[] = [];
 
 // A row of mutually-exclusive pill buttons standing in for a radio group.
 // Native <input type=radio> styling is unreliable in Coherent, so we paint
@@ -119,6 +119,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const quickstartAvailable = useValue(quickstartAvailableBinding);
   const electionsAvailable = useValue(electionsAvailableBinding);
   const infoloomAvailable = useValue(infoloomAvailableBinding);
+  const customChirpsAvailable = useValue(customChirpsAvailableBinding);
   const lastError = useValue(lastErrorBinding);
   const doneJson = useValue(wizardDoneBinding);
   const done = useMemo<WizardDone | null>(() => {
@@ -183,6 +184,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   // integration; only the detected ones render and reach integrations[].
   const [elections, setElections] = useState(true);
   const [infoloom, setInfoloom] = useState(true);
+  const [customchirps, setCustomchirps] = useState(true);
 
   // The wired peer-mod integrations, rendered uniformly. Each shows as a real
   // default-on checkbox only when its detection binding is true; otherwise it's
@@ -191,6 +193,7 @@ export function QuickstartWizard({ onClose }: { onClose: () => void }) {
   const WIRED_INTEGRATIONS = [
     { id: "elections", label: "Elections", available: electionsAvailable, checked: elections, set: setElections },
     { id: "infoloom", label: "InfoLoom", available: infoloomAvailable, checked: infoloom, set: setInfoloom },
+    { id: "customchirps", label: "Custom Chirps", available: customChirpsAvailable, checked: customchirps, set: setCustomchirps },
   ];
   const anyWiredAvailable = WIRED_INTEGRATIONS.some((m) => m.available);
 

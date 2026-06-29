@@ -304,7 +304,7 @@ Beyond region and name, the wizard asks a small set of founding questions. Each 
 
 - **Git versioning (#26)** — the wizard only records the *preference* here (`git_versioning: true|false`). The actual repo-init + auto-commit-at-boundaries plumbing is issue **#26**'s scope; this field is the natural opt-in surface for it and should land with (or after) #26, not before. Until #26 ships, treat the field as inert/hidden.
 
-- **Mod integrations (placeholder)** — a multi-checkbox list letting the player pick which peer-mod integrations to enable for this city, written to `settings.json: integrations[]`. **Placeholder for now** — none are wired yet. Planned: **InfoLoom** (#31), **Custom Chirps** (#19), **Elections** (#43). Design rules for when they land:
+- **Mod integrations** — a multi-checkbox list letting the player pick which peer-mod integrations to enable for this city, written to `settings.json: integrations[]`. **Wired:** **Elections** (#43), **InfoLoom** (#31), and **Custom Chirps** (#19) — each rendered as a real default-on checkbox when detected as loaded, gated on its availability binding (`electionsAvailable` / `infoloomAvailable` / `customChirpsAvailable`). Design rules:
   - **Only show a checkbox when the integration is both (a) supported in Ghostwriter and (b) detected as loaded** in the current game (reflective capability-probe, same pattern as `CartoBridge`). An integration that isn't installed simply doesn't appear — no dead checkboxes.
   - Each integration is **gated on its own implementation issue** (like git/#26): the checkbox is inert/hidden until that integration ships.
   - **Carto is not in this list** — it's the spatial backbone, always on, not optional.
@@ -431,7 +431,7 @@ Founding choices are not one-way. Every field set in the wizard can be changed l
 1. **In-game date in the snapshot** — verify it's already exported (needed for era-derivation); if not, a small `ExportSystem` add lands in phase 1.
 2. **Active-events is currently a global mod setting** (`Settings.ActiveEventsEnabled`), but "storyteller proactivity" wants to be a per-city founding choice. Recommend migrating active-events to a per-city `settings.json` field; flag for the phase that ships proactivity.
 3. **Git versioning depends on issue #26.** The wizard records only the preference; repo-init + auto-commit plumbing is #26's scope. Keep the field hidden/inert until #26 lands.
-4. **Mod integrations is a placeholder.** Each checkbox is gated on its own integration issue — InfoLoom (#31), Custom Chirps (#19), Elections (#43) — and on the reflective detection list from #39 (`mods.loaded[]`). Until those land, the integrations step renders empty/hidden. Carto is always-on and not listed.
+4. **Mod integrations are wired.** Elections (#43), InfoLoom (#31), and Custom Chirps (#19) each render a real default-on checkbox, gated on a reflective availability probe (`electionsAvailable` / `infoloomAvailable` / `customChirpsAvailable`, mirroring the bridges' `IsAvailable`). A checkbox appears only when its mod is detected as loaded; the step renders empty when none are. The same toggles are editable post-founding in the Story Settings editor. Carto is always-on and not listed.
 
 ---
 

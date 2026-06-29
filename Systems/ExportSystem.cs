@@ -157,6 +157,31 @@ namespace CityStoryMod.Systems
             public string name;  // desired custom name; blank/whitespace clears it
         }
 
+        // #19 Custom Chirps return channel. The storyteller writes
+        // chirp-requests.json (a JSON array of { text, department, sender_name,
+        // event }) into the city dir when it creates a new events/ entry; the
+        // mod posts each to the in-game Chirper via CustomChirpsBridge, writes
+        // chirp-results.json, and consumes the request file. Polled on the same
+        // clock heartbeat as naming. Gated agent-side by the "customchirps"
+        // integration — the mod is a dumb actuator: if a request file appears,
+        // it posts (or reports the peer mod absent). Capped per drain so a
+        // burst can't flood the feed.
+        const string ChirpRequestsFile = "chirp-requests.json";
+        const string ChirpResultsFile = "chirp-results.json";
+        const int MaxChirpsPerDrain = 6;
+
+        // Wire shape of one chirp-requests.json entry. Public fields bound by
+        // Newtonsoft; `event` is the (optional) source event slug, carried
+        // through to the results file for traceability only.
+        class ChirpRequest
+        {
+            public string text;         // the chirp body — terse, in-world
+            public string department;   // DepartmentAccount name → message icon; blank = default
+            public string sender_name;  // visible sender label (a canon character or civic voice)
+            [JsonProperty("event")]
+            public string eventSlug;    // optional: originating events/<slug>.md, for results only
+        }
+
         // Save-load transition detection. Flips true the first tick OnUpdate sees
         // inGame+cityReady; flips back to false on any tick where the gate fails
         // (main menu, loading screen, editor). The false→true edge is what we
@@ -571,6 +596,7 @@ namespace CityStoryMod.Systems
                 _lastClockWriteUtc = DateTime.UtcNow;
                 WriteClockFile();
                 ProcessNamingRequests();
+                ProcessChirpRequests();
             }
 
             // Continual spatial-map refresh on its own slow cadence (separate
@@ -2171,7 +2197,7 @@ namespace CityStoryMod.Systems
             {
                 // Don't reparse a broken file every heartbeat — set it aside.
                 _log.Warn($"Naming: malformed {NamingRequestsFile} ({ex.Message}); setting aside.");
-                TrySetAside(reqPath, cityDir);
+                TrySetAside(reqPath, cityDir, "naming-requests.invalid.json");
                 return;
             }
 
@@ -2237,16 +2263,107 @@ namespace CityStoryMod.Systems
             _log.Info($"Naming: applied {applied}/{requests.Count} request(s) from {NamingRequestsFile}.");
         }
 
+        // #19 write path: post storyteller-authored chirps to the in-game
+        // Chirper. Reads chirp-requests.json (a JSON array of { text,
+        // department, sender_name, event }) from the city dir, posts each via
+        // CustomChirpsBridge (compact chirp, canon sender name, no entity
+        // target in v1), writes chirp-results.json, and consumes the request
+        // file. Capped at MaxChirpsPerDrain per heartbeat so a malformed burst
+        // can't flood the feed — the overflow is reported as skipped, not
+        // silently dropped. If Custom Chirps isn't installed the requests are
+        // still consumed and reported skipped, so the agent learns the channel
+        // is dark rather than re-queuing forever.
+        void ProcessChirpRequests()
+        {
+            string cityDir = Mod.LastExportedCityDir;
+            if (string.IsNullOrEmpty(cityDir)) return;
+            string reqPath = Path.Combine(cityDir, ChirpRequestsFile);
+            if (!File.Exists(reqPath)) return;
+
+            List<ChirpRequest> requests;
+            try
+            {
+                requests = JsonConvert.DeserializeObject<List<ChirpRequest>>(File.ReadAllText(reqPath));
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Chirps: malformed {ChirpRequestsFile} ({ex.Message}); setting aside.");
+                TrySetAside(reqPath, cityDir, "chirp-requests.invalid.json");
+                return;
+            }
+
+            if (requests == null || requests.Count == 0)
+            {
+                TryDeleteFile(reqPath);
+                return;
+            }
+
+            bool available = CustomChirpsBridge.IsAvailable;
+            var results = new List<object>();
+            int posted = 0;
+            for (int i = 0; i < requests.Count; i++)
+            {
+                var r = requests[i];
+                if (r == null || string.IsNullOrWhiteSpace(r.text))
+                {
+                    results.Add(new { @event = r?.eventSlug, status = "skipped", reason = "missing chirp text" });
+                    continue;
+                }
+                if (i >= MaxChirpsPerDrain)
+                {
+                    results.Add(new { @event = r.eventSlug, status = "skipped", reason = $"per-drain cap ({MaxChirpsPerDrain}) reached" });
+                    continue;
+                }
+                if (!available)
+                {
+                    results.Add(new { @event = r.eventSlug, status = "skipped", reason = "Custom Chirps not installed" });
+                    continue;
+                }
+
+                bool ok = CustomChirpsBridge.PostChirp(r.text, r.department, r.sender_name, out string usedDept, out string error);
+                if (ok)
+                {
+                    posted++;
+                    results.Add(new { @event = r.eventSlug, status = "posted", department = usedDept, sender = r.sender_name });
+                }
+                else
+                {
+                    results.Add(new { @event = r.eventSlug, status = "error", reason = error });
+                }
+            }
+
+            try
+            {
+                File.WriteAllText(
+                    Path.Combine(cityDir, ChirpResultsFile),
+                    JsonConvert.SerializeObject(new
+                    {
+                        processed_at_utc = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        custom_chirps_available = available,
+                        total = requests.Count,
+                        posted = posted,
+                        results = results,
+                    }, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Chirps: could not write {ChirpResultsFile}: {ex.Message}");
+            }
+
+            TryDeleteFile(reqPath);
+            _log.Info($"Chirps: posted {posted}/{requests.Count} chirp(s) from {ChirpRequestsFile} (available={available}).");
+        }
+
         static void TryDeleteFile(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
 
-        static void TrySetAside(string path, string cityDir)
+        static void TrySetAside(string path, string cityDir, string destFileName)
         {
             try
             {
-                string dest = Path.Combine(cityDir, "naming-requests.invalid.json");
+                string dest = Path.Combine(cityDir, destFileName);
                 if (File.Exists(dest)) File.Delete(dest);
                 File.Move(path, dest);
             }

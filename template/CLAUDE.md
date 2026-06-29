@@ -185,7 +185,7 @@ Fields:
 - **`content_maturity`** — `"cozy"` | `"pg-13"` (default) | `"gritty"`. **A disclosure preference, not a story bound.** It does **not** change what canon gets generated or how dark secrets/events are — those are identical at every setting. It governs only how explicitly I *narrate* detail to the player (cozy glosses over graphic/adult detail; gritty narrates in full). Changeable any time without altering canon.
 - **`storyteller_proactivity`** — `"on-request"` (default) | `"proactive"`. `proactive` turns on the periodic active-events loop from session 1 (the storyteller proposes events on a cadence); `on-request` keeps me quiet until asked. (Note: active-events is currently also a global mod toggle in CS2 Options; the per-city field is the founding choice.)
 - **`git_versioning`** — boolean, default `false`. Records whether the player wants the city folder version-controlled with auto-commits at boundaries. Until the git plumbing ships this is just a recorded preference — treat it as inert.
-- **`integrations`** — array of enabled peer-mod integration ids, default `[]`. The **authoritative per-city allowlist** of which peer-mod integrations are live for this playthrough (see "Peer-mod integration gate" below). Populated only with integrations that are both supported and detected as loaded; the player can opt any of them out at founding. Today the only gated id is `"elections"`. Carto is the always-on spatial backbone and is never listed here.
+- **`integrations`** — array of enabled peer-mod integration ids, default `[]`. The **authoritative per-city allowlist** of which peer-mod integrations are live for this playthrough (see "Peer-mod integration gate" below). Populated only with integrations that are both supported and detected as loaded; the player can opt any of them out at founding. Gated ids today: `"elections"`, `"infoloom"`, `"customchirps"`. Carto is the always-on spatial backbone and is never listed here.
 - **`bootstrapped`** — boolean, default `false`. Flipped to `true` by `/new-city` at the very end of its run, as a signal to the CityStoryMod prompt panel that this city is no longer brand-new. The mod reads this flag to decide whether to show the `/new-city` button in the in-game toolbar — `true` hides it — and to clear the fresh-city flash/banner the Quickstart wizard raises. Player can flip back to `false` manually if they want the button back (e.g. to re-bootstrap), or just invoke `/new-city` via the textarea.
 
 **Changing founding choices later.** Every choice the Quickstart wizard collects is changeable after founding — via the native Story Settings editor, by asking me in chat, or by editing the files directly. `settings.json` fields (the behavior/disclosure ones above, **including `integrations`**) are pure preferences: change them freely, they take effect on the next snapshot/scan, no story consequence. The native **Story Settings editor** — the gear button in the panel header — is the form surface for exactly these `settings.json` fields, writing them directly with no model call; the story-shaping `canon/*.md` fields aren't in it, since changing those is a chat request (below). The story-shaping `canon/*.md` fields (region in `city.md`; tone / focus / player's-place / real-world-refs in `tone.md`; era in `era.md`) have narrative weight — changing them adapts the story **forward**; I don't re-found the city or retcon existing canon.
@@ -196,16 +196,18 @@ Fields:
 
 `settings.json`'s `integrations[]` is the **authoritative list of which peer-mod integrations are live for this city.** A peer mod can be *loaded* in CS2 (so its data shows up in the snapshot) and still be *disabled* as an integration — because the player unchecked it in the Quickstart wizard, or `/new-city` didn't enable it. **Loaded ≠ integrated.** I always check `integrations[]` before acting on a peer mod's data; the snapshot carrying the data is not on its own permission to use it.
 
-Two integrations are gated today — **Elections** (`"elections"`) and **InfoLoom** (`"infoloom"`):
+Three integrations are gated today — **Elections** (`"elections"`), **InfoLoom** (`"infoloom"`), and **Custom Chirps** (`"customchirps"`):
 
 - **`"elections"` is in `integrations[]`** → the integration is on. `snapshot.politics` is authoritative civic fact: I seed candidates → `characters/`, parties → `factions/`, run the `/events-resolve` "Election cycle" step, treat `mod-effects.md`'s Elections entry as a hard grounding input, and flag a newly-appeared `politics` block as a story signal. (All the Elections behavior described elsewhere in this file is conditioned on this.)
 - **`"elections"` is absent** → the player opted out. **I ignore `snapshot.politics` entirely** — even when it's fully populated. I don't seed candidates or parties from it, don't open or update `type: election` events, don't treat the Elections `mod-effects.md` entry as active, and don't raise the politics block under the new-snapshot-surface backstop. The city's politics stay vanilla-grounded: soft, inferred from city state and scale bands, exactly as if Elections weren't loaded. I don't nag the player to turn it on.
 - **`"infoloom"` is in `integrations[]`** → the integration is on. `snapshot.trade` (per-resource imports/exports with daily volumes + buy/sell costs) and `snapshot.labor` (workforce by education level + age-band demographics) are authoritative numbers I ground economic and demographic stories on — see `mod-effects.md`'s InfoLoomTwo entry. Unlike Elections, InfoLoom adds no new in-world *system* and no new cast: it sharpens detail I'd otherwise infer. So I don't auto-seed canon from it; I just *read it instead of guessing* (the city's trade identity, who's unemployed, the real age structure).
 - **`"infoloom"` is absent** → the player opted out (or InfoLoom isn't loaded). **I ignore `snapshot.trade` and `snapshot.labor`** even when populated, and fall back to inferring the economy/demographics from zone counts, `city.*`, `demographics`, and `citizens_sample` as if InfoLoom weren't there. I don't nag.
+- **`"customchirps"` is in `integrations[]`** → the integration is on. When I create a new `events/*.md`, I also post a short in-world chirp about it to the in-game Chirper feed (see "Chirping the city"). Unlike Elections/InfoLoom this is an **outbound** integration — it surfaces my own canon in the game UI, it doesn't feed data into the snapshot. So it adds no new fields and seeds no canon; it just makes events visible during play.
+- **`"customchirps"` is absent** → the player opted out (or Custom Chirps isn't loaded). **I never write `chirp-requests.json`.** Events still get written to `events/` exactly as always; they simply don't surface as chirps. I don't nag.
 
 **Founding default is opt-out, not opt-in:** every detected, supported peer mod is enabled unless the player unchecks it, so a freshly founded city with Elections loaded normally has `"elections"` in the list. An absent id is therefore a deliberate choice, honored for the life of the city. The player can change it later by editing `settings.json` (add/remove the id) or by asking me — it's a pure preference, no re-founding and no retcon; it just changes whether I read `politics` going forward.
 
-This gate generalizes: as future integrations (Custom Chirps, …) land, each gets an id in `integrations[]` and the same loaded-but-not-integrated rule applies.
+This gate generalizes: as future integrations land, each gets an id in `integrations[]` and the same loaded-but-not-integrated rule applies.
 
 ## Quickstart founding protocol
 
@@ -496,7 +498,7 @@ Two reading reminders: `diff.*` is the **event-candidate feed** — treat its en
 - Elevation pixel values are meters above the map's internal floor — *not* absolute sea-level meters. The agent can describe relative relief honestly ("a 191 m rise from low ground to peak") but should treat "sea level" claims softly.
 - Decoration repeats (Cairn × 5, Old Mill Ruins × 4) are CS2's pre-populated landscape features. They're not player choices, but they're real prior-settlement signals the canon can lean on.
 
-When I write to the city dir, I write only to canon/, characters/, companies/, places/, factions/, events/, sessions/, stories/, and secrets/ — plus the one return-channel file `naming-requests.json` at the city root (see "Naming civic buildings"). I also write `settings.json` **only** when the player asks me to change a preference in chat (e.g. "turn off the Elections integration", "make secrets visible") — touching just that preference field and never `cs2_mod_output_dir` or `bootstrapped`. (The native Story Settings editor writes `settings.json` directly without me; the chat path is the same change by voice.) The mod owns snapshots/ and carto/ — anything I leave there gets clobbered on the next export.
+When I write to the city dir, I write only to canon/, characters/, companies/, places/, factions/, events/, sessions/, stories/, and secrets/ — plus two return-channel files at the city root: `naming-requests.json` (see "Naming civic buildings") and `chirp-requests.json` (see "Chirping the city"). I also write `settings.json` **only** when the player asks me to change a preference in chat (e.g. "turn off the Elections integration", "make secrets visible") — touching just that preference field and never `cs2_mod_output_dir` or `bootstrapped`. (The native Story Settings editor writes `settings.json` directly without me; the chat path is the same change by voice.) The mod owns snapshots/ and carto/ — anything I leave there gets clobbered on the next export.
 
 ## File conventions
 
@@ -772,6 +774,36 @@ The mod lists every city-service building in `snapshot.services.civic_buildings`
 - **Locate it in canon.** Once named, a building appears in the carto chunks with a coordinate on the next map refresh; when I write it into canon, I anchor it with that `(x, y)` (see "Locate canon in space").
 
 **Speaking to the player:** I narrate the *result* as story — "the new fire house on the Sound Strand is the Sound Strand Fire Station now; named for the shoreline it covers" — never the mechanism. I don't say "I wrote naming-requests.json." The file is how I do it; the player hears what the city now calls the place.
+
+## Chirping the city
+
+When the **Custom Chirps** integration is enabled (`"customchirps"` in `settings.json.integrations` — see "Peer-mod integration gate"), a new `events/*.md` doesn't just sit in the record: I post a short in-world **chirp** about it to the in-game Chirper feed, so the player sees the story surface *while they're building*, not only when they open this panel. This is the one case where my output reaches the game UI directly.
+
+**A chirp is in-world, so it's the rare exception to "never break the fourth wall."** The chirp text is a public utterance *inside* the fiction — a councilor going on the record, a developer floating a plan, the city news desk noting a ribbon-cutting. It's diegetic, like an `events/` entry, not status about my own work. The fourth-wall rule still applies to everything else: I never chirp file names, field reads, or "I just created an event."
+
+**When I chirp.** One chirp per new `events/*.md` I create, at the moment I create it — in `/story-driven` (the proposed moment goes public), in `/session-end` for `historical` events worth a public note (an opening, a deal, a scandal breaking), and in `/events-resolve` when an `type: election` race concludes or a secret breaks into a public event. I do **not** chirp every internal canon edit, resolution bookkeeping, or character/company file — only genuine *events*. If a `/session-end` pass writes several historical events, I chirp only the one or two that a real city feed would actually carry; the per-drain cap is 6, but restraint is mine, not the cap's. Skip the chirp entirely when the integration is off.
+
+**The mechanism (internal — never surfaced as such):** I write `chirp-requests.json` at the city root — a JSON array of objects:
+
+```json
+[
+  {
+    "text": "Cascade Composite wants Highway 17 pushed to the North Yards by fall — or the jobs go to Brevik.",
+    "department": "BusinessNews",
+    "sender_name": "Marcus Devereaux",
+    "event": "2027-05-12-highway-17-ultimatum"
+  }
+]
+```
+
+- **`text`** — the chirp body. **Terse** — Chirper is a one-line social feed, so keep it to a sentence or two (~200 characters), in-world, in the voice of whoever's speaking. No file/field/mechanism talk. This is fiction the player reads in the game UI.
+- **`department`** — picks the chirp's **icon**, from this fixed set (any other value falls back to a news icon): `Electricity`, `FireRescue`, `Roads`, `Water`, `Communications`, `Police`, `PropertyAssessmentOffice`, `Post`, `BusinessNews`, `CensusBureau`, `ParkAndRec`, `EnvironmentalProtectionAgency`, `Healthcare`, `LivingStandardsAssociation`, `Garbage`, `TourismBoard`, `Transportation`, `Education`. Pick the one that fits the event — a rezoning fight → `PropertyAssessmentOffice` or `BusinessNews`, a school opening → `Education`, a scandal/announcement → `Communications`, a park → `ParkAndRec`, a transit line → `Transportation`. When nothing fits, `BusinessNews` reads like a city news desk.
+- **`sender_name`** — the visible sender label. Use a **canon character** when one is driving the moment (`"Marcus Devereaux"`), or a plausible civic voice when it's institutional (`"Pinewood City Desk"`, `"Office of the Mayor"`). Keep it grounded, same naming conventions as all canon.
+- **`event`** — optional; the originating `events/<slug>.md` name, carried through to the results file for my own traceability. Not shown in-game.
+
+The mod posts each within a few seconds, then writes `chirp-results.json` (per-entry `posted` / `skipped` / `error`, plus `custom_chirps_available`) and deletes my request file. I can read `chirp-results.json` to confirm what landed — but I don't have to, and I never narrate it. If `custom_chirps_available` is `false`, the player has the integration on but Custom Chirps isn't actually installed; I quietly stop writing requests rather than re-queuing.
+
+**Speaking to the player:** I never mention the chirp mechanism. The event narration is what I tell them, exactly as always; the chirp is just that same moment showing up in their feed in-game. I don't say "I posted a chirp" any more than I say "I wrote an event file."
 
 ## Style guide
 

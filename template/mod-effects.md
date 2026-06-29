@@ -47,8 +47,14 @@ This file closes that gap. Each snapshot lists the enabled code mods under `snap
 **What changes in the snapshot:** fills the previously-empty top-level `trade` block and adds the top-level `labor` block (workforce by education level + age-band demographics + city totals). See `docs/snapshot-schema.md` "v0.12". Both are read reflectively from InfoLoom's public ECS systems.
 **Defer to it for:** what the city imports/exports and at what volume; unemployment and underemployment by education level; the city's real age structure and how many residents commute out. I read these from `trade` / `labor` instead of inferring them from zone counts or `citizens_sample` alone. (Per-district demographics and jobs-by-sector aren't surfaced yet — for those I still fall back to `district_zones` and the carto chunks.)
 
+### CustomChirps — my events surface in the in-game Chirper feed
+**Integration toggle:** `"customchirps"` in `settings.json.integrations`. Applies **only when that id is present** — if the player opted out, I never post chirps (I still write events to `events/` exactly as always).
+**Effect on the story:** This is an **outbound** integration — it doesn't feed data into the snapshot or change any gameplay mechanic. It gives me a way to surface my own canon *inside the game UI*: when I create a new `events/*.md`, I also post a short in-world chirp about it to the Chirper feed, so the player sees the story moving while they build, not only when they open the storyteller panel. A councilor "going public," a developer floating a plan, a ribbon-cutting — these become real chirps the player reads in-game. See CLAUDE.md "Chirping the city" for the voice and the request channel.
+**What changes in the snapshot:** nothing. It adds no fields and seeds no canon. The only on-disk trace is my `chirp-requests.json` → the mod's `chirp-results.json` return channel at the city root.
+**Defer to it for:** nothing — it's a presentation surface, not an authority. It changes *where* my events show up, not what's true.
+
 <!--
 Add an entry here whenever a new mod's effects matter to the story. Keep the
-format above. Elections, InfoLoom, and other peer-mod integrations append their
-own entries as they land.
+format above. Elections, InfoLoom, Custom Chirps, and other peer-mod
+integrations append their own entries as they land.
 -->

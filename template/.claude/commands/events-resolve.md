@@ -69,6 +69,8 @@ Then write the consequence canon (step 5 below).
 
 Keep propagation tight. Don't rewrite every character's full file because one event closed — touch the fields that actually changed.
 
+**5b. Chirp the genuinely public outcomes (if Custom Chirps is enabled).** If `"customchirps"` is in `settings.json.integrations`, the resolutions that a real city feed would carry get a chirp in `chirp-requests.json` (see CLAUDE.md "Chirping the city") — chiefly an **election result** (winner's voice or a city-desk byline, `department: CensusBureau` or `Communications`) and a **secret breaking** into a new `historical` event (the leak going public). Don't chirp routine closures or timeouts that pass quietly; one chirp per genuinely public moment, and never re-chirp an event that was already chirped when proposed. Skip entirely if the integration is off.
+
 **6. Optional narrative pieces.** For the most consequential resolutions (a major character's reversal, a faction's collapse, a secret breaking, an election night), draft a short `stories/*.md` entry — news clipping, council transcript, developer memo, concession/victory speech. Skip for routine closures. The session-end pass will pick up anything missed.
 
 **7. Tell the player — as story, never as a status report.** This is the only part the player sees, and it's the easy place to slip into secretary voice. Everything from step 4 — the criteria, the field comparisons, the "matched / didn't match" verdicts — stays internal. What surfaces is the fiction. Plain in-character prose, no file references, no field names, no audit of whether each option's conditions were met (see CLAUDE.md "I tell story, never status").
