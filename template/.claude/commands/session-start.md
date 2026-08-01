@@ -5,23 +5,25 @@ order: 20
 
 Run the session-start checklist for this city.
 
-**0. Open-session check (do this first).**
+**0. Batch the opening reads (do this first — one turn, in parallel).**
 
-Scan `sessions/` for the most recent session file (highest `SXX`). Read its frontmatter:
+Every path here is fixed, so issue all of them together rather than one at a time (see CLAUDE.md "Opening reads"): `clock.json`, `canon/INDEX.md`, `canon/city.md`, `canon/era.md`, `canon/tone.md`, `canon/playthrough-premise.md`, `settings.json`, and a listing of `sessions/*.md` (needed for the next session number in step 2). Then step 1 reads what `clock.json` pointed at.
 
-- If it has no `ended_real_date` field (or `ended_real_date:` is blank), a prior session is still open — the player closed CS2 (or this conversation) before running `/session-end`. Stop here and tell the player:
+**Open-session check.** `clock.json`'s `open_session` field is the answer — the mod resolves it on every heartbeat from the most recent session file's frontmatter:
+
+- **A path** (e.g. `sessions/S07-2026-07-12-open.md`) → a session is still open. Read it to get its `real_date` and `session:` number, then stop here and tell the player:
   > "Session N from `<real_date>` is still open. Run `/session-end` on it first to record what happened, then re-invoke `/session-start`."
   Do not proceed to step 1 until the prior session is closed.
-- If it has `ended_real_date:` set, the prior session is closed — continue.
-- If `sessions/` is empty (first session of this city), continue.
+- **`null`** → the most recent session is closed, or this is the city's first session. Continue.
+- **`clock.json` missing or without the field** (older mod build, or the game hasn't run since this folder was scaffolded) → fall back to the manual check: highest `SXX` in `sessions/`, open if its frontmatter has no `ended_real_date` (or it's blank).
 
-The mod's auto-start-on-save-load setting may have already written the stub for this session before you got here — that's expected. Treat it the same as if you'd written it yourself: an open stub at the front of `sessions/` means there's an active session; a closed file means there isn't.
+The mod's auto-start-on-save-load setting may have already written the stub for this session before you got here — that's expected, and it's why `open_session` can be non-null on a perfectly normal opener. Treat it the same as if you'd written it yourself: a path means there's an active session; `null` means there isn't.
 
-**1. Quick state scan** (brief, internal — don't dump to the player yet):
-- Read `canon/INDEX.md` first — that's the navigation surface; from it you know what entities exist without loading every file.
-- Read `canon/city.md`, `canon/era.md`, `canon/tone.md` if present (small, always-load world canon). Treat `city.md`'s `region:` as a hard constraint on naming and cultural grounding, and `tone.md`'s narrative focus lenses as the bias for what *kind* of opening objectives to propose (citizens → human-scale/neighborhood; civic → systems/economy/politics).
-- Most recent file in `sessions/` (recent ones only — older sessions live compressed in `sessions/archive/`; skim that index lazily, only pulling specific months if relevant).
-- Latest snapshot in `snapshots/` for the current in-game state.
+**1. Quick state scan** (brief, internal — don't dump to the player yet). The canon files from step 0's batch cover most of this; the reads that *do* belong here are the ones whose paths came out of `clock.json` — issue those as a single second batch:
+- `canon/INDEX.md` (from step 0) is the navigation surface; from it you know what entities exist without loading every file.
+- `canon/city.md`, `canon/era.md`, `canon/tone.md` (from step 0, if present — small, always-load world canon). Treat `city.md`'s `region:` as a hard constraint on naming and cultural grounding, and `tone.md`'s narrative focus lenses as the bias for what *kind* of opening objectives to propose (citizens → human-scale/neighborhood; civic → systems/economy/politics).
+- The most recent session file — the one `clock.json`'s `open_session` names, or the highest `SXX` from step 0's listing when it's `null` (recent ones only — older sessions live compressed in `sessions/archive/`; skim that index lazily, only pulling specific months if relevant).
+- The latest snapshot — `clock.json`'s `latest_snapshot` path — for the current in-game state. Don't list `snapshots/` to find it.
 - **Live election check (Elections mod).** If the latest snapshot's `politics` block is non-null, a mayoral race is running. Verify it's reflected in canon: are the candidates in `characters/`, the parties in `factions/`, and is there an open `type: election` event for this cycle (`politics.schedule.mayor_term_year`)? If any of that is missing — e.g. Elections came online mid-playthrough and the ballot never made it into the story — flag it as a gap and run the `/events-resolve` "Election cycle" step to seed the cast and open the event. (Don't let a race run for sessions without the cast existing in canon.)
 - Unpopulated scaffold features:
   - Is `canon/playthrough-premise.md` missing or empty?
@@ -32,7 +34,7 @@ The mod's auto-start-on-save-load setting may have already written the stub for 
 
 **2. Create (or claim) the session stub.**
 
-Determine the next session number `N` by scanning existing `sessions/*.md` filenames and adding 1 to the highest. If the mod already wrote `sessions/SXX-YYYY-MM-DD-open.md` for this session (auto-start enabled), use that file — don't create a duplicate. Otherwise create it now with this frontmatter:
+Determine the next session number `N` from the `sessions/*.md` listing step 0 already fetched — add 1 to the highest `SXX`. (This is the one listing a normal opener genuinely needs, which is why it rides along in step 0's batch instead of costing its own round-trip here.) If the mod already wrote `sessions/SXX-YYYY-MM-DD-open.md` for this session (auto-start enabled), use that file — don't create a duplicate. Otherwise create it now with this frontmatter:
 
 ```yaml
 ---

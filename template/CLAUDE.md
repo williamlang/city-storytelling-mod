@@ -112,14 +112,25 @@ Concretely:
 
 The player's canonical session opener is **`/session-start`** — see `.claude/commands/session-start.md`. They should normally invoke it at the top of a play session.
 
+### Opening reads — one batch, never a directory scan
+
+Every tool result costs a full model round-trip, so a chain of small sequential reads is the biggest single cost in how long the player waits for my first useful sentence. I already know this folder's *shape* cold — the tree below is exhaustive — so there is nothing to discover, only to fetch. Two rules, and they apply to every opener (`/session-start`, `/session-end`, `/events-resolve`, `/story-driven`) and to any cold question:
+
+1. **Never list a directory to find the current file.** The only two paths that aren't fixed are the latest snapshot and the open session, and `clock.json` carries both as ready-to-read relative paths (`latest_snapshot`, `open_session`). Read `clock.json`, then read what it names. Globbing `snapshots/snapshot-*.json` or `sessions/S*-*.md` is the **fallback only** — for when `clock.json` is missing or predates those fields (then: highest timestamp, highest `SXX`).
+2. **Fire the independent reads as one parallel batch.** `clock.json`, `canon/INDEX.md`, `canon/city.md`, `canon/era.md`, `canon/tone.md`, `canon/playthrough-premise.md`, and `settings.json` are fixed paths with no dependency on each other — I request them in a single turn, not one at a time. Then a **second** batch reads whatever `clock.json` pointed at (the snapshot, the open session) plus the handful of entity files INDEX.md showed to be relevant. A normal cold opener is those two batches, not six round-trips.
+
+The ordering constraint is real but shallow: only batch 2 depends on batch 1, and only for the two pointer paths. Everything else can and should ride along in batch 1.
+
 ### Open-session rule
 
 A session in `sessions/` is **open** if its frontmatter lacks `ended_real_date:`, and **closed** if that field is set. Open sessions act like a pid: while one is open, the player is mid-arc — they haven't yet recorded what happened in-game and propagated consequences.
 
-On any city-folder conversation, before doing other work, I check `sessions/` for the most recent file:
+On any city-folder conversation, before doing other work, I check whether a session is open. **`clock.json`'s `open_session` field is that check** — the mod resolves it on every heartbeat, applying exactly the rule above to the most recent session file:
 
-- **Open** → the prior session never got `/session-end`'d (the player ran out of time, force-quit, etc.). I flag this on my first response and tell the player to run `/session-end` to wrap it up. I do not silently begin new story work on top of an unclosed session.
-- **Closed (or no sessions yet)** → free to proceed. If the player invokes `/session-start`, it will create a fresh open stub.
+- **A path** (e.g. `sessions/S07-2026-07-12-open.md`) → a session is open. If I didn't open it this conversation, the prior session never got `/session-end`'d (the player ran out of time, force-quit, etc.). I flag this on my first response and tell the player to run `/session-end` to wrap it up. I do not silently begin new story work on top of an unclosed session.
+- **`null`** → no open session (most recent is closed, or there are none). Free to proceed. If the player invokes `/session-start`, it will create a fresh open stub.
+
+Fallback when `clock.json` is missing or has no `open_session` field: scan `sessions/` for the highest `SXX` and read its frontmatter myself.
 
 The mod's `AutoSessionStartOnSaveLoad` setting (in CS2's Options → CityStoryMod) can be flipped ON so the mod writes the open session stub the moment a save is loaded. When that's on, opening a conversation after loading a save normally lands me in an already-open session and I can pick up from there. When it's off, the player should invoke `/session-start` themselves.
 
@@ -242,6 +253,8 @@ The player can skip any step or do them piecemeal. The point is that newly-arriv
 **Always start with `canon/INDEX.md`.** It's a compact navigation aid: one short paragraph per entity, grouped by type. Skim it on every run to know what canon exists, then pull only the full files relevant to the current snapshot or task via `read_file`.
 
 Why: loading every entity file each turn is expensive in input tokens and gets worse as the playthrough grows. The index is the durable navigation surface; full files are detail-on-demand.
+
+INDEX.md is a fixed path, so it belongs in the first parallel batch alongside `clock.json`, the small always-load world canon, and `settings.json` — see "Opening reads". The entity files it points me at go in the second batch, together with whatever `clock.json`'s pointers named.
 
 **Keep INDEX.md in sync.** When you create or substantially update an entity, also update its INDEX.md entry. Each entity file carries a `quick_read:` frontmatter field — that one-paragraph summary is what belongs in INDEX.md; keep the two aligned.
 
@@ -470,14 +483,29 @@ carto/        Spatial geography. Refreshed automatically on first export of a
                 heightmap / depth data. I do not read these directly — the
                 summary stats live in elevation.md and water.md.
 
-clock.json    Live in-world clock, rewritten every few seconds while the game
-              runs: { in_world_date, in_world_datetime, updated_at_utc }. This
-              is the authoritative "now" — the sim date advances fast, so the
-              latest snapshot's captured_at_ingame is usually in-world weeks
-              behind. Read in_world_date for any deadline math (which events
-              have timed out, what date a new event opens / is due). Falls back
-              to nothing if missing — use the latest snapshot's
-              captured_at_ingame then.
+clock.json    Live in-world clock + current-file pointers, rewritten every few
+              seconds while the game runs:
+                { in_world_date, in_world_datetime, updated_at_utc,
+                  latest_snapshot, open_session, bootstrapped }
+              in_world_date / in_world_datetime are the authoritative "now" —
+              the sim date advances fast, so the latest snapshot's
+              captured_at_ingame is usually in-world weeks behind. Read
+              in_world_date for any deadline math (which events have timed
+              out, what date a new event opens / is due).
+              latest_snapshot and open_session are the mod's answer to "which
+              file is current" — city-dir-relative paths (e.g.
+              "snapshots/snapshot-1779300000.json",
+              "sessions/S07-2026-07-12-open.md") that I Read directly. The mod
+              writes both files, so these are authoritative: I never list
+              snapshots/ or sessions/ to find them. open_session is null when
+              the most recent session is already closed or there are none —
+              that null IS the open-session check.
+              bootstrapped mirrors settings.json's flag, so I can tell an
+              un-founded city from a founded one without a separate read.
+              If clock.json is missing (the game hasn't run since this folder
+              was scaffolded) or a field is absent (older mod build), fall
+              back: highest-timestamp snapshots/snapshot-*.json, highest SXX
+              in sessions/, captured_at_ingame for the date.
 ```
 
 **Which surface for what.** The trees above are the full field reference — each block lists its own story-use and gotchas. The non-obvious cross-surface routing, the cases that aren't a single field lookup:
@@ -487,6 +515,7 @@ clock.json    Live in-world clock, rewritten every few seconds while the game
 - **"Who's suffering from noise / who's making it?"** → `pollution.noise_hotspots` + `noise_sources`, only a story when a source sits near a hotspot (proximity-check the coordinates).
 - **Totals / counts** ("how many residential buildings?") → read the already-aggregated `city.zones.*` / `district_zones`; don't recompute.
 - **"Today's in-world date / has a deadline passed?"** → `clock.json` `in_world_date`, NOT the snapshot's possibly-stale `captured_at_ingame`.
+- **"Which snapshot / which session file is the current one?"** → `clock.json` `latest_snapshot` / `open_session`. Both are ready-to-read relative paths; listing `snapshots/` or `sessions/` to work it out is a wasted round-trip (see "Opening reads").
 
 Two reading reminders: `diff.*` is the **event-candidate feed** — treat its entries as `events/*.md` candidates on `/session-end`; and the body's `*.by_district` blocks (pollution / land_value / crime / tourists) are **standing** signals for grounding character motives and the city's mood at any time, not just change signals.
 

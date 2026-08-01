@@ -141,6 +141,14 @@ namespace CityStoryMod.Systems
         const double ClockWriteIntervalSec = 10;
         DateTime _lastClockWriteUtc;
 
+        // Latch for clock.json's `latest_snapshot` pointer (#45). Set by Export
+        // to the file it just wrote, so the heartbeat publishes the path without
+        // re-listing snapshots/. Paired with the city dir it belongs to so a
+        // city switch (or an export that threw before the write) can't publish
+        // the previous city's snapshot.
+        string _latestSnapshotRel;
+        string _latestSnapshotCityDir;
+
         // #40 naming return channel. The storyteller writes naming-requests.json
         // (a JSON array of { id, name }) into the city dir; the mod applies each
         // via NameSystem.SetCustomName, writes naming-results.json, and consumes
@@ -581,6 +589,11 @@ namespace CityStoryMod.Systems
                         : (hotkey ? "hotkey" : "interval");
                     Export(triggeredBy: trigger);
                     _lastExportUtc = DateTime.UtcNow;
+                    // Refresh clock.json now rather than waiting up to
+                    // ClockWriteIntervalSec, so its `latest_snapshot` pointer
+                    // (#45) names the file we just wrote from the moment it
+                    // exists. The heartbeat below still runs on its own cadence.
+                    WriteClockFile();
                 }
                 catch (Exception ex)
                 {
@@ -661,6 +674,14 @@ namespace CityStoryMod.Systems
                     in_world_date = now.ToString("yyyy-MM-dd"),
                     in_world_datetime = now.ToString("yyyy-MM-ddTHH:mm:ss"),
                     updated_at_utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    // Instance pointers (#45). The storyteller reads clock.json
+                    // first on every opener; carrying these here saves it the
+                    // two directory-listing round-trips it would otherwise
+                    // spend resolving "the latest snapshot" and "the open
+                    // session" before it can read either.
+                    latest_snapshot = LatestSnapshotPointer(cityDir),
+                    open_session = CityPointers.ResolveOpenSession(cityDir),
+                    bootstrapped = CityPointers.ResolveBootstrapped(cityDir),
                 };
                 File.WriteAllText(
                     Path.Combine(cityDir, "clock.json"),
@@ -670,6 +691,23 @@ namespace CityStoryMod.Systems
             {
                 _log.Warn($"Clock file write failed: {ex.Message}");
             }
+        }
+
+        // clock.json's `latest_snapshot`. Normally answered from the filename
+        // Export just wrote — the retention window can hold ~2,000 snapshots at
+        // a 5-minute cadence, and listing that directory every 10 s to
+        // rediscover a name we already know would be pure waste. Falls back to
+        // a scan when we haven't exported for this city yet in this CS2 run
+        // (or an export threw before writing), which is the only case where the
+        // latch can't be trusted.
+        string LatestSnapshotPointer(string cityDir)
+        {
+            if (_latestSnapshotRel != null
+                && string.Equals(_latestSnapshotCityDir, cityDir, StringComparison.OrdinalIgnoreCase))
+            {
+                return _latestSnapshotRel;
+            }
+            return CityPointers.ResolveLatestSnapshot(cityDir);
         }
 
         // 0.7 — Replaced the empty `citizens_sample` placeholder with a
@@ -1045,6 +1083,13 @@ namespace CityStoryMod.Systems
             Directory.CreateDirectory(snapshotsDir);
             string file = Path.Combine(snapshotsDir, $"{snapshotId}.json");
             File.WriteAllText(file, json);
+
+            // Publish this file as clock.json's `latest_snapshot` (#45). Set
+            // only after the write succeeds, so a failed export leaves the
+            // previous (still-on-disk) pointer standing rather than naming a
+            // file that isn't there.
+            _latestSnapshotRel = $"snapshots/{snapshotId}.json";
+            _latestSnapshotCityDir = dir;
 
             // Prune snapshots older than the retention window. At a 5-minute
             // cadence a week is ~2,000 files; the agent only ever reads the

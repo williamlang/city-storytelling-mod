@@ -5,9 +5,9 @@ order: 35
 
 Walk every open event and decide which ones close, then propagate consequences. This runs manually any time the player wants to "check the inbox," and automatically as the first step of `/session-end`.
 
-**1. Read the current date and snapshot context** (do this first — every step below needs it).
+**1. Read the current date and snapshot context** (do this first — every step below needs it). Two batches, not a chain: fetch `clock.json` and `settings.json` together, then fetch everything `clock.json` points at alongside the fixed-path spatial chunks and the open `events/*.md` from step 3 (see CLAUDE.md "Opening reads").
 - **Current in-world date** — read `clock.json` at the city root. Its `in_world_date` is the live "now," refreshed every few seconds; **use this for all deadline comparisons**, not the snapshot's `captured_at_ingame` (which can be minutes stale — i.e. in-world weeks behind, since the sim clock runs fast). If `clock.json` is missing, fall back to the latest snapshot's `captured_at_ingame`.
-- **Snapshot state** — pull the latest snapshot in `snapshots/`. Hold onto:
+- **Snapshot state** — read the snapshot `clock.json`'s `latest_snapshot` names (don't list `snapshots/` to find it; fall back to the highest-timestamp file there only if the pointer is absent). Hold onto:
   - `city.*`, `pollution.*`, `crime.*`, `land_value.*`, `district_zones`, `diff.*` — the fields acceptance criteria refer to.
   - `politics` + `diff.politics` — the election cycle (step 2), present only with the Elections mod **and** the integration enabled (`"elections"` in `settings.json.integrations`; see CLAUDE.md "Peer-mod integration gate"). If the integration is off, treat `politics` as absent.
   - `carto/processed/index.md`, `roads.md`, `districts/<slug>.md` — for criteria that reference spatial state.

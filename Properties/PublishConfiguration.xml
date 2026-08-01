@@ -45,12 +45,12 @@ Ghostwriter is MIT-licensed. Source, issue tracker, and developer docs at github
   <Tag Value="Code Mod" />
   <Thumbnail Value="Properties/Thumbnail.png" />
   <AccessLevel Value="Public" />
-  <ModVersion Value="0.7.0" />
+  <ModVersion Value="0.7.1" />
   <GameVersion Value="1.6.*" />
   <Dependency Id="87428" />
   <ExternalLink Type="github" Url="https://github.com/williamlang/city-storytelling-mod" />
   <ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513346547717378209/1513346547717378209" />
   <ChangeLog>
-**0.7.0** &#8212; Custom Chirps integration (GH #19). When the storyteller writes a new city event, it now also posts a short in-world chirp about it to the in-game Chirper feed &#8212; so the story surfaces while you build, not just when you open the panel. Chirps are authored in-character (a councilor going public, a developer floating a plan, the city news desk) with a fitting department icon and sender. Toggle it per city in the founding wizard or the Story Settings editor, like Elections and InfoLoom; soft-detected, so the toggle only appears when Custom Chirps is installed and the mod does nothing without it.
+**0.7.1** &#8212; Faster first response from the storyteller (GH #45). The storyteller used to spend several round-trips just working out which files were current &#8212; scanning the snapshot folder for the newest export, scanning the session log for an open session &#8212; before it could start actually reading anything. The mod already knows both, so it now publishes them in its live clock file, and the storyteller reads its opening context in one parallel batch instead of one file at a time. Same answers, noticeably less waiting.
   </ChangeLog>
 </Publish>

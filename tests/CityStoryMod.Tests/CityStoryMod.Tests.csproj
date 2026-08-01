@@ -26,6 +26,7 @@
     <Compile Include="..\..\Storyteller\GeoTiffReader.cs" Link="LinkedSources\GeoTiffReader.cs" />
     <Compile Include="..\..\Storyteller\MapCoords.cs" Link="LinkedSources\MapCoords.cs" />
     <Compile Include="..\..\Storyteller\QuickstartConfig.cs" Link="LinkedSources\QuickstartConfig.cs" />
+    <Compile Include="..\..\Storyteller\CityPointers.cs" Link="LinkedSources\CityPointers.cs" />
   </ItemGroup>
 
   <ItemGroup>
